@@ -22,13 +22,26 @@ def boxarray_to_boxes(boxes, labels, labelmap):
 
 
 # Training
-def _encode_boxes(targets, box_coder, cuda):
+def _encode_boxes(targets, box_coder, cuda, all_timesteps=True):
     loc_targets, cls_targets = [], []
-    for i in range(len(targets)):
-        boxes, labels = targets[i][:, :-1], targets[i][:, -1]
-        loc_t, cls_t = box_coder.encode(boxes, labels)
-        loc_targets.append(loc_t.unsqueeze(0))
-        cls_targets.append(cls_t.unsqueeze(0).long())
+
+    if all_timesteps:
+        for t in range(len(targets)):
+            for i in range(len(targets[t])):
+                boxes, labels = targets[t][i][:, :-1], targets[t][i][:, -1]
+                if cuda:
+                    boxes, labels = boxes.cuda(), labels.cuda()
+                loc_t, cls_t = box_coder.encode(boxes, labels)
+                loc_targets.append(loc_t.unsqueeze(0))
+                cls_targets.append(cls_t.unsqueeze(0).long())
+    else:
+        for i in range(len(targets)):
+            boxes, labels = targets[i][:, :-1], targets[i][:, -1]
+            if cuda:
+                boxes, labels = boxes.cuda(), labels.cuda()
+            loc_t, cls_t = box_coder.encode(boxes, labels)
+            loc_targets.append(loc_t.unsqueeze(0))
+            cls_targets.append(cls_t.unsqueeze(0).long())
 
     loc_targets = torch.cat(loc_targets, dim=0)  # (N,#anchors,4)
     cls_targets = torch.cat(cls_targets, dim=0)  # (N,#anchors,C)
@@ -51,29 +64,31 @@ class SSDTrainer(object):
     """
     class wrapping training/ validation/ testing
     """
-    def __init__(self, net, box_coder, criterion, optimizer):
+    def __init__(self, net, box_coder, criterion, optimizer, all_timesteps=False):
         self.net = net
         self.box_coder = box_coder
         self.criterion = criterion
         self.optimizer = optimizer
+        self.all_timesteps = all_timesteps
+
 
     def train(self, epoch, dataset, args):
         print('\nEpoch: %d' % epoch)
         self.net.train()
         self.net.reset()
         train_loss = 0
+        self.net.extractor.return_all = self.all_timesteps
 
         for batch_idx in range(args.train_iter):
             inputs, targets = dataset.next()
 
             if args.cuda:
                 inputs = inputs.cuda()
-                targets = [y.cuda() for y in targets]
 
             self.optimizer.zero_grad()
             loc_preds, cls_preds = self.net(inputs)
 
-            loc_targets, cls_targets = _encode_boxes(targets, self.box_coder, args.cuda)
+            loc_targets, cls_targets = _encode_boxes(targets, self.box_coder, args.cuda, self.all_timesteps)
 
             loc_loss, cls_loss = self.criterion(loc_preds, loc_targets, cls_preds, cls_targets)
             loss = loc_loss + cls_loss
@@ -91,6 +106,7 @@ class SSDTrainer(object):
         print('\nEpoch (test): %d' % epoch)
         self.net.eval()
         self.net.reset()
+        self.net.extractor.return_all = True
 
         if isinstance(dataset, SquaresVideos):
 
@@ -103,7 +119,7 @@ class SSDTrainer(object):
 
             grid = np.zeros((time * periods, nrows, ncols, dataset.height, dataset.width, 3), dtype=np.uint8)
             self.net.reset()
-            self.net.extractor.return_all = True
+            #self.net.extractor.return_all = True
 
             for period in range(periods):
                 # print('\rperiod: ', period, end='')

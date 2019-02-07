@@ -83,7 +83,7 @@ class ConvRNNFeatureExtractor(nn.Module):
                                    self.conv5.cout,  # 32
                                    self.conv6.cout]  # 64
 
-        self.return_all = False
+        self.return_all = True #if set returns rank-5, else returns rank-4 last item
 
     def forward(self, x):
         sources = list()

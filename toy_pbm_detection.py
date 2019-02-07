@@ -248,7 +248,7 @@ class SquaresVideos:
     This simulates DVS events Histograms
     """
 
-    def __init__(self, batchsize=32, t=10, h=300, w=300, c=3, normalize=False, cuda=False):
+    def __init__(self, batchsize=32, t=10, h=300, w=300, c=3, normalize=False, cuda=False, encode_all_timesteps=False):
         self.batchsize = batchsize
         self.num_frames = 100000
         self.channels = c
@@ -260,6 +260,7 @@ class SquaresVideos:
         self.multi_aspect_ratios = False
         self.max_stops = 6
         self.animations = [SquareAnimation(t, h, w, c, self.max_stops) for i in range(self.batchsize)]
+        self.encode_all_timesteps = encode_all_timesteps
 
     def reset(self):
         for anim in self.animations:
@@ -276,18 +277,25 @@ class SquaresVideos:
     def __len__(self):
         return self.num_frames
 
+    def __get_item__(self, item):
+
+
     def next(self):
-        #x = torch.zeros(self.batchsize, self.channels, self.time, self.height, self.width)
         x = torch.zeros(self.time, self.batchsize, self.channels, self.height, self.width)
-        y = []
+        if self.encode_all_timesteps:
+            y = [[] for t in range(self.time)]
+        else:
+            y = []
 
         for i, anim in enumerate(self.animations):
             for t in range(self.time):
                 im, boxes = anim.run()
-                #x[i, :, t] = im
                 x[t, i, :] = im
+                if self.encode_all_timesteps:
+                    y[t].append(torch.from_numpy(boxes))
 
-            y.append(torch.from_numpy(boxes))
+            if not self.encode_all_timesteps:
+                y.append(torch.from_numpy(boxes))
 
         return x, y
 
