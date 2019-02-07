@@ -9,9 +9,6 @@ import torch.optim as optim
 import torch.nn.functional as F
 import torch.backends.cudnn as cudnn
 
-import torchvision
-import torchvision.transforms as transforms
-
 from ssd_v2 import SSD300
 from box_coder import SSDBoxCoder
 from ssd_loss import SSDLoss
@@ -25,7 +22,7 @@ parser.add_argument('--dbname', type=str, default='/home/eperot/data/torch_datas
 parser.add_argument('--batchsize', type=int, default=32, help='batchsize')
 parser.add_argument('--lr', default=1e-3, type=float, help='learning rate')
 parser.add_argument('--resume', action='store_true', help='resume from checkpoint')
-parser.add_argument('--max_iter', type=int, default=100, help='#iter / train epoch')
+parser.add_argument('--max_iter', type=int, default=10, help='#iter / train epoch')
 parser.add_argument('--test_iter', type=int, default=50, help='#iter / test epoch')
 parser.add_argument('--epochs', type=int, default=1000, help='num epochs to train')
 parser.add_argument('--model', default='./checkpoints/ssd300_v2.pth', type=str, help='initialized model path')
@@ -41,7 +38,7 @@ args = parser.parse_args()
 os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu_dev)
 
 from toy_pbm_detection import SquaresImages, SquaresVideos
-from h5_sequence_detection import H5SequenceDetection
+#from h5_sequence_detection import H5SequenceDetection
 from utils import draw_bboxes, make_single_channel_display, filter_outliers
 
 
@@ -58,7 +55,7 @@ def boxarray_to_boxes(boxes, labels, labelmap):
     return bboxes
 
 
-CLASSES, CIN, T, H, W = 2, 3, 1, 120, 152
+CLASSES, CIN, T, H, W = 2, 1, 5, 128, 128
 
 # H, W = H * 2, W * 2
 
@@ -67,13 +64,13 @@ nrows = 4
 # Dataset
 print('==> Preparing dataset..')
 # dataset = SquaresImages(h=H, w=W, batchsize=args.batchsize, normalize=False, cuda=args.cuda)
-dataset = SquaresVideos(h=H, w=W, batchsize=args.batchsize, normalize=False, cuda=args.cuda)
+dataset = SquaresVideos(t=T, c=CIN, h=H, w=W, batchsize=args.batchsize, normalize=False, cuda=args.cuda)
 # dataset = H5SequenceDetection(args.dbname, batchsize=args.batchsize, tbins=10, ybins=H, xbins=W, cuda=args.cuda)
 
 
 # Model
 print('==> Building model..')
-net = SSD300(num_classes=CLASSES, in_channels=CIN, height=H, width=W)
+net = SSD300(num_classes=CLASSES, cin=CIN, height=H, width=W)
 
 if args.cuda:
     net.cuda()
@@ -230,7 +227,7 @@ def test(epoch, max_iter=10):
         if args.visdom:
             viz.images(vis_show, win=image_plot)
 
-    elif isinstance(dataset, SquaresVideos) or isinstance(dataset, H5SequenceDetection):
+    elif isinstance(dataset, SquaresVideos):# or isinstance(dataset, H5SequenceDetection):
 
         periods = max_iter
 
@@ -286,8 +283,7 @@ def test(epoch, max_iter=10):
         video = video.reshape(time * periods, nrows * img_size[0], ncols * img_size[1],
                               3)  # (T,Rows,H,Cols,W,3) -> (T,Rows*H,Cols*W,3)
 
-        #fourcc = cv2.VideoWriter_fourcc(*'XVID')
-        fourcc = cv2.cv.FOURCC(*'XVID')
+        fourcc = cv2.VideoWriter_fourcc(*'XVID')
         videofile = './checkpoints/tests/' + str(epoch) + '.avi'
         print('writing to: ', videofile)
         out = cv2.VideoWriter(videofile, fourcc, 30.0, (ncols * img_size[1], nrows * img_size[0]))

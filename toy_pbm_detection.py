@@ -203,7 +203,7 @@ class SquareAnimation:
         self.width = w
         self.channels = c
 
-        self.num_objects = np.random.randint(1, 5)
+        self.num_objects = 1 #np.random.randint(1, 5)
         self.objects = []
         for i in range(self.num_objects):
             self.objects += [MovingSquare(t, h, w, c, max_stop)]
