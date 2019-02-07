@@ -127,9 +127,9 @@ class ConvRNNFeatureExtractor(nn.Module):
                 module.reset()
 
 
-class SSD300(nn.Module):
+class SSD(nn.Module):
     def __init__(self, num_classes, cin=2, height=300, width=300):
-        super(SSD300, self).__init__()
+        super(SSD, self).__init__()
         self.num_classes = num_classes
 
         self.extractor = ConvRNNFeatureExtractor(cin)
@@ -173,5 +173,5 @@ class SSD300(nn.Module):
 
 
 if __name__ == '__main__':
-    ssd = SSD300(2, 240, 304)
+    ssd = SSD(2, 240, 304)
 
