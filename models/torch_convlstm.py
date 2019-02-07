@@ -7,7 +7,7 @@ import torch
 class ConvLSTMCell(nn.Module):
     r"""ConvLSTMCell module, applies sequential part of LSTM.
     """
-    def __init__(self, hidden_dim, kernel_size, bias):
+    def __init__(self, hidden_dim, kernel_size, bias, nonlin=F.leaky_relu):
         super(ConvLSTMCell, self).__init__()
         self.hidden_dim = hidden_dim
 
@@ -18,6 +18,7 @@ class ConvLSTMCell(nn.Module):
                                   bias=bias)
 
         self.reset()
+        self.nonlin = nonlin
 
     def forward(self, xi):
         xiseq = xi.split(1, 2)  # n,c,t,h,w
@@ -41,7 +42,7 @@ class ConvLSTMCell(nn.Module):
                 c = i * g
             else:
                 c = f * self.prev_c + i * g
-            h = o * torch.tanh(c)
+            h = o * self.nonlin(c)
             result.append(h.unsqueeze(2))
             self.prev_h = h
             self.prev_c = c
@@ -79,7 +80,6 @@ class ConvLSTM(nn.Module):
         bnx = self.bn1(x)
         y = self.conv1(bnx)
         h = self.timepool(y)
-        h = F.leaky_relu(h)
         return h
 
 
