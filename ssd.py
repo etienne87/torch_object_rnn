@@ -6,11 +6,8 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 import math
 from coordconv import CoordConv
-import sys
 
-sys.path.insert(0, '../')
-from models.torch_convlstm import ConvLSTM, ConvLSTM2, ConvQRNN, batch_to_time, time_to_batch
-
+from models.torch_convlstm import ConvLSTM, batch_to_time, time_to_batch
 
 
 class Conv2d(nn.Module):
@@ -107,10 +104,14 @@ class ConvRNNFeatureExtractor(nn.Module):
             x5, n = time_to_batch(x5)
             x6, n = time_to_batch(x6)
         else:
-            x3 = x3[:, :, -1]
-            x4 = x4[:, :, -1]
-            x5 = x5[:, :, -1]
-            x6 = x6[:, :, -1]
+            x3 = x3[-1]
+            x4 = x4[-1]
+            x5 = x5[-1]
+            x6 = x6[-1]
+            # x3 = x3[:, :, -1]
+            # x4 = x4[:, :, -1]
+            # x5 = x5[:, :, -1]
+            # x6 = x6[:, :, -1]
         sources += [x3, x4, x5, x6]
         return sources
 
@@ -121,10 +122,8 @@ class ConvRNNFeatureExtractor(nn.Module):
 
     def reset(self):
         for name, module in self._modules.iteritems():
-            if isinstance(module, ConvQRNN) or isinstance(module, ConvLSTM):
+            if isinstance(module, ConvLSTM):
                 module.timepool.reset()
-            if isinstance(module, ConvLSTM2):
-                module.reset()
 
 
 class SSD(nn.Module):

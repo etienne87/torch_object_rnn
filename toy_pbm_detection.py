@@ -277,13 +277,15 @@ class SquaresVideos:
         return self.num_frames
 
     def next(self):
-        x = torch.zeros(self.batchsize, self.channels, self.time, self.height, self.width)
+        #x = torch.zeros(self.batchsize, self.channels, self.time, self.height, self.width)
+        x = torch.zeros(self.time, self.batchsize, self.channels, self.height, self.width)
         y = []
 
         for i, anim in enumerate(self.animations):
             for t in range(self.time):
                 im, boxes = anim.run()
-                x[i, :, t] = im
+                #x[i, :, t] = im
+                x[t, i, :] = im
 
             y.append(torch.from_numpy(boxes))
 

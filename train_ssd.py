@@ -11,7 +11,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 import torch.backends.cudnn as cudnn
 
-from ssd_v2 import SSD
+from ssd import SSD
 from box_coder import SSDBoxCoder
 from ssd_loss import SSDLoss
 from trainer import SSDTrainer

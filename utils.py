@@ -24,7 +24,6 @@ def draw_bboxes(img, bboxes):
         cv2.putText(img, class_name, (center[0], pt2[1] - 1), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color)
     return img
 
-
 def filter_outliers(g, num_std=2):
     grange = num_std*g.std()
     gimg_min = g.mean() - grange

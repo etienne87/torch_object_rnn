@@ -43,7 +43,7 @@ def _encode_boxes(targets, box_coder, cuda):
 def _dig_out_time(x, n=32):
     nt, nanchors, c = x.size()
     t = int(nt / n)
-    x = x.view(n, t, nanchors, c)
+    x = x.view(t, n, nanchors, c)
     return x
 
 
@@ -121,23 +121,25 @@ class SSDTrainer(object):
                 loc_preds = _dig_out_time(loc_preds, batchsize)
                 cls_preds = _dig_out_time(cls_preds, batchsize)
 
-                for i in range(loc_preds.size(0)):
+                for i in range(loc_preds.size(1)):
                     y = i / ncols
                     x = i % ncols
-                    for t in range(loc_preds.size(1)):
+                    for t in range(loc_preds.size(0)):
                         if dataset.channels == 3:
-                            img = np.moveaxis(images[i, :, t], 0, 2)
+                            img = np.moveaxis(images[t, i, :], 0, 2)
                             img = ((img - img.min()) / (img.max() - img.min()) * 255).astype(np.uint8)
                             show = np.zeros((dataset.height, dataset.width, 3), dtype=np.float32)
                             show[...] = img
                             img = show
                         elif dataset.channels == 2:
-                            diff = filter_outliers(images[i, 1, t] - images[i, 0, t])
+                            diff = filter_outliers(images[t, i, 1] - images[t, i, 0])
                             img = make_single_channel_display(diff, None, None)
                         else:
-                            img = make_single_channel_display(images[i, 0, t], -1, 1)
-                        boxes, labels, scores = self.box_coder.decode(loc_preds[i, t].data,
-                                                                 F.softmax(cls_preds[i, t], dim=1).data, nms_thresh=0.6)
+                            img = make_single_channel_display(images[t, i, 0], -1, 1)
+
+                        boxes, labels, scores = self.box_coder.decode(loc_preds[t, i].data,
+                                                                      F.softmax(cls_preds[t, i], dim=1).data,
+                                                                      nms_thresh=0.6)
                         if boxes is not None:
                             bboxes = boxarray_to_boxes(boxes, labels, dataset.labelmap)
                             img = draw_bboxes(img, bboxes)
