@@ -1,6 +1,26 @@
 import numpy as np
 import cv2
+from multiprocessing import Queue, Process
 
+class StreamDataset(object):
+    """This class streams data in parallel to your main processing.
+       Only 1 thread is used.
+    """
+    def __init__(self, source, max_iter):
+        self.source = source
+        self.max_iter = max_iter
+
+    def __iter__(self):
+        q = Queue()
+        def worker(q):
+            while(1):
+                q.put(self.source.next())
+        p = Process(name='daemon', target=worker, args=(q,))
+        p.start()
+        for i in range(self.max_iter):
+            x, y = q.get()
+            yield x, y
+        p.close()
 
 def boxarray_to_boxes(boxarray):
     boxes = []

@@ -1,5 +1,5 @@
 from __future__ import print_function
-import sys
+import time
 import torch
 import numpy as np
 import cv2
@@ -277,8 +277,6 @@ class SquaresVideos:
     def __len__(self):
         return self.num_frames
 
-    def __get_item__(self, item):
-
 
     def next(self):
         x = torch.zeros(self.time, self.batchsize, self.channels, self.height, self.width)
@@ -299,71 +297,43 @@ class SquaresVideos:
 
         return x, y
 
+    def __iter__(self):
+        for _ in range(len(self)):
+            yield self.next()
 
 if __name__ == '__main__':
-    sys.path.insert(0, '../')
-    from utils import boxarray_to_boxes, draw_bboxes, make_single_channel_display
+    from utils import boxarray_to_boxes, draw_bboxes, make_single_channel_display, StreamDataset
 
+    test = SquaresVideos(t=10, c=1, h=128, w=128, batchsize=8)
+    dataloader = StreamDataset(test, max_iter=1000)
+    start = 0
 
-    anim = SquareAnimation(c=1, max_stop=80)
-    while(1):
-        x, boxes = anim.run()
+    for i, (x, y) in enumerate(dataloader):
+        print(1000 * (time.time() - start), ' to get x, y')
 
-        if x.size(0) == 1:
-            img = make_single_channel_display(x.numpy()[0], -1, 1)
-        else:
-            x = x.numpy()
-            img = np.moveaxis(x,0,2)
-
-        cv2.imshow('img',img)
-        cv2.waitKey(10)
-
-    tp = SquaresVideos(batchsize=1, h=240, w=304)
-
-    print('channels: ', tp.channels)
-
-    for i in range(100):
-
-        if i % 2 == 0:
-            scale = 2 ** np.random.randint(0, 3)
-            print('new scale: ', scale)
-            H, W = 240 / scale, 304 / scale
-            tp.reset_size(H, W)
-
-        x, y = tp.next()
-        x = x.cpu()
-
-        # Display It!
-        for j in range(x.size(0)):
+        start = time.time()
+        for j in range(x.size(1)):
             boxes = y[j].cpu().numpy().astype(np.float32)
             boxes = boxes.astype(np.int32)
             bboxes = boxarray_to_boxes(boxes)
 
-            print('boxes: ', boxes)
+            for t in range(x.size(0)):
+                img = x[t, j, :].numpy().astype(np.float32)
+                if img.shape[0] == 1:
+                    img = make_single_channel_display(img[0], -1, 1)
+                else:
+                    img = np.moveaxis(img, 0, 2)
+                    show = np.zeros((test.height, test.width, 3), dtype=np.float32)
+                    show[...] = img
+                    img = show
 
-            if isinstance(tp, SquaresVideos):
-                for t in range(x.size(2)):
-                    img = x[j, :, t].numpy().astype(np.float32)
-                    if img.shape[0] == 1:
-                        img = make_single_channel_display(img[0], -1, 1)
-                    else:
-                        img = np.moveaxis(img, 0, 2)
-                        show = np.zeros((H, W, 3), dtype=np.float32)
-                        show[...] = img
-                        img = show
-
-                    img = draw_bboxes(img, bboxes)
-                    cv2.imshow('example', img)
-                    key = cv2.waitKey()
-                    if key == 27:
-                        exit()
-            else:
-                img = x[j, 0].numpy().astype(np.float32)
-                img = ((img - img.min()) / (img.max() - img.min()) * 255).astype(np.uint8)
-                img = (img.astype(np.uint8))[..., None].repeat(3, 2)
                 img = draw_bboxes(img, bboxes)
-
                 cv2.imshow('example', img)
-                key = cv2.waitKey()
+                key = cv2.waitKey(10)
                 if key == 27:
                     exit()
+
+        end = time.time() - start
+        print('display batch: ', end * 1000)
+
+        start = time.time()
