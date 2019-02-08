@@ -1,3 +1,4 @@
+import time
 import numpy as np
 import cv2
 from multiprocessing import Queue, Process
@@ -15,12 +16,15 @@ class StreamDataset(object):
         def worker(q):
             while(1):
                 q.put(self.source.next())
+                time.sleep(0.1)
         p = Process(name='daemon', target=worker, args=(q,))
         p.start()
         for i in range(self.max_iter):
             x, y = q.get()
             yield x, y
-        p.close()
+
+    def __len__(self):
+        return self.max_iter
 
 def boxarray_to_boxes(boxarray):
     boxes = []

@@ -1,14 +1,8 @@
 from __future__ import print_function
-
-import os
-import time as timing
 import argparse
-import numpy as np
-import cv2
 
 import torch
 import torch.optim as optim
-import torch.nn.functional as F
 import torch.backends.cudnn as cudnn
 
 from ssd import SSD
@@ -17,6 +11,7 @@ from ssd_loss import SSDLoss
 from trainer import SSDTrainer
 
 from toy_pbm_detection import SquaresVideos
+from utils import StreamDataset
 
 
 def parse_args():
@@ -45,7 +40,7 @@ def main():
     # Dataset
     print('==> Preparing dataset..')
     dataset = SquaresVideos(t=time, c=cin, h=height, w=width, batchsize=args.batchsize, normalize=False, cuda=args.cuda)
-    dataset.num_frames = args.train_iter #TODO: remove that
+    dataset.num_frames = args.train_iter
 
     # Model
     print('==> Building model..')
@@ -77,7 +72,7 @@ def main():
 
     trainer = SSDTrainer(net, box_coder, criterion, optimizer)
 
-    for epoch in range(start_epoch, start_epoch + 200):
+    for epoch in range(start_epoch, args.epochs):
         trainer.train(epoch, dataset, args)
         trainer.test(epoch, dataset, nrows, args)
         # scheduler.step()

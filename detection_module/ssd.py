@@ -2,38 +2,10 @@
 from __future__ import division
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.autograd import Variable
 import math
-from coordconv import CoordConv
 
-from models.torch_convlstm import ConvLSTM, batch_to_time, time_to_batch
-
-
-class Conv2d(nn.Module):
-
-    def __init__(self, cin, cout, kernel_size, stride, padding, dilation=1, addcoords=False):
-        super(Conv2d, self).__init__()
-        self.cin = cin
-        self.cout = cout
-
-        if addcoords:
-            self.cin += 2
-            self.conv1 = CoordConv(cin, cout, kernel_size=kernel_size, stride=stride, dilation=dilation,
-                                   padding=padding,
-                                   bias=True)
-        else:
-            self.conv1 = nn.Conv2d(cin, cout, kernel_size=kernel_size, stride=stride, dilation=dilation,
-                                   padding=padding,
-                                   bias=True)
-
-        self.bn1 = nn.BatchNorm2d(cout)
-
-    def forward(self, x):
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = F.relu(x)
-        return x
+from modules import ConvLSTM, batch_to_time, time_to_batch, Conv2d
 
 
 def get_ssd_params(sources, h, w):
@@ -108,10 +80,6 @@ class ConvRNNFeatureExtractor(nn.Module):
             x4 = x4[-1]
             x5 = x5[-1]
             x6 = x6[-1]
-            # x3 = x3[:, :, -1]
-            # x4 = x4[:, :, -1]
-            # x5 = x5[:, :, -1]
-            # x6 = x6[:, :, -1]
         sources += [x3, x4, x5, x6]
         return sources
 

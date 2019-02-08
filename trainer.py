@@ -1,5 +1,6 @@
 from __future__ import print_function
 import os
+import time
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -83,16 +84,19 @@ class SSDTrainer(object):
         train_loss = 0
         self.net.extractor.return_all = self.all_timesteps
 
-
+        start = 0
+        runtime_stats = {'dataloader': 0, 'network': 0}
         for batch_idx, data in enumerate(dataset):
+            if batch_idx > 0:
+                runtime_stats['dataloader'] += time.time()-start
             inputs, targets = data
 
+            start = time.time()
             if args.cuda:
                 inputs = inputs.cuda()
 
             self.optimizer.zero_grad()
             loc_preds, cls_preds = self.net(inputs)
-
             loc_targets, cls_targets = _encode_boxes(targets, self.box_coder, args.cuda, self.all_timesteps)
 
             loc_loss, cls_loss = self.criterion(loc_preds, loc_targets, cls_preds, cls_targets)
@@ -100,11 +104,18 @@ class SSDTrainer(object):
             loss.backward()
             self.optimizer.step()
 
+            runtime_stats['network'] += time.time() - start
+
             train_loss += loss.data.item()
 
             if batch_idx % args.log_every == 0:
-                print('\rtrain_loss: %.3f | avg_loss: %.3f [%d/%d]'
-                      % (loss.data.item(), train_loss / (batch_idx + 1), batch_idx + 1, len(dataset)), ' ')
+                print('\rtrain_loss: %.3f | avg_loss: %.3f [%d/%d] | @data: %.3f | @net: %.3f'
+                      % (loss.data.item(), train_loss / (batch_idx + 1), batch_idx + 1, len(dataset),
+                         runtime_stats['dataloader'] / (batch_idx + 1),
+                         runtime_stats['network'] / (batch_idx + 1)
+                         ), ' ')
+
+            start = time.time()
 
 
     def test(self, epoch, dataset, nrows, args):
