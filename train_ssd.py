@@ -17,7 +17,6 @@ from ssd_loss import SSDLoss
 from trainer import SSDTrainer
 
 from toy_pbm_detection import SquaresVideos
-from utils import draw_bboxes, make_single_channel_display, filter_outliers
 
 
 def parse_args():
@@ -46,7 +45,7 @@ def main():
     # Dataset
     print('==> Preparing dataset..')
     dataset = SquaresVideos(t=time, c=cin, h=height, w=width, batchsize=args.batchsize, normalize=False, cuda=args.cuda)
-
+    dataset.num_frames = args.train_iter #TODO: remove that
 
     # Model
     print('==> Building model..')

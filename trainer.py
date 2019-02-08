@@ -4,8 +4,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 import cv2
-from utils import draw_bboxes, make_single_channel_display, filter_outliers
-from toy_pbm_detection import SquaresVideos
+from utils import draw_bboxes, make_single_channel_display
 
 
 def boxarray_to_boxes(boxes, labels, labelmap):
@@ -60,6 +59,10 @@ def _dig_out_time(x, n=32):
     return x
 
 
+def single_frame_display(im):
+    return make_single_channel_display(im[0], -1, 1)
+
+
 class SSDTrainer(object):
     """
     class wrapping training/ validation/ testing
@@ -70,6 +73,7 @@ class SSDTrainer(object):
         self.criterion = criterion
         self.optimizer = optimizer
         self.all_timesteps = all_timesteps
+        self.make_image = single_frame_display
 
 
     def train(self, epoch, dataset, args):
@@ -79,8 +83,9 @@ class SSDTrainer(object):
         train_loss = 0
         self.net.extractor.return_all = self.all_timesteps
 
-        for batch_idx in range(args.train_iter):
-            inputs, targets = dataset.next()
+
+        for batch_idx, data in enumerate(dataset):
+            inputs, targets = data
 
             if args.cuda:
                 inputs = inputs.cuda()
@@ -108,73 +113,51 @@ class SSDTrainer(object):
         self.net.reset()
         self.net.extractor.return_all = True
 
-        if isinstance(dataset, SquaresVideos):
+        periods = args.test_iter
+        batchsize = dataset.batchsize
+        time = dataset.time
+        ncols = batchsize / nrows
+        fourcc = cv2.VideoWriter_fourcc(*'XVID')
+        videofile = './checkpoints/tests/' + str(epoch) + '.avi'
+        out = cv2.VideoWriter(videofile, fourcc, 30.0, (ncols * dataset.height, nrows * dataset.width))
+        grid = np.zeros((nrows, ncols, dataset.height, dataset.width, 3), dtype=np.uint8)
+        for period in range(periods):
+            inputs, _ = dataset.next()
+            images = inputs.cpu().data.numpy()
 
-            periods = args.test_iter
+            if args.cuda:
+                inputs = inputs.cuda()
 
-            batchsize = dataset.batchsize
-            time = dataset.time
 
-            ncols = batchsize / nrows
+            loc_preds, cls_preds = self.net(inputs)
+            loc_preds = _dig_out_time(loc_preds, batchsize)
+            cls_preds = _dig_out_time(cls_preds, batchsize)
 
-            grid = np.zeros((time * periods, nrows, ncols, dataset.height, dataset.width, 3), dtype=np.uint8)
-            self.net.reset()
-            #self.net.extractor.return_all = True
-
-            for period in range(periods):
-                # print('\rperiod: ', period, end='')
-                inputs, _ = dataset.next()
-                images = inputs.cpu().data.numpy()
-
-                if args.cuda:
-                    inputs = inputs.cuda()
-
-                # start = timing.time()
-                loc_preds, cls_preds = self.net(inputs)
-                # end = timing.time()
-                # print(end-start, ' s ')
-
-                loc_preds = _dig_out_time(loc_preds, batchsize)
-                cls_preds = _dig_out_time(cls_preds, batchsize)
-
+            for t in range(loc_preds.size(0)):
                 for i in range(loc_preds.size(1)):
                     y = i / ncols
                     x = i % ncols
-                    for t in range(loc_preds.size(0)):
-                        if dataset.channels == 3:
-                            img = np.moveaxis(images[t, i, :], 0, 2)
-                            img = ((img - img.min()) / (img.max() - img.min()) * 255).astype(np.uint8)
-                            show = np.zeros((dataset.height, dataset.width, 3), dtype=np.float32)
-                            show[...] = img
-                            img = show
-                        elif dataset.channels == 2:
-                            diff = filter_outliers(images[t, i, 1] - images[t, i, 0])
-                            img = make_single_channel_display(diff, None, None)
-                        else:
-                            img = make_single_channel_display(images[t, i, 0], -1, 1)
 
-                        boxes, labels, scores = self.box_coder.decode(loc_preds[t, i].data,
-                                                                      F.softmax(cls_preds[t, i], dim=1).data,
-                                                                      nms_thresh=0.6)
-                        if boxes is not None:
-                            bboxes = boxarray_to_boxes(boxes, labels, dataset.labelmap)
-                            img = draw_bboxes(img, bboxes)
+                    img = self.make_image(images[t, i])
 
-                        grid[t + period * time, y, x] = img
+                    assert img.shape == grid[0, 0].shape
 
-            video = grid.swapaxes(2, 3)  # (T,Rows,Cols,H,W,3) -> (T,Rows,H,Cols,W,3)
-            video = video.reshape(time * periods, nrows * dataset.height, ncols * dataset.width,
-                                  3)  # (T,Rows,H,Cols,W,3) -> (T,Rows*H,Cols*W,3)
+                    boxes, labels, scores = self.box_coder.decode(loc_preds[t, i].data,
+                                                                  F.softmax(cls_preds[t, i], dim=1).data,
+                                                                  nms_thresh=0.6)
+                    if boxes is not None:
+                        bboxes = boxarray_to_boxes(boxes, labels, dataset.labelmap)
+                        img = draw_bboxes(img, bboxes)
 
-            fourcc = cv2.VideoWriter_fourcc(*'XVID')
-            videofile = './checkpoints/tests/' + str(epoch) + '.avi'
-            print('writing to: ', videofile)
-            out = cv2.VideoWriter(videofile, fourcc, 30.0, (ncols * dataset.height, nrows * dataset.width))
-            for t in range(time * periods):
-                out.write(video[t])
-            out.release()
+                    grid[y, x] = img
 
-            self.net.extractor.return_all = False
+                image = grid.swapaxes(1, 2).reshape(nrows * dataset.height, ncols * dataset.width, 3)
+                out.write(image)
+
+        out.release()
+
+
+        self.net.extractor.return_all = False
 
 
     def save_ckpt(self, epoch, net, args, name='ckpt'):
