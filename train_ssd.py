@@ -22,8 +22,7 @@ def parse_args():
     parser.add_argument('--train_iter', type=int, default=200, help='#iter / train epoch')
     parser.add_argument('--test_iter', type=int, default=200, help='#iter / test epoch')
     parser.add_argument('--epochs', type=int, default=1000, help='num epochs to train')
-    parser.add_argument('--model', default='./checkpoints/ssd300_v2.pth', type=str, help='initialized model path')
-    parser.add_argument('--checkpoint', default='./checkpoints/ckpt.pth', type=str, help='checkpoint path')
+    parser.add_argument('--checkpoint', default='./checkpoints/', type=str, help='checkpoint path')
     parser.add_argument('--cuda', action='store_true', help='use cuda')
     parser.add_argument('--log_every', type=int, default=10, help='log every')
     return parser.parse_args()
@@ -55,7 +54,6 @@ def main():
         print('==> Resuming from checkpoint..')
         checkpoint = torch.load(args.checkpoint)
         net.load_state_dict(checkpoint['net'])
-        best_loss = checkpoint['loss']
         start_epoch = checkpoint['epoch']
 
     box_coder = SSDBoxCoder(net)
@@ -63,21 +61,18 @@ def main():
     if args.cuda:
         box_coder.cuda()
 
-    img_size = (dataset.height, dataset.width)
 
     criterion = SSDLoss(num_classes=classes)
     optimizer = optim.Adam(net.parameters(), lr=args.lr, betas=(0.9, 0.99), eps=1e-8, weight_decay=1e-6)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.99)
-
     trainer = SSDTrainer(net, box_coder, criterion, optimizer)
 
     for epoch in range(start_epoch, args.epochs):
         trainer.train(epoch, dataset, args)
-        trainer.val(epoch, dataset, args)
+        #trainer.val(epoch, dataset, args)
         trainer.test(epoch, dataset, nrows, args)
-        # scheduler.step()
-        trainer.save_ckpt(epoch)
-
+        #trainer.save_ckpt(epoch, args)
+        #scheduler.step()
 
 
 if __name__ == '__main__':

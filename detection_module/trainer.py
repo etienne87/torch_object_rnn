@@ -4,8 +4,9 @@ import time
 import torch
 import torch.nn.functional as F
 import numpy as np
-import cv2
 from tensorboardX import SummaryWriter
+from tensorboardX.summary import make_video, _clean_tag
+from tensorboardX.proto.summary_pb2 import Summary
 from utils import draw_bboxes, make_single_channel_display
 
 
@@ -72,6 +73,13 @@ def prepare_ckpt_dir(filename):
     if not os.path.isdir(dir):
         os.mkdir(dir)
 
+def add_video(writer, tag, tensor_thwc, global_step=None, fps=30, walltime=None):
+    """found that add_video from tbX is buggy"""
+    tag = _clean_tag(tag)
+    video = make_video(tensor_thwc, fps)
+    summary = Summary(value=[Summary.Value(tag=tag, image=video)])
+    writer.file_writer.add_summary(summary, global_step, walltime)
+
 
 class SSDTrainer(object):
     """
@@ -103,10 +111,10 @@ class SSDTrainer(object):
                 runtime_stats['dataloader'] += time.time()-start
             inputs, targets = data
 
-            start = time.time()
             if args.cuda:
                 inputs = inputs.cuda()
 
+            start = time.time()
             self.optimizer.zero_grad()
             loc_preds, cls_preds = self.net(inputs)
             loc_targets, cls_targets = _encode_boxes(targets, self.box_coder, args.cuda, self.all_timesteps)
@@ -118,7 +126,7 @@ class SSDTrainer(object):
 
             runtime_stats['network'] += time.time() - start
 
-            train_loss += loss.data.item()
+            train_loss += loss.item()
 
             self.writer.add_scalar('train_loss',loss.data.item(), batch_idx + epoch * len(dataset))
 
@@ -138,15 +146,31 @@ class SSDTrainer(object):
         self.net.reset()
         val_loss = 0
 
+        start = 0
+        runtime_stats = {'dataloader': 0, 'network': 0}
         for batch_idx, data in enumerate(dataset):
+            if batch_idx > 0:
+                runtime_stats['dataloader'] += time.time() - start
             inputs, targets = data
             if args.cuda:
                 inputs = inputs.cuda()
+
+            start = time.time()
             loc_preds, cls_preds = self.net(inputs)
             loc_targets, cls_targets = _encode_boxes(targets, self.box_coder, args.cuda, self.all_timesteps)
             loc_loss, cls_loss = self.criterion(loc_preds, loc_targets, cls_preds, cls_targets)
             loss = loc_loss + cls_loss
             val_loss += loss.item()
+            runtime_stats['network'] += time.time() - start
+
+            if batch_idx % args.log_every == 0:
+                print('\rval_loss: %.3f | avg_loss: %.3f [%d/%d] | @data: %.3f | @net: %.3f'
+                      % (loss.data.item(), val_loss / (batch_idx + 1), batch_idx + 1, len(dataset),
+                         runtime_stats['dataloader'] / (batch_idx + 1),
+                         runtime_stats['network'] / (batch_idx + 1)
+                         ), ' ')
+
+            start = time.time()
 
         self.writer.add_scalar('val_loss', loss.data.item(), epoch)
 
@@ -161,13 +185,8 @@ class SSDTrainer(object):
         time = dataset.time
 
         ncols = batchsize / nrows
-        fourcc = cv2.VideoWriter_fourcc(*'XVID')
-        videofile = os.path.dirname(args.checkpoint) + 'tests/' + str(epoch) + '.avi'
-        prepare_ckpt_dir(videofile)
-        out = cv2.VideoWriter(videofile, fourcc, 30.0, (ncols * dataset.height, nrows * dataset.width))
-        grid = np.zeros((nrows, ncols, dataset.height, dataset.width, 3), dtype=np.uint8)
+        grid = np.zeros((periods * time, nrows, ncols, dataset.height, dataset.width, 3), dtype=np.uint8)
 
-        #grid = torch.ByteTensor(dataset.batchsize, periods * time, 3, dataset.height, dataset.width)
         for period in range(periods):
             inputs, targets = dataset.next()
 
@@ -192,14 +211,10 @@ class SSDTrainer(object):
                         bboxes = boxarray_to_boxes(boxes, labels, dataset.labelmap)
                         img = draw_bboxes(img, bboxes)
 
-                    grid[y, x] = img
-                    # grid[i, t + period * time] = torch.from_numpy(np.transpose(img, (2, 0, 1)))
-                image = grid.swapaxes(1, 2).reshape(nrows * dataset.height, ncols * dataset.width, 3)
-                out.write(image)
+                    grid[t + period * time, y, x] = img
 
-        out.release()
-
-        #self.writer.add_video('test', vid_tensor=grid, fps=30)
+        grid = grid.swapaxes(2, 3).reshape(periods * time, nrows * dataset.height, ncols * dataset.width, 3)
+        add_video(self.writer, 'test'+str(epoch), grid, fps=30)
         self.net.extractor.return_all = False
 
     def save_ckpt(self, epoch, args, name='checkpoint#'):
@@ -207,6 +222,6 @@ class SSDTrainer(object):
             'net': self.net.state_dict(),
             'epoch': epoch,
         }
-        ckpt_file = args.checkpoint + '/' + name + str(epoch) + '.pth'
+        ckpt_file = os.path.dirname(args.checkpoint) + '/' + name + str(epoch) + '.pth'
         prepare_ckpt_dir(ckpt_file)
         torch.save(state, ckpt_file)
