@@ -5,6 +5,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 import cv2
+rom tensorboardX import SummaryWriter
 from utils import draw_bboxes, make_single_channel_display
 
 
@@ -35,6 +36,8 @@ def _encode_boxes(targets, box_coder, cuda, all_timesteps=True):
                 loc_targets.append(loc_t.unsqueeze(0))
                 cls_targets.append(cls_t.unsqueeze(0).long())
     else:
+        if isinstance(targets[0], list):
+            targets = [item[-1] for item in targets] #take last item
         for i in range(len(targets)):
             boxes, labels = targets[i][:, :-1], targets[i][:, -1]
             if cuda:
@@ -75,7 +78,11 @@ class SSDTrainer(object):
         self.optimizer = optimizer
         self.all_timesteps = all_timesteps
         self.make_image = single_frame_display
+        self.writer = SummaryWriter()
+        self.dump_results_every = 100
 
+    def __del__(self):
+        self.writer.close()
 
     def train(self, epoch, dataset, args):
         print('\nEpoch: %d' % epoch)
@@ -108,12 +115,17 @@ class SSDTrainer(object):
 
             train_loss += loss.data.item()
 
+            writer.add_scalar('train_loss',loss.data.item(), batch_idx + epoch * len(dataset))
+
             if batch_idx % args.log_every == 0:
                 print('\rtrain_loss: %.3f | avg_loss: %.3f [%d/%d] | @data: %.3f | @net: %.3f'
                       % (loss.data.item(), train_loss / (batch_idx + 1), batch_idx + 1, len(dataset),
                          runtime_stats['dataloader'] / (batch_idx + 1),
                          runtime_stats['network'] / (batch_idx + 1)
                          ), ' ')
+
+            if batch_idx % self.dump_results_every == 0:
+                self.writer.export_scalars_to_json(args.checkpoint + "/training.json")
 
             start = time.time()
 
@@ -129,9 +141,10 @@ class SSDTrainer(object):
         time = dataset.time
         ncols = batchsize / nrows
         fourcc = cv2.VideoWriter_fourcc(*'XVID')
-        videofile = './checkpoints/tests/' + str(epoch) + '.avi'
-        out = cv2.VideoWriter(videofile, fourcc, 30.0, (ncols * dataset.height, nrows * dataset.width))
-        grid = np.zeros((nrows, ncols, dataset.height, dataset.width, 3), dtype=np.uint8)
+        #videofile = './checkpoints/tests/' + str(epoch) + '.avi'
+        #out = cv2.VideoWriter(videofile, fourcc, 30.0, (ncols * dataset.height, nrows * dataset.width))
+        #grid = np.zeros((nrows, ncols, dataset.height, dataset.width, 3), dtype=np.uint8)
+        grid = torch.ByteTensor(dataset.batchsize, periods * time, dataset.height, dataset.width)
         for period in range(periods):
             inputs, _ = dataset.next()
             images = inputs.cpu().data.numpy()
@@ -160,13 +173,15 @@ class SSDTrainer(object):
                         bboxes = boxarray_to_boxes(boxes, labels, dataset.labelmap)
                         img = draw_bboxes(img, bboxes)
 
-                    grid[y, x] = img
+                    #grid[y, x] = img
+                    grid[i, t + period * time] = torch.from_numpy(np.transpose(img, (2, 0, 1)))
 
-                image = grid.swapaxes(1, 2).reshape(nrows * dataset.height, ncols * dataset.width, 3)
-                out.write(image)
+                #image = grid.swapaxes(1, 2).reshape(nrows * dataset.height, ncols * dataset.width, 3)
+                #out.write(image)
 
-        out.release()
+        #out.release()
 
+        self.writer.add_video('test', vid_tensor=grid)
 
         self.net.extractor.return_all = False
 

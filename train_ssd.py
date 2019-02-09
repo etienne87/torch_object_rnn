@@ -5,9 +5,9 @@ import torch
 import torch.optim as optim
 import torch.backends.cudnn as cudnn
 
-from ssd import SSD
-from box_coder import SSDBoxCoder
-from ssd_loss import SSDLoss
+from detection_module.ssd import SSD
+from detection_module.box_coder import SSDBoxCoder
+from detection_module.ssd_loss import SSDLoss
 from trainer import SSDTrainer
 
 from toy_pbm_detection import SquaresVideos
