@@ -69,11 +69,11 @@ def main():
 
     for epoch in range(start_epoch, args.epochs):
         trainer.train(epoch, dataset, args)
-        #trainer.val(epoch, dataset, args)
+        trainer.val(epoch, dataset, args)
         trainer.test(epoch, dataset, nrows, args)
-        #trainer.save_ckpt(epoch, args)
-        #scheduler.step()
-
+        trainer.save_ckpt(epoch, args)
+        trainer.writer.add_scalar('learning rate', optimizer.param_groups[0]['lr'], epoch)
+        scheduler.step()
 
 if __name__ == '__main__':
     main()
