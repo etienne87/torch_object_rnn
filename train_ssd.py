@@ -9,6 +9,7 @@ from detection_module.ssd import SSD
 from detection_module.box_coder import SSDBoxCoder
 from detection_module.ssd_loss import SSDLoss
 from detection_module.trainer import SSDTrainer
+from detection_module.networks import ConvRNNFeatureExtractor
 
 from toy_pbm_detection import SquaresVideos
 
@@ -42,7 +43,7 @@ def main():
 
     # Model
     print('==> Building model..')
-    net = SSD(num_classes=classes, cin=cin, height=height, width=width)
+    net = SSD(feature_extractor=ConvRNNFeatureExtractor, num_classes=classes, cin=cin, height=height, width=width)
 
     if args.cuda:
         net.cuda()
