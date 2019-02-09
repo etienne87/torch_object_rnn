@@ -6,22 +6,25 @@ from multiprocessing import Queue, Process
 class StreamDataset(object):
     """This class streams data in parallel to your main processing.
        Only 1 thread is used.
+       Requires that your class has a "next"
     """
     def __init__(self, source, max_iter):
         self.source = source
         self.max_iter = max_iter
 
+    def worker(self, q):
+        while (1):
+            q.put(self.source.next())
+            time.sleep(0.01)
+
     def __iter__(self):
-        q = Queue()
-        def worker(q):
-            while(1):
-                q.put(self.source.next())
-                time.sleep(0.1)
-        p = Process(name='daemon', target=worker, args=(q,))
+        q = Queue(maxsize=5)
+        p = Process(name='daemon', target=self.worker, args=(q,))
         p.start()
         for i in range(self.max_iter):
             x, y = q.get()
             yield x, y
+        p.terminate()
 
     def __len__(self):
         return self.max_iter

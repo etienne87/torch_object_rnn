@@ -1,6 +1,6 @@
 from __future__ import print_function
 import argparse
-
+import os
 import torch
 import torch.optim as optim
 import torch.backends.cudnn as cudnn
@@ -9,8 +9,8 @@ from detection_module.ssd import SSD
 from detection_module.box_coder import SSDBoxCoder
 from detection_module.ssd_loss import SSDLoss
 from detection_module.trainer import SSDTrainer
-from detection_module.networks import ConvRNNFeatureExtractor
-
+from detection_module.networks import ConvRNNFeatureExtractor, FPNRNNFeatureExtractor
+from detection_module.utils import StreamDataset
 from toy_pbm_detection import SquaresVideos
 
 
@@ -32,6 +32,8 @@ def parse_args():
 def main():
     args = parse_args()
 
+    os.environ['OMP_NUM_THREADS'] = '1'
+
     classes, cin, time, height, width = 2, 1, 5, 128, 128
 
     nrows = 4
@@ -41,9 +43,11 @@ def main():
     dataset = SquaresVideos(t=time, c=cin, h=height, w=width, batchsize=args.batchsize, normalize=False, cuda=args.cuda)
     dataset.num_frames = args.train_iter
 
+    dataloader = StreamDataset(dataset, args.train_iter)
+    #dataloader = dataset
     # Model
     print('==> Building model..')
-    net = SSD(feature_extractor=ConvRNNFeatureExtractor, num_classes=classes, cin=cin, height=height, width=width)
+    net = SSD(feature_extractor=FPNRNNFeatureExtractor, num_classes=classes, cin=cin, height=height, width=width)
 
     if args.cuda:
         net.cuda()
@@ -69,8 +73,8 @@ def main():
     trainer = SSDTrainer(net, box_coder, criterion, optimizer)
 
     for epoch in range(start_epoch, args.epochs):
-        trainer.train(epoch, dataset, args)
-        trainer.val(epoch, dataset, args)
+        trainer.train(epoch, dataloader, args)
+        trainer.val(epoch, dataloader, args)
         trainer.test(epoch, dataset, nrows, args)
         trainer.save_ckpt(epoch, args)
         trainer.writer.add_scalar('learning rate', optimizer.param_groups[0]['lr'], epoch)
