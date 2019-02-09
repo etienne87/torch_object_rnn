@@ -49,8 +49,7 @@ class SSDLoss(nn.Module):
         # loc_loss = SmoothL1Loss(pos_loc_preds, pos_loc_targets)
         #===============================================================
         mask = pos.unsqueeze(2).expand_as(loc_preds)       # [N,#anchors,4]
-        loc_loss = F.smooth_l1_loss(loc_preds[mask], loc_targets[mask], size_average=False)
-
+        loc_loss = F.smooth_l1_loss(loc_preds[mask], loc_targets[mask], reduction='sum')
         #===============================================================
         # cls_loss = CrossEntropyLoss(cls_preds, cls_targets)
         #===============================================================
