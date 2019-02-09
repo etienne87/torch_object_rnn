@@ -82,7 +82,3 @@ class SSD(nn.Module):
         cls_preds = torch.cat(cls_preds, 1)
         return loc_preds, cls_preds
 
-
-if __name__ == '__main__':
-    ssd = SSD(2, 240, 304)
-

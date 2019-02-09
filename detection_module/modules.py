@@ -1,8 +1,6 @@
 import torch.nn as nn
 from torch.nn import functional as F
-from torch.autograd import Variable
 import torch
-
 
 
 def time_to_batch(x):
@@ -96,60 +94,24 @@ class ConvLSTM(nn.Module):
         return h
 
 
-'''
-An alternative implementation for PyTorch with auto-infering the x-y dimensions.
-'''
-class AddCoords(nn.Module):
-
-    def __init__(self, with_r=False):
-        super(AddCoords,self).__init__()
-        self.with_r = with_r
-
-    def forward(self, input_tensor):
-        """
-        Args:
-            input_tensor: shape(batch, channel, x_dim, y_dim)
-        """
-        batch_size, _, x_dim, y_dim = input_tensor.size()
-
-        xx_channel = torch.arange(x_dim).repeat(1, y_dim, 1)
-        yy_channel = torch.arange(y_dim).repeat(1, x_dim, 1).transpose(1, 2)
-
-        xx_channel = xx_channel.float() / (x_dim - 1)
-        yy_channel = yy_channel.float() / (y_dim - 1)
-
-        xx_channel = xx_channel * 2 - 1
-        yy_channel = yy_channel * 2 - 1
-
-        xx_channel = xx_channel.repeat(batch_size, 1, 1, 1).transpose(2, 3)
-        yy_channel = yy_channel.repeat(batch_size, 1, 1, 1).transpose(2, 3)
-
-        ret = torch.cat([
-            input_tensor,
-            xx_channel.type_as(input_tensor),
-            yy_channel.type_as(input_tensor)], dim=1)
-
-        if self.with_r:
-            rr = torch.sqrt(torch.pow(xx_channel.type_as(input_tensor) - 0.5, 2) + torch.pow(yy_channel.type_as(input_tensor) - 0.5, 2))
-            ret = torch.cat([ret, rr], dim=1)
-
-        return ret
-
-
 class CoordConv(nn.Module):
+    """
+    coord conv implementation https://eng.uber.com/coordconv
+    """
 
-    def __init__(self, in_channels, out_channels, with_r=False, **kwargs):
-        super(CoordConv,self).__init__()
-        self.addcoords = AddCoords(with_r=with_r)
-        in_size = in_channels+2
-        if with_r:
-            in_size += 1
-        self.conv = nn.Conv2d(in_size, out_channels, **kwargs)
+    def __init__(self, in_size, out_channels, img_rows, img_cols, kernel=1,
+                 **kwargs):
+        super(CoordConv, self).__init__()
+        grid_h = (torch.arange(img_rows)[:, None] * torch.ones(img_rows, img_cols) - 0.5 * img_rows) * 2 / img_rows
+        grid_w = (torch.arange(img_cols)[None, :] * torch.ones(img_rows, img_cols) - img_cols * 0.5) * 2 / img_cols
+        self.grid = nn.Parameter(torch.cat((grid_h[None, :, :],
+                                            grid_w[None, :, :]), 0), False)
+        self.conv = nn.Conv2d(in_size + 2, out_channels, kernel, **kwargs)
 
-    def forward(self, x):
-        ret = self.addcoords(x)
-        ret = self.conv(ret)
-        return ret
+    def forward(self, inp):
+        x = torch.cat(
+            (inp, self.grid[None, ...].repeat(inp.shape[0], 1, 1, 1)), 1)
+        return self.conv(x)
 
 
 class Conv2d(nn.Module):
@@ -176,3 +138,106 @@ class Conv2d(nn.Module):
         x = self.bn1(x)
         x = F.relu(x)
         return x
+
+
+class SeparableConv2D(nn.Module):
+    """Convolve spatially channels independently & then pointwise together"""
+
+    def __init__(self, cin, cout, kernel, depth_multiplier=1, stride=1,
+                 padding=1):
+        super(SeparableConv2D, self).__init__()
+
+        self.dw = nn.Conv2d(cin, cin * depth_multiplier, kernel, padding=padding,
+                            stride=stride, groups=cin)
+
+        self.bn1 = nn.GroupNorm(cin, cin * depth_multiplier)
+        self.pw = nn.Conv2d(cin * depth_multiplier, cout, 1,
+                            stride=1)
+        self.bn2 = nn.BatchNorm2d(cout)
+
+        self.output_channels = cout
+
+    def forward(self, x):
+        x1 = self.dw(x)
+
+        x1 = self.bn1(x1)
+        out = F.relu(self.pw(x1))
+        out = self.bn2(out)
+        return out
+
+
+class SepConvLSTM(nn.Module):
+    """
+    convlstm with a depthwise separable convolution first
+    """
+
+    def __init__(self, cin, cout, kernel_size, padding, stride=1):
+        super(SepConvLSTM, self).__init__()
+
+        self.conv1 = SeparableConv2D(cin, 4 * cout, kernel_size, depth_multiplier=2, stride=stride, padding=padding)
+        self.bn1 = nn.BatchNorm2d(cin)
+
+        self.timepool = ConvLSTMCell(cout, 3, True)
+
+    def forward(self, x):
+        x, n = time_to_batch(x)
+        bnx = self.bn1(x)
+        y = self.conv1(bnx)
+        y = batch_to_time(y, n)
+        h = self.timepool(y)
+        return h
+
+    def reset(self):
+        """
+        reset memory of the lstm cells
+        """
+        self.timepool.reset()
+
+
+
+class ResNetBlock_concat(nn.Module):
+    """Residual Block using concatenate"""
+
+    def __init__(self, cin, cout=-1):
+        super(ResNetBlock_concat, self).__init__()
+
+        self.conv1 = nn.Conv2d(cin, cout, 3, padding=1, stride=1)
+        self.bn1 = nn.BatchNorm2d(cout)
+        self.conv2 = nn.Conv2d(cout, cout, 3, padding=1, stride=1)
+        self.bn2 = nn.BatchNorm2d(cout)
+
+    def forward(self, x):
+        conv1 = F.relu(self.bn1(self.conv1(x)))
+        conv2 = F.relu(self.bn2(self.conv2(conv1)))
+        return torch.cat((conv2, x), 1)
+
+
+class ResNetBlock(nn.Module):
+    """Transition block"""
+
+    def __init__(self, cin):
+        super(ResNetBlock, self).__init__()
+        self.conv1 = nn.Conv2d(cin, cin, 3, padding=1, stride=1)
+        self.bn1 = nn.BatchNorm2d(cin)
+        self.conv2 = nn.Conv2d(cin, cin, 3, padding=1, stride=1)
+        self.bn2 = nn.BatchNorm2d(cin)
+
+    def forward(self, x):
+        conv1 = F.relu(self.bn1(self.conv1(x)))
+        conv2 = F.relu(self.bn2(self.conv2(conv1)))
+        return conv2 + x
+
+
+class UpSampleConv(nn.Module):
+    """interpolate with nearest neighbors then convolves"""
+
+    def __init__(self, cin, cout, kernel, scale_factor=2, non_linearity=lambda s: s, **kwargs):
+        super(UpSampleConv, self).__init__()
+        self.non_linearity = non_linearity
+        self.scale_factor = scale_factor
+        self.conv1 = nn.Conv2d(cin, cout, kernel, **kwargs)
+        self.bn1 = nn.BatchNorm2d(cout)
+
+    def forward(self, x):
+        conv1 = self.conv1(F.interpolate(x, scale_factor=self.scale_factor))
+        return self.non_linearity(self.bn1(conv1))
