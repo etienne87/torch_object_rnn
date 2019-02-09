@@ -5,7 +5,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 import cv2
-rom tensorboardX import SummaryWriter
+from tensorboardX import SummaryWriter
 from utils import draw_bboxes, make_single_channel_display
 
 
@@ -67,6 +67,12 @@ def single_frame_display(im):
     return make_single_channel_display(im[0], -1, 1)
 
 
+def prepare_ckpt_dir(filename):
+    dir = os.path.dirname(filename)
+    if not os.path.isdir(dir):
+        os.mkdir(dir)
+
+
 class SSDTrainer(object):
     """
     class wrapping training/ validation/ testing
@@ -79,13 +85,12 @@ class SSDTrainer(object):
         self.all_timesteps = all_timesteps
         self.make_image = single_frame_display
         self.writer = SummaryWriter()
-        self.dump_results_every = 100
 
     def __del__(self):
         self.writer.close()
 
     def train(self, epoch, dataset, args):
-        print('\nEpoch: %d' % epoch)
+        print('\nEpoch: %d (train)' % epoch)
         self.net.train()
         self.net.reset()
         train_loss = 0
@@ -115,7 +120,7 @@ class SSDTrainer(object):
 
             train_loss += loss.data.item()
 
-            writer.add_scalar('train_loss',loss.data.item(), batch_idx + epoch * len(dataset))
+            self.writer.add_scalar('train_loss',loss.data.item(), batch_idx + epoch * len(dataset))
 
             if batch_idx % args.log_every == 0:
                 print('\rtrain_loss: %.3f | avg_loss: %.3f [%d/%d] | @data: %.3f | @net: %.3f'
@@ -124,14 +129,29 @@ class SSDTrainer(object):
                          runtime_stats['network'] / (batch_idx + 1)
                          ), ' ')
 
-            if batch_idx % self.dump_results_every == 0:
-                self.writer.export_scalars_to_json(args.checkpoint + "/training.json")
-
             start = time.time()
 
 
+    def val(self, epoch, dataset, args):
+        print('\nEpoch: %d (val)' % epoch)
+        self.net.eval()
+        self.net.reset()
+        val_loss = 0
+
+        for batch_idx, data in enumerate(dataset):
+            inputs, targets = data
+            if args.cuda:
+                inputs = inputs.cuda()
+            loc_preds, cls_preds = self.net(inputs)
+            loc_targets, cls_targets = _encode_boxes(targets, self.box_coder, args.cuda, self.all_timesteps)
+            loc_loss, cls_loss = self.criterion(loc_preds, loc_targets, cls_preds, cls_targets)
+            loss = loc_loss + cls_loss
+            val_loss += loss.item()
+
+        self.writer.add_scalar('val_loss', loss.data.item(), epoch)
+
     def test(self, epoch, dataset, nrows, args):
-        print('\nEpoch (test): %d' % epoch)
+        print('\nEpoch: %d (test)' % epoch)
         self.net.eval()
         self.net.reset()
         self.net.extractor.return_all = True
@@ -139,33 +159,32 @@ class SSDTrainer(object):
         periods = args.test_iter
         batchsize = dataset.batchsize
         time = dataset.time
+
         ncols = batchsize / nrows
         fourcc = cv2.VideoWriter_fourcc(*'XVID')
-        #videofile = './checkpoints/tests/' + str(epoch) + '.avi'
-        #out = cv2.VideoWriter(videofile, fourcc, 30.0, (ncols * dataset.height, nrows * dataset.width))
-        #grid = np.zeros((nrows, ncols, dataset.height, dataset.width, 3), dtype=np.uint8)
-        grid = torch.ByteTensor(dataset.batchsize, periods * time, dataset.height, dataset.width)
+        videofile = os.path.dirname(args.checkpoint) + 'tests/' + str(epoch) + '.avi'
+        prepare_ckpt_dir(videofile)
+        out = cv2.VideoWriter(videofile, fourcc, 30.0, (ncols * dataset.height, nrows * dataset.width))
+        grid = np.zeros((nrows, ncols, dataset.height, dataset.width, 3), dtype=np.uint8)
+
+        #grid = torch.ByteTensor(dataset.batchsize, periods * time, 3, dataset.height, dataset.width)
         for period in range(periods):
-            inputs, _ = dataset.next()
-            images = inputs.cpu().data.numpy()
+            inputs, targets = dataset.next()
 
             if args.cuda:
                 inputs = inputs.cuda()
 
-
             loc_preds, cls_preds = self.net(inputs)
-            loc_preds = _dig_out_time(loc_preds, batchsize)
-            cls_preds = _dig_out_time(cls_preds, batchsize)
 
+            images = inputs.cpu().data.numpy()
+            loc_preds = _dig_out_time(loc_preds, dataset.batchsize)
+            cls_preds = _dig_out_time(cls_preds, dataset.batchsize)
             for t in range(loc_preds.size(0)):
                 for i in range(loc_preds.size(1)):
                     y = i / ncols
                     x = i % ncols
-
                     img = self.make_image(images[t, i])
-
-                    assert img.shape == grid[0, 0].shape
-
+                    # assert img.shape == grid[0, 0].shape
                     boxes, labels, scores = self.box_coder.decode(loc_preds[t, i].data,
                                                                   F.softmax(cls_preds[t, i], dim=1).data,
                                                                   nms_thresh=0.6)
@@ -173,25 +192,21 @@ class SSDTrainer(object):
                         bboxes = boxarray_to_boxes(boxes, labels, dataset.labelmap)
                         img = draw_bboxes(img, bboxes)
 
-                    #grid[y, x] = img
-                    grid[i, t + period * time] = torch.from_numpy(np.transpose(img, (2, 0, 1)))
+                    grid[y, x] = img
+                    # grid[i, t + period * time] = torch.from_numpy(np.transpose(img, (2, 0, 1)))
+                image = grid.swapaxes(1, 2).reshape(nrows * dataset.height, ncols * dataset.width, 3)
+                out.write(image)
 
-                #image = grid.swapaxes(1, 2).reshape(nrows * dataset.height, ncols * dataset.width, 3)
-                #out.write(image)
+        out.release()
 
-        #out.release()
-
-        self.writer.add_video('test', vid_tensor=grid)
-
+        #self.writer.add_video('test', vid_tensor=grid, fps=30)
         self.net.extractor.return_all = False
 
-
-    def save_ckpt(self, epoch, net, args, name='ckpt'):
+    def save_ckpt(self, epoch, args, name='checkpoint#'):
         state = {
             'net': self.net.state_dict(),
             'epoch': epoch,
         }
-        ckpt_file = os.path.dirname(args.checkpoint) + '/ckpt_' + str(epoch) + '.pth'
-        if not os.path.isdir(os.path.dirname(args.checkpoint)):
-            os.mkdir(os.path.dirname(args.checkpoint))
+        ckpt_file = args.checkpoint + '/' + name + str(epoch) + '.pth'
+        prepare_ckpt_dir(ckpt_file)
         torch.save(state, ckpt_file)

@@ -8,10 +8,9 @@ import torch.backends.cudnn as cudnn
 from detection_module.ssd import SSD
 from detection_module.box_coder import SSDBoxCoder
 from detection_module.ssd_loss import SSDLoss
-from trainer import SSDTrainer
+from detection_module.trainer import SSDTrainer
 
 from toy_pbm_detection import SquaresVideos
-from utils import StreamDataset
 
 
 def parse_args():
@@ -74,9 +73,10 @@ def main():
 
     for epoch in range(start_epoch, args.epochs):
         trainer.train(epoch, dataset, args)
+        trainer.val(epoch, dataset, args)
         trainer.test(epoch, dataset, nrows, args)
         # scheduler.step()
-        # trainer.save_ckpt(epoch)
+        trainer.save_ckpt(epoch)
 
 
 
