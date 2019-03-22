@@ -47,7 +47,7 @@ def main():
     #dataloader = dataset
     # Model
     print('==> Building model..')
-    net = SSD(feature_extractor=FPNRNNFeatureExtractor, num_classes=classes, cin=cin, height=height, width=width)
+    net = SSD(feature_extractor=ConvRNNFeatureExtractor, num_classes=classes, cin=cin, height=height, width=width)
 
     if args.cuda:
         net.cuda()

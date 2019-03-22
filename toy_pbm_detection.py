@@ -3,7 +3,7 @@ import time
 import torch
 import numpy as np
 import cv2
-
+cv2.setNumThreads(0)
 
 def clamp_xyxy(x1, y1, x2, y2, width, height):
     x1 = np.minimum(np.maximum(x1, 0), width)
@@ -180,8 +180,8 @@ class MovingSquare:
             self.stop_num -= 1
 
         v = np.sqrt(self.vx ** 2 + self.vy ** 2 + self.vs ** 2)
-        if np.random.rand() < 0.01 and v < 5 and not self.first_iteration:
-            self.stop_num = np.random.randint(5, self.max_stop)
+        if np.random.rand() < 0.1 and v < 5 and not self.first_iteration:
+            self.stop_num = np.random.randint(1, self.max_stop)
 
         if np.random.rand() < 0.01:
             self.reset_speed()
@@ -237,7 +237,7 @@ class SquareAnimation:
 
         self.first_iteration = False
 
-        return self.img, boxes
+        return diff, boxes
 
 
 class SquaresVideos:
@@ -258,7 +258,7 @@ class SquaresVideos:
         self.normalize = normalize
         self.labelmap = ['square']
         self.multi_aspect_ratios = False
-        self.max_stops = 6
+        self.max_stops = 30
         self.animations = [SquareAnimation(t, h, w, c, self.max_stops) for i in range(self.batchsize)]
         self.encode_all_timesteps = encode_all_timesteps
 
@@ -302,9 +302,9 @@ class SquaresVideos:
             yield self.next()
 
 if __name__ == '__main__':
-    from utils import boxarray_to_boxes, draw_bboxes, make_single_channel_display, StreamDataset
+    from detection_module.utils import boxarray_to_boxes, draw_bboxes, make_single_channel_display, StreamDataset
 
-    test = SquaresVideos(t=10, c=1, h=128, w=128, batchsize=8)
+    test = SquaresVideos(t=10, c=1, h=128, w=128, batchsize=1)
     dataloader = StreamDataset(test, max_iter=1000)
     start = 0
 

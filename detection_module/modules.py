@@ -1,4 +1,5 @@
 import torch.nn as nn
+from torch.autograd import Function
 from torch.nn import functional as F
 import torch
 
@@ -14,6 +15,64 @@ def batch_to_time(x, n=32):
     time = int(nt / n)
     x = x.view(time, n, c, h, w)
     return x
+
+class ClampMod(Function):
+    r""" clamp (gradient 1)
+     """
+
+    @staticmethod
+    def forward(ctx, x, minV, maxV):
+        bx = torch.clamp(x, minV, maxV)
+        return bx
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        grad_x = None
+        if ctx.needs_input_grad[0]:
+            grad_x = grad_output
+        return grad_x, None, None
+
+clampMod = ClampMod.apply
+
+
+def mod_sigmoid2(x, alpha=0.2):
+    o = F.sigmoid(x) * (1. + 2. * alpha) - alpha
+    o = clampMod(o, 0, 1)
+    return o
+
+
+# scaled and clamped tanh forward, gradient of scaled tanh backward
+def mod_tanh2(x, alpha=0.2):
+    o = F.tanh(x) * (1. + alpha)
+    o = clampMod(o, -1, 1)
+    return o
+
+
+# hard sigmoid forward, gradient 1 from -0.5-alpha to 0.5+alpha
+def mod_sigmoid(x, alpha=0.1):
+    o = torch.clamp(x + 0.5, 0 - alpha, 1 + alpha)
+    o = clampMod(o, 0, 1)
+    return o
+
+
+# hard tanh forward, gradient 1 from -1-alpha to 1+alpha
+def mod_tanh(x, alpha=0.1):
+    o = torch.clamp(x, -1 - alpha, 1 + alpha)
+    o = clampMod(o, -1, 1)
+    return o
+
+
+def get_nonlinearity(mode):
+    if mode == "hard":
+        sigmoid = mod_sigmoid
+        tanh = mod_tanh
+    elif mode == "soft":
+        sigmoid = mod_sigmoid2
+        tanh = mod_tanh2
+    elif mode == "original":
+        sigmoid = F.sigmoid
+        tanh = F.tanh
+    return sigmoid, tanh
 
 
 class ConvLSTMCell(nn.Module):
@@ -31,6 +90,8 @@ class ConvLSTMCell(nn.Module):
 
         self.reset()
         self.nonlin = nonlin
+
+        self.sigmoid, self.tanh = get_nonlinearity("original")
 
     def forward(self, xi):
         xiseq = xi.split(1, 0) #t,n,c,h,w
@@ -50,10 +111,10 @@ class ConvLSTMCell(nn.Module):
                 tmp = xt
 
             cc_i, cc_f, cc_o, cc_g = torch.split(tmp, self.hidden_dim, dim=1)
-            i = torch.sigmoid(cc_i)
-            f = torch.sigmoid(cc_f)
-            o = torch.sigmoid(cc_o)
-            g = torch.tanh(cc_g)
+            i = self.sigmoid(cc_i)
+            f = self.sigmoid(cc_f)
+            o = self.sigmoid(cc_o)
+            g = self.tanh(cc_g)
             if self.prev_c is None:
                 c = i * g
             else:

@@ -6,7 +6,7 @@ class ConvRNNFeatureExtractor(nn.Module):
     def __init__(self, cin=1):
         super(ConvRNNFeatureExtractor, self).__init__()
         self.cin = cin
-        base = 16
+        base = 8
         _kernel_size = 7
         _stride = 2
         _padding = 3
