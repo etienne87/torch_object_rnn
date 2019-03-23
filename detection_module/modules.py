@@ -93,27 +93,26 @@ def get_nonlinearity(mode):
 class ConvLSTMCell(nn.Module):
     r"""ConvLSTMCell module, applies sequential part of LSTM.
     """
-    def __init__(self, hidden_dim, kernel_size, bias, nonlin=F.leaky_relu):
+
+    def __init__(self, hidden_dim, kernel_size, conv_func=nn.Conv2d, nonlin=torch.tanh):
         super(ConvLSTMCell, self).__init__()
         self.hidden_dim = hidden_dim
 
-        self.conv_h2h = nn.Conv2d(in_channels=self.hidden_dim,
+        self.conv_h2h = conv_func(in_channels=self.hidden_dim,
                                   out_channels=4 * self.hidden_dim,
                                   kernel_size=kernel_size,
                                   padding=1,
-                                  bias=bias)
+                                  bias=False)
 
         self.reset()
         self.nonlin = nonlin
 
-        self.sigmoid, self.tanh = get_nonlinearity("anneal")
-        self.alpha = nn.Parameter(1.0+torch.rand(1)*0.001)
-
     def forward(self, xi):
-        xiseq = xi.split(1, 0) #t,n,c,h,w
-
-        # if self.train:
-        #     self.alpha *= 1.01
+        inference = (len(xi.shape) == 4)  # inference for model conversion
+        if inference:
+            xiseq = [xi]
+        else:
+            xiseq = xi.split(1, 0)  # t,n,c,h,w
 
         if self.prev_h is not None:
             self.prev_h = self.prev_h.detach()
@@ -121,7 +120,8 @@ class ConvLSTMCell(nn.Module):
 
         result = []
         for t, xt in enumerate(xiseq):
-            xt = xt.squeeze(0)
+            if not inference:  # for training/val (not inference)
+                xt = xt.squeeze(0)
 
             if self.prev_h is not None:
                 tmp = self.conv_h2h(self.prev_h) + xt
@@ -129,20 +129,31 @@ class ConvLSTMCell(nn.Module):
                 tmp = xt
 
             cc_i, cc_f, cc_o, cc_g = torch.split(tmp, self.hidden_dim, dim=1)
-            i = self.sigmoid(cc_i, self.alpha)
-            f = self.sigmoid(cc_f, self.alpha)
-            o = self.sigmoid(cc_o, self.alpha)
-            g = self.tanh(cc_g, self.alpha)
+            i = torch.sigmoid(cc_i)
+            f = torch.sigmoid(cc_f)
+            o = torch.sigmoid(cc_o)
+            g = torch.tanh(cc_g)
             if self.prev_c is None:
                 c = i * g
             else:
                 c = f * self.prev_c + i * g
             h = o * self.nonlin(c)
-            result.append(h.unsqueeze(0))
+            if not inference:
+                result.append(h.unsqueeze(0))
             self.prev_h = h
             self.prev_c = c
-        res = torch.cat(result, dim=0)
+        if inference:
+            res = h
+        else:
+            res = torch.cat(result, dim=0)
         return res
+
+    def set(self, prev_h, prev_c):
+        self.prev_h = prev_h
+        self.prev_c = prev_c
+
+    def get(self):
+        return self.prev_h, self.prev_c
 
     def reset(self):
         self.prev_h, self.prev_c = None, None
@@ -162,7 +173,7 @@ class ConvLSTM(nn.Module):
 
         self.bn1 = nn.BatchNorm2d(nInputPlane)
 
-        self.timepool = ConvLSTMCell(nOutputPlane, 3, True)
+        self.timepool = ConvLSTMCell(nOutputPlane, 3)
 
     def forward(self, x):
         x, n = time_to_batch(x)

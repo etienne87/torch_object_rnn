@@ -85,9 +85,5 @@ def main():
         trainer.writer.add_scalar('learning rate', optimizer.param_groups[0]['lr'], epoch)
         scheduler.step()
 
-        for module in net.extractor.modules():
-            if isinstance(module, ConvLSTMCell):
-                print('alpha: ', module.alpha)
-
 if __name__ == '__main__':
     main()
