@@ -13,11 +13,12 @@ from detection_module.networks import ConvRNNFeatureExtractor, FPNRNNFeatureExtr
 from detection_module.utils import StreamDataset
 from toy_pbm_detection import SquaresVideos
 
+from detection_module.modules import ConvLSTMCell
 
 def parse_args():
     parser = argparse.ArgumentParser(description='PyTorch SSD Training')
     parser.add_argument('--path', type=str, default='', help='path to dataset')
-    parser.add_argument('--batchsize', type=int, default=32, help='batchsize')
+    parser.add_argument('--batchsize', type=int, default=8, help='batchsize')
     parser.add_argument('--lr', default=1e-3, type=float, help='learning rate')
     parser.add_argument('--resume', action='store_true', help='resume from checkpoint')
     parser.add_argument('--train_iter', type=int, default=200, help='#iter / train epoch')
@@ -41,9 +42,13 @@ def main():
     # Dataset
     print('==> Preparing dataset..')
     dataset = SquaresVideos(t=time, c=cin, h=height, w=width, batchsize=args.batchsize, normalize=False, cuda=args.cuda)
+
+    test_dataset = SquaresVideos(t=time, c=cin, h=height, w=width, max_stops=300,
+                                 batchsize=args.batchsize, normalize=False, cuda=args.cuda)
     dataset.num_frames = args.train_iter
 
     dataloader = StreamDataset(dataset, args.train_iter)
+    test_dataloader = StreamDataset(test_dataset, args.test_iter)
     #dataloader = dataset
     # Model
     print('==> Building model..')
@@ -68,17 +73,21 @@ def main():
 
 
     criterion = SSDLoss(num_classes=classes)
-    optimizer = optim.Adam(net.parameters(), lr=args.lr, betas=(0.9, 0.99), eps=1e-8, weight_decay=1e-6)
+    optimizer = optim.Adam(net.parameters(), lr=args.lr, betas=(0.9, 0.99), eps=1e-8, weight_decay=0)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.99)
     trainer = SSDTrainer(net, box_coder, criterion, optimizer)
 
     for epoch in range(start_epoch, args.epochs):
         trainer.train(epoch, dataloader, args)
-        trainer.val(epoch, dataloader, args)
-        trainer.test(epoch, dataset, nrows, args)
+        trainer.val(epoch, test_dataloader, args)
+        trainer.test(epoch, test_dataset, nrows, args)
         trainer.save_ckpt(epoch, args)
         trainer.writer.add_scalar('learning rate', optimizer.param_groups[0]['lr'], epoch)
         scheduler.step()
+
+        for module in net.extractor.modules():
+            if isinstance(module, ConvLSTMCell):
+                print('alpha: ', module.alpha)
 
 if __name__ == '__main__':
     main()

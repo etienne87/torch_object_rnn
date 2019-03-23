@@ -248,7 +248,8 @@ class SquaresVideos:
     This simulates DVS events Histograms
     """
 
-    def __init__(self, batchsize=32, t=10, h=300, w=300, c=3, normalize=False, cuda=False, encode_all_timesteps=False):
+    def __init__(self, batchsize=32, t=10, h=300, w=300, c=3,
+                 normalize=False, cuda=False, encode_all_timesteps=False, max_stops=30):
         self.batchsize = batchsize
         self.num_frames = 100000
         self.channels = c
@@ -258,7 +259,7 @@ class SquaresVideos:
         self.normalize = normalize
         self.labelmap = ['square']
         self.multi_aspect_ratios = False
-        self.max_stops = 30
+        self.max_stops = max_stops
         self.animations = [SquareAnimation(t, h, w, c, self.max_stops) for i in range(self.batchsize)]
         self.encode_all_timesteps = encode_all_timesteps
 

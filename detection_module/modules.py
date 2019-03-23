@@ -61,6 +61,16 @@ def mod_tanh(x, alpha=0.1):
     o = clampMod(o, -1, 1)
     return o
 
+ALPHA = 1.0
+
+def anneal_sigmoid(x, alpha=1.0):
+    o = torch.sigmoid(alpha * x)
+    return o
+
+def anneal_tanh(x, alpha=1.0):
+    o = torch.tanh(alpha * x)
+    return o
+
 
 def get_nonlinearity(mode):
     if mode == "hard":
@@ -72,7 +82,12 @@ def get_nonlinearity(mode):
     elif mode == "original":
         sigmoid = F.sigmoid
         tanh = F.tanh
+    elif mode == "anneal":
+        sigmoid = anneal_sigmoid
+        tanh =  anneal_tanh
     return sigmoid, tanh
+
+
 
 
 class ConvLSTMCell(nn.Module):
@@ -91,11 +106,14 @@ class ConvLSTMCell(nn.Module):
         self.reset()
         self.nonlin = nonlin
 
-        self.sigmoid, self.tanh = get_nonlinearity("original")
+        self.sigmoid, self.tanh = get_nonlinearity("anneal")
+        self.alpha = nn.Parameter(1.0+torch.rand(1)*0.001)
 
     def forward(self, xi):
         xiseq = xi.split(1, 0) #t,n,c,h,w
 
+        # if self.train:
+        #     self.alpha *= 1.01
 
         if self.prev_h is not None:
             self.prev_h = self.prev_h.detach()
@@ -111,10 +129,10 @@ class ConvLSTMCell(nn.Module):
                 tmp = xt
 
             cc_i, cc_f, cc_o, cc_g = torch.split(tmp, self.hidden_dim, dim=1)
-            i = self.sigmoid(cc_i)
-            f = self.sigmoid(cc_f)
-            o = self.sigmoid(cc_o)
-            g = self.tanh(cc_g)
+            i = self.sigmoid(cc_i, self.alpha)
+            f = self.sigmoid(cc_f, self.alpha)
+            o = self.sigmoid(cc_o, self.alpha)
+            g = self.tanh(cc_g, self.alpha)
             if self.prev_c is None:
                 c = i * g
             else:
@@ -131,7 +149,7 @@ class ConvLSTMCell(nn.Module):
 
 
 class ConvLSTM(nn.Module):
-    r"""ConvLSTM module. computes input-to-hidden in parallel.
+    r"""ConvLSTM module.
     """
     def __init__(self, nInputPlane, nOutputPlane, kernel_size, stride, padding, dilation=1):
         super(ConvLSTM, self).__init__()
@@ -145,6 +163,94 @@ class ConvLSTM(nn.Module):
         self.bn1 = nn.BatchNorm2d(nInputPlane)
 
         self.timepool = ConvLSTMCell(nOutputPlane, 3, True)
+
+    def forward(self, x):
+        x, n = time_to_batch(x)
+        bnx = self.bn1(x)
+        y = self.conv1(bnx)
+        y = batch_to_time(y, n)
+        h = self.timepool(y)
+        return h
+
+
+class ConvGRUCell(nn.Module):
+    r"""ConvGRUCell module, applies sequential part of LSTM.
+    """
+    def __init__(self, hidden_dim, kernel_size, bias):
+        super(ConvGRUCell, self).__init__()
+        self.hidden_dim = hidden_dim
+
+        # Fully-Gated
+        self.conv_h2zr = nn.Conv2d(in_channels=self.hidden_dim,
+                                  out_channels=2 * self.hidden_dim,
+                                  kernel_size=kernel_size,
+                                  padding=1,
+                                  bias=bias)
+
+        self.conv_h2h = nn.Conv2d(in_channels=self.hidden_dim,
+                                  out_channels=self.hidden_dim,
+                                  kernel_size=kernel_size,
+                                  padding=1,
+                                  bias=bias)
+
+        self.reset()
+
+    def forward(self, xi):
+        xiseq = xi.split(1, 0) #t,n,c,h,w
+
+        if self.prev_h is not None:
+            self.prev_h = self.prev_h.detach()
+
+        result = []
+        for t, xt in enumerate(xiseq):
+            xt = xt.squeeze(0)
+
+            #split x & h in 3
+            x_zr, x_h = xt[:, :2*self.hidden_dim], xt[:,2*self.hidden_dim:]
+
+            if self.prev_h is not None:
+                tmp = self.conv_h2zr(self.prev_h) + x_zr
+            else:
+                tmp = x_zr
+
+            cc_z, cc_r = torch.split(tmp, self.hidden_dim, dim=1)
+            z = torch.sigmoid(cc_z)
+            r = torch.sigmoid(cc_r)
+
+            if self.prev_h is not None:
+                tmp = self.conv_h2h(r * self.prev_h) + x_h
+            else:
+                tmp = x_h
+            tmp = torch.sigmoid(tmp)
+
+            if self.prev_h is not None:
+                h = (1-z) * self.prev_h + z * tmp
+            else:
+                h = z * tmp
+
+            result.append(h.unsqueeze(0))
+            self.prev_h = h
+        res = torch.cat(result, dim=0)
+        return res
+
+    def reset(self):
+        self.prev_h = None
+
+class ConvGRU(nn.Module):
+    r"""ConvGRU module.
+    """
+    def __init__(self, nInputPlane, nOutputPlane, kernel_size, stride, padding, dilation=1):
+        super(ConvGRU, self).__init__()
+
+        self.cin = nInputPlane
+        self.cout = nOutputPlane
+        self.conv1 = nn.Conv2d(nInputPlane, 3 * nOutputPlane, kernel_size=kernel_size, stride=stride, dilation=dilation,
+                               padding=padding,
+                               bias=True)
+
+        self.bn1 = nn.BatchNorm2d(nInputPlane)
+
+        self.timepool = ConvGRUCell(nOutputPlane, 3, True)
 
     def forward(self, x):
         x, n = time_to_batch(x)
