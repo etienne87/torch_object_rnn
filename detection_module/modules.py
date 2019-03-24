@@ -16,80 +16,6 @@ def batch_to_time(x, n=32):
     x = x.view(time, n, c, h, w)
     return x
 
-class ClampMod(Function):
-    r""" clamp (gradient 1)
-     """
-
-    @staticmethod
-    def forward(ctx, x, minV, maxV):
-        bx = torch.clamp(x, minV, maxV)
-        return bx
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        grad_x = None
-        if ctx.needs_input_grad[0]:
-            grad_x = grad_output
-        return grad_x, None, None
-
-clampMod = ClampMod.apply
-
-
-def mod_sigmoid2(x, alpha=0.2):
-    o = F.sigmoid(x) * (1. + 2. * alpha) - alpha
-    o = clampMod(o, 0, 1)
-    return o
-
-
-# scaled and clamped tanh forward, gradient of scaled tanh backward
-def mod_tanh2(x, alpha=0.2):
-    o = F.tanh(x) * (1. + alpha)
-    o = clampMod(o, -1, 1)
-    return o
-
-
-# hard sigmoid forward, gradient 1 from -0.5-alpha to 0.5+alpha
-def mod_sigmoid(x, alpha=0.1):
-    o = torch.clamp(x + 0.5, 0 - alpha, 1 + alpha)
-    o = clampMod(o, 0, 1)
-    return o
-
-
-# hard tanh forward, gradient 1 from -1-alpha to 1+alpha
-def mod_tanh(x, alpha=0.1):
-    o = torch.clamp(x, -1 - alpha, 1 + alpha)
-    o = clampMod(o, -1, 1)
-    return o
-
-ALPHA = 1.0
-
-def anneal_sigmoid(x, alpha=1.0):
-    o = torch.sigmoid(alpha * x)
-    return o
-
-def anneal_tanh(x, alpha=1.0):
-    o = torch.tanh(alpha * x)
-    return o
-
-
-def get_nonlinearity(mode):
-    if mode == "hard":
-        sigmoid = mod_sigmoid
-        tanh = mod_tanh
-    elif mode == "soft":
-        sigmoid = mod_sigmoid2
-        tanh = mod_tanh2
-    elif mode == "original":
-        sigmoid = F.sigmoid
-        tanh = F.tanh
-    elif mode == "anneal":
-        sigmoid = anneal_sigmoid
-        tanh =  anneal_tanh
-    return sigmoid, tanh
-
-
-
-
 class ConvLSTMCell(nn.Module):
     r"""ConvLSTMCell module, applies sequential part of LSTM.
     """
@@ -99,7 +25,14 @@ class ConvLSTMCell(nn.Module):
         self.hidden_dim = hidden_dim
 
         self.conv_h2h = conv_func(in_channels=self.hidden_dim,
-                                  out_channels=4 * self.hidden_dim,
+                                  out_channels=3 * self.hidden_dim,
+                                  kernel_size=kernel_size,
+                                  padding=1,
+                                  bias=False)
+
+        # PeepHole?
+        self.conv_c2h = conv_func(in_channels=self.hidden_dim,
+                                  out_channels=3 * self.hidden_dim,
                                   kernel_size=kernel_size,
                                   padding=1,
                                   bias=False)
@@ -124,13 +57,17 @@ class ConvLSTMCell(nn.Module):
                 xt = xt.squeeze(0)
 
             if self.prev_h is not None:
-                tmp = self.conv_h2h(self.prev_h) + xt
+                tmp = self.conv_c2h(self.prev_c) + self.conv_h2h(self.prev_h) + xt
             else:
                 tmp = xt
 
-            cc_i, cc_f, cc_o, cc_g = torch.split(tmp, self.hidden_dim, dim=1)
-            i = torch.sigmoid(cc_i)
+            # cc_i, cc_f, cc_o, cc_g = torch.split(tmp, self.hidden_dim, dim=1)
+            # i = torch.sigmoid(cc_i)
+
+            cc_f, cc_o, cc_g = torch.split(tmp, self.hidden_dim, dim=1)
             f = torch.sigmoid(cc_f)
+            i = 1 - f
+
             o = torch.sigmoid(cc_o)
             g = torch.tanh(cc_g)
             if self.prev_c is None:
@@ -205,6 +142,17 @@ class ConvGRUCell(nn.Module):
                                   bias=bias)
 
         self.reset()
+
+        #Chrono Init
+        # Tmax = 3000
+        # self.conv_h2zr.bias.data.fill_(0)
+        # self.conv_h2zr.bias.data[hidden_dim: 2 * hidden_dim] = \
+        #     -torch.log(nn.init.uniform_(self.conv_h2zr.bias.data[: hidden_dim], 1, Tmax - 1))
+        # self.conv_h2zr.bias.data[: hidden_dim] = -self.conv_h2zr.bias.data[hidden_dim: 2 * hidden_dim]
+        #
+        # self.conv_h2h.bias.data.fill_(0)
+        # self.conv_h2h.bias.data[: hidden_dim] = -self.conv_h2zr.bias.data[hidden_dim: 2 * hidden_dim]
+
 
     def forward(self, xi):
         xiseq = xi.split(1, 0) #t,n,c,h,w

@@ -123,10 +123,10 @@ class MovingSquare:
         self.minheight, self.minwidth = 30, 30
         self.stop_num = 0
         self.max_stop = max_stop
+        self.color = 0.5 + torch.rand(c) / 2
+        self.iter = 0
         self.reset()
         self.run()
-        self.first_iteration = True
-        self.color = 0.5 + torch.rand(c) / 2
 
     def reset(self):
         s = np.random.randint(self.minheight, 3 * self.minheight)
@@ -180,7 +180,7 @@ class MovingSquare:
             self.stop_num -= 1
 
         v = np.sqrt(self.vx ** 2 + self.vy ** 2 + self.vs ** 2)
-        if np.random.rand() < 0.1 and v < 5 and not self.first_iteration:
+        if np.random.rand() < 0.1 and v < 5 and self.iter > 10:
             self.stop_num = np.random.randint(1, self.max_stop)
 
         if np.random.rand() < 0.01:
@@ -188,7 +188,7 @@ class MovingSquare:
 
         x1, y1, x2, y2 = clamp_xyxy(self.x1, self.y1, self.x2, self.y2, self.width - 1, self.height - 1)
 
-        self.first_iteration = False
+        self.iter += 1
 
         return (x1, y1, x2, y2)
 
@@ -305,7 +305,7 @@ class SquaresVideos:
 if __name__ == '__main__':
     from detection_module.utils import boxarray_to_boxes, draw_bboxes, make_single_channel_display, StreamDataset
 
-    test = SquaresVideos(t=10, c=1, h=128, w=128, batchsize=1)
+    test = SquaresVideos(t=10, c=1, h=128, w=128, batchsize=1, max_stops=300, encode_all_timesteps=True)
     dataloader = StreamDataset(test, max_iter=1000)
     start = 0
 
@@ -314,11 +314,12 @@ if __name__ == '__main__':
 
         start = time.time()
         for j in range(x.size(1)):
-            boxes = y[j].cpu().numpy().astype(np.float32)
-            boxes = boxes.astype(np.int32)
-            bboxes = boxarray_to_boxes(boxes)
 
             for t in range(x.size(0)):
+                boxes = y[t][j].cpu()
+                bboxes = boxarray_to_boxes(boxes[:, :4], boxes[:, 4], test.labelmap)
+
+
                 img = x[t, j, :].numpy().astype(np.float32)
                 if img.shape[0] == 1:
                     img = make_single_channel_display(img[0], -1, 1)
