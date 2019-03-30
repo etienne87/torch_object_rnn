@@ -33,7 +33,7 @@ def main():
 
     os.environ['OMP_NUM_THREADS'] = '1'
 
-    classes, cin, time, height, width = 2, 1, 5, 128, 128
+    classes, cin, time, height, width = 2, 1, 25, 128, 128
 
     nrows = 4
 

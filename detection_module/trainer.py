@@ -141,7 +141,7 @@ class SSDTrainer(object):
                     grid[t + period * time, y, x] = img
 
         grid = grid.swapaxes(2, 3).reshape(periods * time, nrows * dataset.height, ncols * dataset.width, 3)
-        utils.add_video(self.writer, 'test' + str(epoch), grid, fps=30)
+        utils.add_video(self.writer, 'test', grid, global_step=epoch, fps=30)
         self.net.extractor.return_all = False
 
     def save_ckpt(self, epoch, args, name='checkpoint#'):
