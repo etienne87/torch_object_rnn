@@ -1,12 +1,12 @@
 #!/usr/bin/python
 
-# This script is for pedagogic purpose, about cameras projections from world & back
+# This script does some random 3d animation
 #
 # Copyright: (c) 2017-2018 Chronocam
 
 import numpy as np
 import cv2
-
+import time
 
 
 class Cube(object):
@@ -62,7 +62,7 @@ def filter_2d(pts, height, width):
     return ids
 
 def filter_3d(pts, tvec):
-    ids = np.where((pts[:, 1] <= 0) &
+    ids = np.where((pts[:, 1] <= 2) &
                    (pts[:, 2] >= tvec[2])) #points behind the camera
     return pts[ids]
 
@@ -75,19 +75,27 @@ def world_to_img(objp, rvec, tvec, K, dist_coeffs, height, width):
     #filter points that are behind the camera
     objp = filter_3d(objp, tvec)
     if len(objp) == 0:
-        return np.array([])
+        return np.array([]), np.array([]), np.array([])
 
-    img_grid = cv2.projectPoints(objp, R, T, K, dist_coeffs)[0].squeeze().reshape(-1, 2)
+    img_grid = cv2.projectPoints(objp, R, T, K, dist_coeffs)[0].squeeze().reshape(-1, 2).astype(np.int32)
+
     ids = filter_2d(img_grid, height, width)
     objp = objp[ids]
-    img_grid = img_grid[ids]
-    return img_grid.astype(np.int32)
+    img_grid2 = img_grid[ids]
+    zbuffer = 1./(objp[:, 2]+0.1)
+
+    return img_grid2, img_grid, zbuffer
+
+def rotate(objp, cog, rspeed):
+    R = cv2.Rodrigues(rspeed)[0]
+    xyz = (objp-cog).dot(R.T) + cog
+    return xyz
 
 
-def draw_points(grid, img, color=(255,0,0)):
+def draw_points(grid, img, zbuffer, color=(255,0,0)):
     for i in range(grid.shape[0]):
         pt = (int(grid[i, 0]), int(grid[i, 1]))
-        cv2.circle(img, pt, 0, color, 3)
+        cv2.circle(img, pt, 1, color, 3)
 
 
 def show_plane_animation(objp, rvec, tvec, K, dist, axis=0):
@@ -111,6 +119,19 @@ def get_square(cube2d):
     xmax, ymax = cube2d.max(axis=0).tolist()
     return (xmin, ymin), (xmax, ymax)
 
+def draw_flow(img, old, new):
+    flow = new-old
+    cmap = cv2.applyColorMap(np.arange(255, dtype=np.uint8), cv2.COLORMAP_HSV).tolist()
+
+    for i in range(new.shape[0]):
+        pt1 = (old[i, 0], old[i, 1])
+        pt2 = (new[i, 0]+1, new[i, 1]+1)
+        angle = np.arctan2(pt2[1]-pt1[1], pt2[0]-pt1[0])
+        angle = abs(int(min(angle, np.pi-0.01)*255/np.pi))
+        color = cmap[angle][0]
+        cv2.arrowedLine(img, pt1, pt2, color, 2)
+
+
 OK = 0
 TOOSMALL = 1
 TOOBIG = 2
@@ -122,7 +143,7 @@ RIGHT = 6
 
 if __name__ == '__main__':
 
-    dtype = np.float32
+    dtype = np.float64
     height, width = 480, 640
     K = np.array([[300, 0, width/2],
                   [0, 300, height/2],
@@ -131,60 +152,98 @@ if __name__ == '__main__':
     dist = np.array([0.0, 0.0, 0.0, 0.0, 0.0], dtype=dtype).reshape(5, )
 
     plane = make_xy_plane(npts_x=3, npts_z=100, x_min=-10, x_max=10, z_min=0, z_max=7)
-    cube = make_cube(n=10, x_min=-1, x_max=1, y_min=-2, y_max=0.0, z_min=1.2, z_max=1.2+2)
+    cube = make_cube(n=10, x_min=-1, x_max=1, y_min=-2, y_max=0, z_min=1.2, z_max=1.2+2)
+    cube_cog = np.array([0,-1,2.2], dtype=dtype)
 
     rvec = np.array([0, 0, 0], dtype=dtype)  # PITCH, YAW, ROLL
-    tvec = np.array([0, -1, -2.0], dtype=dtype)
+    tvec = np.array([-1, -4, -5], dtype=dtype)
 
     last_img = np.full((height, width, 3), 127, dtype=np.uint8)
     img = np.full((height, width, 3), 127, dtype=np.uint8)
 
+    old_cube2d = None
+
     cv2.namedWindow("image")
 
+    rspeed = np.random.randn(3) * 0.01
+    tspeed = np.random.randn(3) * 0.1
+    stop_iter = 0
+
     while 1:
-        last_img[...] = img
-        img[...] = 127
-        rvec = rvec*0.999 + np.random.randn(3) * 0.001
-        tvec = tvec*0.999 + np.random.randn(3) * 0.001
-
-        rvec[0] += 0.05
-        rvec[1] += 0.1
-        rvec[2] += 0.1
-
-        cube2d = world_to_img(cube, rvec, tvec, K, dist, height, width) #TODO: put on GPU
-        plane2d = world_to_img(plane, rvec, tvec, K, dist, height, width) #TODO: put on GPU
 
 
-        draw_points(plane2d, img, (255, 0, 255))
-        draw_points(cube2d, img, (0, 0, 255))
+        start = time.time()
+        if stop_iter == 0:
+            last_img[...] = img
+            img[...] = 127
+
+        rspeed = rspeed*0.99 + np.random.randn(3)*0.01
+        if stop_iter == 0:
+            cube = rotate(cube, cube_cog, rspeed)
+            tvec += tspeed
+        else:
+            stop_iter -= 1
 
 
+        cube2d, fullcube2d, cube2dz = world_to_img(cube, rvec, tvec, K, dist, height, width) #TODO: put on GPU
+        plane2d, fullplane2d, planez = world_to_img(plane, rvec, tvec, K, dist, height, width) #TODO: put on GPU
+        draw_points(plane2d, img, zbuffer=planez, color=(255, 0, 255))
+        draw_points(cube2d, img, zbuffer=cube2dz, color=(0, 0, 255))
         diff = img.astype(np.float32)/255.0-last_img.astype(np.float32)/255.0 + 0.5
-
         tl, br = get_square(cube2d)
+
+        show = img.copy()
+
+        if old_cube2d is not None:
+            draw_flow(show, old_cube2d, fullcube2d)
+        old_cube2d = fullcube2d
+
+
         if tl:
             cv2.rectangle(diff, tl, br, (255,0,0), 2)
 
-        cv2.imshow('image', img)
+            tl2, br2 = get_square(fullcube2d)
+            fullwidth = br2[0]-tl2[0]
+            fullheight = br2[1]-tl2[1]
+
+            min_width = 64
+            min_height = 64
+            x1, y1 = tl
+            x2, y2 = br
+            flags = {}
+
+
+            if x1 <= 0:
+                flags[LEFT] = 1
+                tspeed[0] = -abs(tspeed[0])
+
+            if x2 >= width - 1:
+                flags[RIGHT] = 1
+                tspeed[0] = abs(tspeed[0])
+
+            if y1 <= 0:
+                flags[TOP] = 1
+                tspeed[1] = -abs(tspeed[1])
+
+            if y2 >= height -1:
+                flags[BOTTOM] = 1
+                tspeed[1] = abs(tspeed[1])
+
+            if fullwidth <= min_width or fullheight <= min_height:
+                flags[TOOSMALL] = 1
+                tspeed[2] = abs(tspeed[2])
+
+            if fullwidth >= width - 2 or fullheight >= height - 2:
+                flags[TOOBIG] = 1
+                tspeed[2] = -abs(tspeed[2])
+
+        if np.random.rand() < 0.01:
+            stop_iter = 3
+
+        #print(time.time()-start, ' s')
+
+        cv2.imshow('image', show)
         cv2.imshow('diff', diff)
-        key = cv2.waitKey(5)
-        if key == ord('q'):
-            #rvec[1] -= np.pi/16
-            tvec[0] -= 0.1
-        elif key == ord('d'):
-            #rvec[1] += np.pi/16
-            tvec[0] += 0.1
-        elif key == ord('s'):
-            # rvec[0] -= np.pi/16
-            tvec[2] -= 0.1
-        elif key == ord('z'):
-            #rvec[0] += np.pi / 16
-            tvec[2] += 0.5
-        elif key == ord('w'):
-            # rvec[0] -= np.pi/16
-            tvec[1] -= 0.1
-        elif key == ord('x'):
-            #rvec[0] += np.pi / 16
-            tvec[1] += 0.1
+        key = cv2.waitKey(3)
         if key == 27:
             break
