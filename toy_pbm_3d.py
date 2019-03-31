@@ -1,6 +1,8 @@
 #!/usr/bin/python
-
-# This script does some random 3d animation
+# This script runs a random 3d animation & can retrieve:
+# - detection
+# - flow
+# - zbuffer
 #
 # Copyright: (c) 2017-2018 Chronocam
 
@@ -73,9 +75,9 @@ def world_to_img(objp, rvec, tvec, K, dist_coeffs, height, width):
         R = rvec
     T = -R.dot(tvec)
     #filter points that are behind the camera
-    objp = filter_3d(objp, tvec)
-    if len(objp) == 0:
-        return np.array([]), np.array([]), np.array([])
+    # objp = filter_3d(objp, tvec)
+    # if len(objp) == 0:
+    #     return np.array([]), np.array([]), np.array([])
 
     img_grid = cv2.projectPoints(objp, R, T, K, dist_coeffs)[0].squeeze().reshape(-1, 2).astype(np.int32)
 
@@ -119,8 +121,8 @@ def get_square(cube2d):
     xmax, ymax = cube2d.max(axis=0).tolist()
     return (xmin, ymin), (xmax, ymax)
 
+
 def draw_flow(img, old, new):
-    flow = new-old
     cmap = cv2.applyColorMap(np.arange(255, dtype=np.uint8), cv2.COLORMAP_HSV).tolist()
 
     for i in range(new.shape[0]):
@@ -162,6 +164,7 @@ if __name__ == '__main__':
     img = np.full((height, width, 3), 127, dtype=np.uint8)
 
     old_cube2d = None
+    old_plane2d = None
 
     cv2.namedWindow("image")
 
@@ -178,6 +181,8 @@ if __name__ == '__main__':
             img[...] = 127
 
         rspeed = rspeed*0.99 + np.random.randn(3)*0.01
+        tspeed = tspeed*0.99 + np.random.randn(3)*0.01
+
         if stop_iter == 0:
             cube = rotate(cube, cube_cog, rspeed)
             tvec += tspeed
@@ -196,8 +201,11 @@ if __name__ == '__main__':
 
         if old_cube2d is not None:
             draw_flow(show, old_cube2d, fullcube2d)
-        old_cube2d = fullcube2d
+        if old_plane2d is not None:
+            draw_flow(show, old_plane2d, fullplane2d)
 
+        old_cube2d = fullcube2d
+        old_plane2d = fullplane2d
 
         if tl:
             cv2.rectangle(diff, tl, br, (255,0,0), 2)
