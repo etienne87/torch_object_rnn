@@ -10,21 +10,6 @@ import numpy as np
 import cv2
 import time
 
-
-class Cube(object):
-    def __init__(self, dims, dtype=np.float32):
-        self.points = np.array([[],
-                               [],
-                               [],
-                               [],
-                               [],
-                               [],
-                               [],
-                               []
-                               ], dtype=dtype)
-
-
-
 # define plane parallel to the ground
 def make_xy_plane(npts_x=5, npts_z=10, x_min=-10, x_max=10, z_min=0, z_max=50, height=0):
     n1 = npts_z
@@ -39,12 +24,65 @@ def make_xy_plane(npts_x=5, npts_z=10, x_min=-10, x_max=10, z_min=0, z_max=50, h
     objp[:, 1] = height
     return objp
 
+def plane_intersect(rays,tvec,p0=np.array([0,0,0]),normal=np.array([0,1,0])):
+    n = normal.T
+    l = rays
+    l0 = tvec
+    a = (p0 - l0).dot(n)
+    b = l.dot(n) + 1e-20
+    d = a / b
+    d = np.expand_dims(d,axis=1)
+    p = d*l + l0
+    return p
+
 def make_cube(n=50, x_min=-1, x_max=1, y_min=-1, y_max=1, z_min=0, z_max=5):
-    z_step = float(z_max - z_min) / n
-    y_step = float(y_max - y_min) / n
-    x_step = float(x_max - x_min) / n
-    objp = np.mgrid[x_min:x_max:x_step, y_min:y_max:y_step, z_min:z_max:z_step].T.reshape(-1, 3)
+    # z_step = float(z_max - z_min) / n
+    # y_step = float(y_max - y_min) / n
+    # x_step = float(x_max - x_min) / n
+    # objp = np.mgrid[x_min:x_max:x_step, y_min:y_max:y_step, z_min:z_max:z_step].T.reshape(-1, 3)
+
+    objp = np.array([
+                    [x_min, y_min, z_min],
+                    [x_min, y_min, z_max],
+                    [x_min, y_max, z_max],
+                    [x_min, y_max, z_min],
+                    [x_max, y_min, z_min],
+                    [x_max, y_min, z_max],
+                    [x_max, y_max, z_max],
+                    [x_max, y_max, z_min]], dtype=np.float32)
+
     return objp
+
+def add_points_on_faces(cube):
+    planes = [[0, 1, 2, 3],
+              [4, 5, 6, 7],
+              [0, 4, 7, 3],
+              [1, 5, 6, 2],
+              [0, 1, 5, 4],
+              [3, 2, 6, 7]]
+    points = []
+    for plane in enumerate(planes):
+        points = np.meshgrid()
+
+
+def draw_cube_faces(img, cube, zbuffer):
+    planes = [[0, 1, 2, 3],
+              [4, 5, 6, 7],
+              [0, 4, 7, 3],
+              [1, 5, 6, 2],
+              [0, 1, 5, 4],
+              [3, 2, 6, 7],
+              ]
+    cmap = cv2.applyColorMap(np.arange(0, 255, 255/8, dtype=np.uint8), cv2.COLORMAP_AUTUMN).tolist()
+    planes2 = []
+    for i, plane in enumerate(planes):
+        zavg = zbuffer[plane].mean(0)
+        clr = cmap[i][0] + [1.0-zavg/3.0]
+        planes2.append((zavg, cube[plane], clr))
+    planes2 = sorted(planes2, key=lambda x:x[0], reverse=False)
+    for zm, plane, clr in planes2:
+        cv2.fillConvexPoly(img, plane, clr)
+
 
 def dist2undist_cv(pts, K, dist_coeffs):
     im_grid_cv = np.expand_dims(pts, axis=0)
@@ -74,18 +112,10 @@ def world_to_img(objp, rvec, tvec, K, dist_coeffs, height, width):
     else:
         R = rvec
     T = -R.dot(tvec)
-    #filter points that are behind the camera
-    # objp = filter_3d(objp, tvec)
-    # if len(objp) == 0:
-    #     return np.array([]), np.array([]), np.array([])
-
     img_grid = cv2.projectPoints(objp, R, T, K, dist_coeffs)[0].squeeze().reshape(-1, 2).astype(np.int32)
-
     ids = filter_2d(img_grid, height, width)
-    objp = objp[ids]
     img_grid2 = img_grid[ids]
     zbuffer = 1./(objp[:, 2]+0.1)
-
     return img_grid2, img_grid, zbuffer
 
 def rotate(objp, cog, rspeed):
@@ -154,11 +184,12 @@ if __name__ == '__main__':
     dist = np.array([0.0, 0.0, 0.0, 0.0, 0.0], dtype=dtype).reshape(5, )
 
     plane = make_xy_plane(npts_x=3, npts_z=100, x_min=-10, x_max=10, z_min=0, z_max=7)
-    cube = make_cube(n=10, x_min=-1, x_max=1, y_min=-2, y_max=0, z_min=1.2, z_max=1.2+2)
+    #cube = make_cube(n=5, x_min=-1, x_max=1, y_min=-2, y_max=0, z_min=1.2, z_max=1.2+2)
+    cube = make_cube(n=5, x_min=-1, x_max=1, y_min=-2, y_max=0, z_min=1.2, z_max=1.2 + 2)
     cube_cog = np.array([0,-1,2.2], dtype=dtype)
 
     rvec = np.array([0, 0, 0], dtype=dtype)  # PITCH, YAW, ROLL
-    tvec = np.array([-1, -4, -5], dtype=dtype)
+    tvec = np.array([-1, -4, -4], dtype=dtype)
 
     last_img = np.full((height, width, 3), 127, dtype=np.uint8)
     img = np.full((height, width, 3), 127, dtype=np.uint8)
@@ -175,7 +206,7 @@ if __name__ == '__main__':
     while 1:
 
 
-        start = time.time()
+
         if stop_iter == 0:
             last_img[...] = img
             img[...] = 127
@@ -191,24 +222,32 @@ if __name__ == '__main__':
 
 
         cube2d, fullcube2d, cube2dz = world_to_img(cube, rvec, tvec, K, dist, height, width) #TODO: put on GPU
+
         plane2d, fullplane2d, planez = world_to_img(plane, rvec, tvec, K, dist, height, width) #TODO: put on GPU
-        draw_points(plane2d, img, zbuffer=planez, color=(255, 0, 255))
+        start = time.time()
+
+        draw_cube_faces(img, fullcube2d, cube2dz)
+        #draw_points(plane2d, img, zbuffer=planez, color=(255, 0, 255))
         draw_points(cube2d, img, zbuffer=cube2dz, color=(0, 0, 255))
+
         diff = img.astype(np.float32)/255.0-last_img.astype(np.float32)/255.0 + 0.5
-        tl, br = get_square(cube2d)
+        tl, br = get_square(fullcube2d)
 
         show = img.copy()
 
         if old_cube2d is not None:
             draw_flow(show, old_cube2d, fullcube2d)
-        if old_plane2d is not None:
-            draw_flow(show, old_plane2d, fullplane2d)
+
+        print(time.time() - start, ' s')
+
 
         old_cube2d = fullcube2d
         old_plane2d = fullplane2d
 
         if tl:
-            cv2.rectangle(diff, tl, br, (255,0,0), 2)
+            color = (0,0,0)
+            cv2.rectangle(show, tl, br, color, 2)
+            cv2.putText(show, "a cube!", br, cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
 
             tl2, br2 = get_square(fullcube2d)
             fullwidth = br2[0]-tl2[0]
@@ -248,10 +287,9 @@ if __name__ == '__main__':
         if np.random.rand() < 0.01:
             stop_iter = 3
 
-        #print(time.time()-start, ' s')
+
 
         cv2.imshow('image', show)
-        cv2.imshow('diff', diff)
-        key = cv2.waitKey(3)
+        key = cv2.waitKey(0)
         if key == 27:
             break
