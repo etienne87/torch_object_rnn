@@ -104,7 +104,7 @@ class ConvLSTM(nn.Module):
 
         self.cin = nInputPlane
         self.cout = nOutputPlane
-        self.conv1 = nn.Conv2d(nInputPlane, 4 * nOutputPlane, kernel_size=kernel_size, stride=stride, dilation=dilation,
+        self.conv1 = nn.Conv2d(nInputPlane, 3 * nOutputPlane, kernel_size=kernel_size, stride=stride, dilation=dilation,
                                padding=padding,
                                bias=True)
 

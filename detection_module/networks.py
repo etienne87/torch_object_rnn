@@ -53,8 +53,7 @@ class ConvRNNFeatureExtractor(nn.Module):
     def reset(self):
         for name, module in self._modules.iteritems():
             if isinstance(module, ConvLSTM) or \
-               isinstance(module, ConvGRU) or \
-               isinstance(module, ConvQRNN):
+               isinstance(module, ConvGRU):
                 module.timepool.reset()
 
 

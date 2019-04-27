@@ -17,6 +17,7 @@ class SSDBoxCoder:
         self.default_boxes_xyxy =  change_box_order(self.default_boxes, 'xywh2xyxy')
         self.iou_threshold = 0.5
         self.use_cuda = False
+        self.variances = (0.2, 0.2)
 
     def reset(self, ssd_model):
         self.steps = ssd_model.steps
@@ -125,9 +126,8 @@ class SSDBoxCoder:
         boxes = change_box_order(boxes, 'xyxy2xywh')
         default_boxes = self.default_boxes # change_box_order(default_boxes, 'xyxy2xywh')
 
-        variances = (0.1, 0.2)
-        loc_xy = (boxes[:,:2]-default_boxes[:,:2]) / default_boxes[:,2:] / variances[0]
-        loc_wh = torch.log(boxes[:,2:]/default_boxes[:,2:]) / variances[1]
+        loc_xy = (boxes[:,:2]-default_boxes[:,:2]) / default_boxes[:,2:] / self.variances[0]
+        loc_wh = torch.log(boxes[:,2:]/default_boxes[:,2:]) / self.variances[1]
         loc_targets = torch.cat([loc_xy,loc_wh], 1)
         cls_targets = 1 + labels[index.clamp(min=0)]
         cls_targets[index<0] = 0
@@ -146,9 +146,9 @@ class SSDBoxCoder:
           boxes: (tensor) bbox locations, sized [#obj,4].
           labels: (tensor) class labels, sized [#obj,].
         '''
-        variances = (0.1, 0.2)
-        xy = loc_preds[:,:2] * variances[0] * self.default_boxes[:,2:] + self.default_boxes[:,:2]
-        wh = torch.exp(loc_preds[:,2:]*variances[1]) * self.default_boxes[:,2:]
+        xy = loc_preds[:,:2] * self.variances[0] * self.default_boxes[:,2:] + self.default_boxes[:,:2]
+        wh = torch.exp(loc_preds[:,2:] * self.variances[1]) * self.default_boxes[:,2:]
+
         box_preds = torch.cat([xy-wh/2, xy+wh/2], 1)
 
         if RELATIVE_ANCHORS:
