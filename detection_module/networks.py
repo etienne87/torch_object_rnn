@@ -13,9 +13,9 @@ class ConvRNNFeatureExtractor(nn.Module):
         self.conv1 = Conv2d(cin, base, kernel_size=7, stride=2, padding=3, addcoords=False)
         self.conv2 = Conv2d(base, base * 2, kernel_size=7, stride=2, padding=3)
         self.conv3 = ConvGRU(base * 2, base * 4, kernel_size=_kernel_size, stride=_stride, padding=_padding)
-        self.conv4 = ConvGRU(base * 4, base * 8, kernel_size=_kernel_size, stride=_stride, padding=_padding)
-        self.conv5 = ConvGRU(base * 8, base * 8, kernel_size=_kernel_size, stride=_stride, padding=_padding)
-        self.conv6 = ConvGRU(base * 8, base * 16, kernel_size=_kernel_size, stride=_stride, padding=_padding)
+        self.conv4 = ConvGRU(base * 4, base * 4, kernel_size=_kernel_size, stride=1, dilation=1, padding=3)
+        self.conv5 = ConvGRU(base * 4, base * 4, kernel_size=_kernel_size, stride=1, dilation=2, padding=3)
+        self.conv6 = ConvGRU(base * 4, base * 4, kernel_size=_kernel_size, stride=1, dilation=3, padding=3*2)
 
         self.end_point_channels = [self.conv3.cout,  # 8
                                    self.conv4.cout,  # 16

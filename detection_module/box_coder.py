@@ -3,7 +3,6 @@ import math
 import torch
 from box import box_iou, box_nms, change_box_order
 
-RELATIVE_ANCHORS = True
 
 class SSDBoxCoder:
     def __init__(self, ssd_model):
@@ -39,19 +38,12 @@ class SSDBoxCoder:
         for i, fm_size in enumerate(self.fm_sizes):
             f_y, f_x = fm_size
             s_y, s_x = self.steps[i]
-            #for h, w in itertools.product(range(fm_size), repeat=2):
+            print('sy, sx: ', s_y, s_x)
+            s = self.box_sizes[i]
             for h in range(f_y):
                 for w in range(f_x):
-                    # cx = (w + 0.5) * self.steps[i]
-                    # cy = (h + 0.5) * self.steps[i]
                     cx = (w + 0.5) * s_x
                     cy = (h + 0.5) * s_y
-                    s = self.box_sizes[i]
-
-                    if RELATIVE_ANCHORS:
-                        cx /= self.width
-                        cy /= self.height
-                        s /= min(self.width, self.height)
 
                     boxes.append((cx, cy, s, s))
 
@@ -89,13 +81,6 @@ class SSDBoxCoder:
             v, i = x.max(0)
             j = v.max(0)[1].item() #was (0)[1][0] which causes Pytorch Warning for Scalars
             return (i[j], j)
-
-        if RELATIVE_ANCHORS:
-            boxes[:,0] /= float(self.width)
-            boxes[:,2] /= float(self.width)
-            boxes[:,1] /= float(self.height)
-            boxes[:,3] /= float(self.height)
-
 
         default_boxes = self.default_boxes_xyxy
 
@@ -150,12 +135,6 @@ class SSDBoxCoder:
         wh = torch.exp(loc_preds[:,2:] * self.variances[1]) * self.default_boxes[:,2:]
 
         box_preds = torch.cat([xy-wh/2, xy+wh/2], 1)
-
-        if RELATIVE_ANCHORS:
-            box_preds[:,0] *= float(self.width)
-            box_preds[:,2] *= float(self.width)
-            box_preds[:,1] *= float(self.height)
-            box_preds[:,3] *= float(self.height)
 
         boxes = []
         labels = []
