@@ -8,6 +8,7 @@ import torch.backends.cudnn as cudnn
 from detection_module.ssd import SSD
 from detection_module.box_coder import SSDBoxCoder
 from detection_module.ssd_loss import SSDLoss
+from detection_module.focal_loss import FocalLoss
 from detection_module.trainer import SSDTrainer
 from detection_module.networks import ConvRNNFeatureExtractor, FPNRNNFeatureExtractor
 from detection_module.utils import StreamDataset
@@ -15,12 +16,13 @@ from toy_pbm_detection import SquaresVideos
 
 def parse_args():
     parser = argparse.ArgumentParser(description='PyTorch SSD Training')
+    parser.add_argument('logdir', type=str, help='where to save')
     parser.add_argument('--path', type=str, default='', help='path to dataset')
     parser.add_argument('--batchsize', type=int, default=8, help='batchsize')
     parser.add_argument('--lr', default=1e-3, type=float, help='learning rate')
     parser.add_argument('--resume', action='store_true', help='resume from checkpoint')
-    parser.add_argument('--train_iter', type=int, default=200, help='#iter / train epoch')
-    parser.add_argument('--test_iter', type=int, default=200, help='#iter / test epoch')
+    parser.add_argument('--train_iter', type=int, default=100, help='#iter / train epoch')
+    parser.add_argument('--test_iter', type=int, default=10, help='#iter / test epoch')
     parser.add_argument('--epochs', type=int, default=1000, help='num epochs to train')
     parser.add_argument('--checkpoint', default='./checkpoints/', type=str, help='checkpoint path')
     parser.add_argument('--cuda', action='store_true', help='use cuda')
@@ -33,7 +35,7 @@ def main():
 
     os.environ['OMP_NUM_THREADS'] = '1'
 
-    classes, cin, time, height, width = 2, 1, 25, 128, 128
+    classes, cin, time, height, width = 2, 1, 10, 128, 128
 
     nrows = 4
 
@@ -47,8 +49,9 @@ def main():
                                  encode_all_timesteps=True)
     dataset.num_frames = args.train_iter
 
-    dataloader = StreamDataset(dataset, args.train_iter)
-    test_dataloader = StreamDataset(test_dataset, args.test_iter)
+    dataloader = dataset
+    # dataloader = StreamDataset(dataset, args.train_iter)
+    # test_dataloader = StreamDataset(test_dataset, args.test_iter)
     #dataloader = dataset
     # Model
     print('==> Building model..')
@@ -72,14 +75,15 @@ def main():
         box_coder.cuda()
 
 
-    criterion = SSDLoss(num_classes=classes)
+    #criterion = SSDLoss(num_classes=classes)
+    criterion = FocalLoss(num_classes=classes)
     optimizer = optim.Adam(net.parameters(), lr=args.lr, betas=(0.9, 0.99), eps=1e-8, weight_decay=0)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.99)
-    trainer = SSDTrainer(net, box_coder, criterion, optimizer, all_timesteps=True)
+    trainer = SSDTrainer(args.logdir, net, box_coder, criterion, optimizer, all_timesteps=True)
 
     for epoch in range(start_epoch, args.epochs):
         trainer.train(epoch, dataloader, args)
-        trainer.val(epoch, test_dataloader, args)
+        # trainer.val(epoch, test_dataloader, args)
         trainer.test(epoch, test_dataset, nrows, args)
         trainer.save_ckpt(epoch, args)
         trainer.writer.add_scalar('learning rate', optimizer.param_groups[0]['lr'], epoch)

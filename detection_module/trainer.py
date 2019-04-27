@@ -13,14 +13,14 @@ class SSDTrainer(object):
     class wrapping training/ validation/ testing
     """
 
-    def __init__(self, net, box_coder, criterion, optimizer, all_timesteps=False):
+    def __init__(self, logdir, net, box_coder, criterion, optimizer, all_timesteps=False):
         self.net = net
         self.box_coder = box_coder
         self.criterion = criterion
         self.optimizer = optimizer
         self.all_timesteps = all_timesteps
         self.make_image = utils.single_frame_display
-        self.writer = SummaryWriter()
+        self.writer = SummaryWriter(logdir)
 
     def __del__(self):
         self.writer.close()
@@ -38,7 +38,6 @@ class SSDTrainer(object):
             if batch_idx > 0:
                 runtime_stats['dataloader'] += time.time() - start
             inputs, targets = data
-
             if args.cuda:
                 inputs = inputs.cuda()
 
