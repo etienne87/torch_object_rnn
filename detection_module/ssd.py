@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 import math
-
+from deform_conv import ConvOffset2D
 
 def get_box_params(sources, h, w):
     image_size = float(min(h, w))
@@ -53,6 +53,7 @@ class SSD(nn.Module):
         self.cls_layers = nn.ModuleList()
 
         #shared heads
+        self.conv_offset = ConvOffset2D(self.in_channels[0])
         self.loc_layer = nn.Conv2d(self.in_channels[0], self.num_anchors[0]*4, kernel_size=3, padding=1)
         self.cls_layer = nn.Conv2d(self.in_channels[0], self.num_anchors[0]* self.num_classes, kernel_size=3, padding=1)
 
@@ -75,6 +76,7 @@ class SSD(nn.Module):
         xs = self.extractor(x)
         for i, x in enumerate(xs):
             #loc_pred = self.loc_layers[i](x)
+            x = self.conv_offset(x)
             loc_pred = self.loc_layer(x)
             loc_pred = loc_pred.permute(0, 2, 3, 1).contiguous()
             loc_preds.append(loc_pred.view(loc_pred.size(0), -1, 4))

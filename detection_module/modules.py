@@ -1,5 +1,4 @@
 import torch.nn as nn
-from torch.autograd import Function
 from torch.nn import functional as F
 import torch
 
@@ -143,6 +142,8 @@ class ConvGRUCell(nn.Module):
 
         self.reset()
 
+        self.zoneout_prob = 0.9
+        self.dropout_rate = 0.1
         #Chrono Init
         # Tmax = 3000
         # self.conv_h2zr.bias.data.fill_(0)
@@ -186,6 +187,7 @@ class ConvGRUCell(nn.Module):
                 h = (1-z) * self.prev_h + z * tmp
             else:
                 h = z * tmp
+
 
             result.append(h.unsqueeze(0))
             self.prev_h = h
