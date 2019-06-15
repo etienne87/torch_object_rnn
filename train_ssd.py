@@ -5,13 +5,13 @@ import torch
 import torch.optim as optim
 import torch.backends.cudnn as cudnn
 
-from detection_module.ssd import SSD
-from detection_module.box_coder import SSDBoxCoder
-from detection_module.ssd_loss import SSDLoss
-from detection_module.focal_loss import FocalLoss
-from detection_module.trainer import SSDTrainer
-from detection_module.networks import ConvRNNFeatureExtractor, FPNRNNFeatureExtractor
-from detection_module.utils import StreamDataset
+from core.ssd import SSD
+from core.box_coder import SSDBoxCoder
+from core.box_coder2 import RetinaBoxCoder
+from core.ssd_loss import SSDLoss
+from core.focal_loss import FocalLoss
+from core.trainer import SSDTrainer
+from core.networks import ConvRNNFeatureExtractor
 from toy_pbm_detection import SquaresVideos
 
 def parse_args():
@@ -41,18 +41,11 @@ def main():
 
     # Dataset
     print('==> Preparing dataset..')
-    dataset = SquaresVideos(t=time, c=cin, h=height, w=width, batchsize=args.batchsize, normalize=False, cuda=args.cuda,
-                            encode_all_timesteps=True)
-
-    test_dataset = SquaresVideos(t=time, c=cin, h=height, w=width, max_stops=300,
-                                 batchsize=args.batchsize, normalize=False, cuda=args.cuda,
-                                 encode_all_timesteps=True)
+    dataset = SquaresVideos(t=time, c=cin, h=height, w=width, batchsize=args.batchsize, normalize=False)
+    test_dataset = SquaresVideos(t=time, c=cin, h=height, w=width, batchsize=args.batchsize, max_stops=300, normalize=False)
     dataset.num_frames = args.train_iter
-
     dataloader = dataset
-    # dataloader = StreamDataset(dataset, args.train_iter)
-    # test_dataloader = StreamDataset(test_dataset, args.test_iter)
-    #dataloader = dataset
+
     # Model
     print('==> Building model..')
     net = SSD(feature_extractor=ConvRNNFeatureExtractor, num_classes=classes, cin=cin, height=height, width=width)
@@ -77,7 +70,7 @@ def main():
 
     #criterion = SSDLoss(num_classes=classes)
     criterion = FocalLoss(num_classes=classes)
-    optimizer = optim.Adam(net.parameters(), lr=args.lr, betas=(0.9, 0.99), eps=1e-8, weight_decay=0)
+    optimizer = optim.Adam(net.parameters(), lr=args.lr, betas=(0.9, 0.999), eps=1e-8, weight_decay=0)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.99)
     trainer = SSDTrainer(args.logdir, net, box_coder, criterion, optimizer, all_timesteps=True)
 
