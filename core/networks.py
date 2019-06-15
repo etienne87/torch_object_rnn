@@ -1,6 +1,6 @@
 import torch.nn as nn
-from modules import Conv2d, ConvLSTM, ConvGRU, batch_to_time, time_to_batch
-from torch.nn import functional as F
+from modules import Conv2d, ConvLSTM, ConvGRU, SpatialGRU, batch_to_time, time_to_batch
+
 
 class ConvRNNFeatureExtractor(nn.Module):
     def __init__(self, cin=1):
@@ -10,7 +10,9 @@ class ConvRNNFeatureExtractor(nn.Module):
         self.conv1 = Conv2d(cin, base, kernel_size=7, stride=2, padding=3, addcoords=False)
         self.conv2 = Conv2d(base, base * 2, kernel_size=7, stride=2, padding=3)
 
-        self.conv3 = ConvGRU(base * 2, base * 4, kernel_size=7, stride=2, padding=3)
+        self.sp0 = SpatialGRU(base * 2, base * 4, 1, 1, 0)
+
+        self.conv3 = ConvGRU(base * 4, base * 4, kernel_size=7, stride=2, padding=3)
         self.conv4 = ConvGRU(base * 4, base * 4, kernel_size=7, stride=1, dilation=1, padding=3)
         self.conv5 = ConvGRU(base * 4, base * 4, kernel_size=7, stride=1, dilation=2, padding=3)
         self.conv6 = ConvGRU(base * 4, base * 4, kernel_size=7, stride=1, dilation=3, padding=3*2)
@@ -28,6 +30,7 @@ class ConvRNNFeatureExtractor(nn.Module):
         x0, n = time_to_batch(x)
         x1 = self.conv1(x0)
         x2 = self.conv2(x1)
+        x2 = self.sp0(x2)
         x2 = batch_to_time(x2, n)
 
         x3 = self.conv3(x2)

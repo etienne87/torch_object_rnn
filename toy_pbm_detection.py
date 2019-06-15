@@ -180,9 +180,9 @@ class MovingSquare:
             self.stop_num -= 1
 
         v = np.sqrt(self.vx ** 2 + self.vy ** 2 + self.vs ** 2)
-        if np.random.rand() < 0.1 and v < 5 and self.iter > 10:
-            self.stop_num = np.random.randint(1, self.max_stop)
-
+        # if np.random.rand() < 0.001 and v < 5 and self.iter > 10:
+        #     self.stop_num = np.random.randint(1, self.max_stop)
+        #
         if np.random.rand() < 0.01:
             self.reset_speed()
 
@@ -198,10 +198,11 @@ class SquareAnimation:
      Responsible for endless WhiteSquare Animation
     """
 
-    def __init__(self, t=10, h=300, w=300, c=1, max_stop=15):
+    def __init__(self, t=10, h=300, w=300, c=1, max_stop=15, mode='none'):
         self.height = h
         self.width = w
         self.channels = c
+        self.mode = mode
 
         self.num_objects = 1 #np.random.randint(1, 5)
         self.objects = []
@@ -215,8 +216,6 @@ class SquareAnimation:
             object.reset()
         self.prev_img = torch.zeros(self.channels, self.height, self.width)
         self.img = torch.zeros(self.channels, self.height, self.width)
-        self.flow = torch.zeros(2, self.height, self.width)
-
 
     def run(self):
         self.prev_img[...] = self.img
@@ -225,43 +224,50 @@ class SquareAnimation:
         boxes = np.zeros((len(self.objects), 5), dtype=np.float32)
         for i, object in enumerate(self.objects):
             x1, y1, x2, y2 = object.run()
-            # assert(object.color.size(0) == self.channels)
-            # print(object.color.size(0), ' channels: ', self.channels)
+
             for c in range(self.channels):
                 self.img[c, y1:y2, x1:x2] += object.color[c]
             boxes[i] = np.array([x1, y1, x2, y2, 0])
 
-        # self.img += (torch.rand(self.channels,self.height,self.width)>0.99).float()
-
-        diff = self.img - self.prev_img
 
         self.first_iteration = False
 
-        return diff, boxes
+        # diff = self.img - self.prev_img
+        # if self.mode == 'diff':
+        #     output = diff
+        # else:
+        #     output = self.img
+        #
+        # # if np.random.rand() < 0.8:
+        # #     output[...] = 0
+        #
+        # # noise
+        # output -= 0.5 * (torch.rand(self.height, self.width) > 0.99).float()
+        # output += 0.5 * (torch.rand(self.height, self.width) > 0.99).float()
+        # output *= (torch.rand(self.height, self.width) > 0.2).float()
+
+        output = self.img
+        return output, boxes
 
 
 class SquaresVideos:
     """
     Toy Detection DataBase for video detection.
-    Make a Rectangle filled with white or black and its bbox
-    The Rectangle moves continuously, so network can infer motion.
-    This simulates DVS events Histograms
+    Move a Patch
     """
 
     def __init__(self, batchsize=32, t=10, h=300, w=300, c=3,
-                 normalize=False, cuda=False, encode_all_timesteps=False, max_stops=30):
+                 normalize=False, max_stops=30, mode='diff'):
         self.batchsize = batchsize
         self.num_frames = 100000
         self.channels = c
         self.time, self.height, self.width = t, h, w
-        self.cuda = cuda
         self.rate = 0
         self.normalize = normalize
         self.labelmap = ['square']
         self.multi_aspect_ratios = False
         self.max_stops = max_stops
-        self.animations = [SquareAnimation(t, h, w, c, self.max_stops) for i in range(self.batchsize)]
-        self.encode_all_timesteps = encode_all_timesteps
+        self.animations = [SquareAnimation(t, h, w, c, self.max_stops, mode) for i in range(self.batchsize)]
 
     def reset(self):
         for anim in self.animations:
@@ -272,29 +278,19 @@ class SquaresVideos:
         self.animations = [SquareAnimation(self.time, height, width, self.channels, self.max_stops) for i in
                            range(self.batchsize)]
 
-    def cuda(self, cuda):
-        self.cuda = cuda
-
     def __len__(self):
         return self.num_frames
 
 
     def next(self):
         x = torch.zeros(self.time, self.batchsize, self.channels, self.height, self.width)
-        if self.encode_all_timesteps:
-            y = [[] for t in range(self.time)]
-        else:
-            y = []
+        y = [[] for t in range(self.time)]
 
         for i, anim in enumerate(self.animations):
             for t in range(self.time):
                 im, boxes = anim.run()
                 x[t, i, :] = im
-                if self.encode_all_timesteps:
-                    y[t].append(torch.from_numpy(boxes))
-
-            if not self.encode_all_timesteps:
-                y.append(torch.from_numpy(boxes))
+                y[t].append(torch.from_numpy(boxes))
 
         return x, y
 
@@ -302,11 +298,12 @@ class SquaresVideos:
         for _ in range(len(self)):
             yield self.next()
 
-if __name__ == '__main__':
-    from detection_module.utils import boxarray_to_boxes, draw_bboxes, make_single_channel_display, StreamDataset
 
-    test = SquaresVideos(t=10, c=1, h=128, w=128, batchsize=1, max_stops=300, encode_all_timesteps=True)
-    dataloader = StreamDataset(test, max_iter=1000)
+if __name__ == '__main__':
+    from core.utils import boxarray_to_boxes, draw_bboxes, make_single_channel_display
+
+    dataloader = SquaresVideos(t=10, c=3, h=64, w=64, batchsize=1)
+
     start = 0
 
     for i, (x, y) in enumerate(dataloader):
@@ -317,7 +314,7 @@ if __name__ == '__main__':
 
             for t in range(x.size(0)):
                 boxes = y[t][j].cpu()
-                bboxes = boxarray_to_boxes(boxes[:, :4], boxes[:, 4], test.labelmap)
+                bboxes = boxarray_to_boxes(boxes[:, :4], boxes[:, 4], dataloader.labelmap)
 
 
                 img = x[t, j, :].numpy().astype(np.float32)
@@ -325,13 +322,13 @@ if __name__ == '__main__':
                     img = make_single_channel_display(img[0], -1, 1)
                 else:
                     img = np.moveaxis(img, 0, 2)
-                    show = np.zeros((test.height, test.width, 3), dtype=np.float32)
+                    show = np.zeros((dataloader.height, dataloader.width, 3), dtype=np.float32)
                     show[...] = img
                     img = show
 
-                img = draw_bboxes(img, bboxes)
+                #img = draw_bboxes(img, bboxes)
                 cv2.imshow('example', img)
-                key = cv2.waitKey(10)
+                key = cv2.waitKey(5)
                 if key == 27:
                     exit()
 

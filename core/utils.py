@@ -26,6 +26,7 @@ def boxarray_to_boxes(boxes, labels, labelmap):
 # Training
 def encode_boxes(targets, box_coder, cuda, all_timesteps=True):
     loc_targets, cls_targets = [], []
+    w_targets = []
 
     if all_timesteps:
         for t in range(len(targets)):
@@ -33,9 +34,10 @@ def encode_boxes(targets, box_coder, cuda, all_timesteps=True):
                 boxes, labels = targets[t][i][:, :-1], targets[t][i][:, -1]
                 if cuda:
                     boxes, labels = boxes.cuda(), labels.cuda()
-                loc_t, cls_t = box_coder.encode(boxes, labels)
+                loc_t, cls_t, w_t = box_coder.encode(boxes, labels)
                 loc_targets.append(loc_t.unsqueeze(0))
                 cls_targets.append(cls_t.unsqueeze(0).long())
+                w_targets.append(w_t.unsqueeze(0))
     else:
         if isinstance(targets[0], list):
             targets = [item[-1] for item in targets] #take last item
@@ -49,12 +51,14 @@ def encode_boxes(targets, box_coder, cuda, all_timesteps=True):
 
     loc_targets = torch.cat(loc_targets, dim=0)  # (N,#anchors,4)
     cls_targets = torch.cat(cls_targets, dim=0)  # (N,#anchors,C)
+    w_targets = torch.cat(w_targets, dim=0) # (N,#anchors)
 
     if cuda:
         loc_targets = loc_targets.cuda()
         cls_targets = cls_targets.cuda()
+        w_targets = w_targets.cuda()
 
-    return loc_targets, cls_targets
+    return loc_targets, cls_targets, w_targets
 
 
 # batch to time for rank 3 tensors

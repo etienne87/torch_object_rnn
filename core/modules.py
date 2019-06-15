@@ -1,7 +1,7 @@
 import torch.nn as nn
 from torch.nn import functional as F
 import torch
-
+import math
 
 def time_to_batch(x):
     t, n, c, h, w = x.size()
@@ -120,6 +120,110 @@ class ConvLSTM(nn.Module):
         return h
 
 
+class SpatialGRUCell(nn.Module):
+    r"""SpatialGRUCell module, applies sequential part of LSTM.
+        Row-by-Row or Col-by-Col
+    """
+
+    def __init__(self, hidden_dim, kernel_size, bias, dim=3):
+        super(SpatialGRUCell, self).__init__()
+        self.hidden_dim = hidden_dim
+        self.spdim = dim
+
+        # Fully-Gated
+        self.conv_h2zr = nn.Sequential(
+                         nn.BatchNorm1d(self.hidden_dim),
+                         nn.Conv1d(in_channels=self.hidden_dim,
+                                   out_channels=2 * self.hidden_dim,
+                                   kernel_size=kernel_size,
+                                   padding=1,
+                                   bias=bias))
+
+        self.conv_h2h = nn.Sequential(
+                        nn.BatchNorm1d(self.hidden_dim),
+                        nn.Conv1d(in_channels=self.hidden_dim,
+                                  out_channels=self.hidden_dim,
+                                  kernel_size=kernel_size,
+                                  padding=1,
+                                  bias=bias))
+
+        self.reset()
+
+    def forward(self, xi):
+        xiseq = xi.split(1, self.spdim)  # n,c,h,w -> h x (n,c,w) or w x (n,c,h)
+
+        # if self.prev_h is not None:
+        #     self.prev_h = self.prev_h.detach()
+
+        self.reset()
+
+        result = []
+        for t, xt in enumerate(xiseq):
+            xt = xt.squeeze(self.spdim)
+
+            # split x & h in 3
+            x_zr, x_h = xt[:, :2 * self.hidden_dim], xt[:, 2 * self.hidden_dim:]
+
+            if self.prev_h is not None:
+                tmp = self.conv_h2zr(self.prev_h) + x_zr
+            else:
+                tmp = x_zr
+
+            cc_z, cc_r = torch.split(tmp, self.hidden_dim, dim=1)
+            z = torch.sigmoid(cc_z)
+            r = torch.sigmoid(cc_r)
+
+            if self.prev_h is not None:
+                tmp = self.conv_h2h(r * self.prev_h) + x_h
+            else:
+                tmp = x_h
+            tmp = torch.tanh(tmp)
+
+            if self.prev_h is not None:
+                h = (1 - z) * self.prev_h + z * tmp
+            else:
+                h = z * tmp
+
+
+            result.append(h.unsqueeze(self.spdim))
+            self.prev_h = h
+
+        res = torch.cat(result, dim=self.spdim)
+        return res
+
+    def reset(self):
+        self.prev_h = None
+
+
+class SpatialGRU(nn.Module):
+    r"""ConvGRU module.
+    """
+    def __init__(self, nInputPlane, nOutputPlane, kernel_size, stride, padding, dilation=1):
+        super(SpatialGRU, self).__init__()
+
+        self.cin = nInputPlane
+        self.cout = nOutputPlane
+        self.conv1 = nn.Conv2d(nInputPlane, 3 * nOutputPlane, kernel_size=kernel_size, stride=stride, dilation=dilation,
+                               padding=padding,
+                               bias=True)
+
+        self.bn1 = nn.BatchNorm2d(nInputPlane)
+
+        self.conv2 = nn.Conv2d(nOutputPlane, 3 * nOutputPlane, kernel_size=kernel_size, stride=stride, dilation=dilation,
+                               padding=padding,
+                               bias=True)
+
+        self.bn2 = nn.BatchNorm2d(nOutputPlane)
+
+        self.xpool = SpatialGRUCell(nOutputPlane, 3, True, dim=3)
+        self.ypool = SpatialGRUCell(nOutputPlane, 3, True, dim=2)
+
+    def forward(self, x):
+        x = self.xpool(self.conv1(self.bn1(x)))
+        h = self.ypool(self.conv2(self.bn2(x)))
+        return h
+
+
 class ConvGRUCell(nn.Module):
     r"""ConvGRUCell module, applies sequential part of LSTM.
     """
@@ -141,18 +245,6 @@ class ConvGRUCell(nn.Module):
                                   bias=bias)
 
         self.reset()
-
-        self.zoneout_prob = 0.9
-        self.dropout_rate = 0.1
-        #Chrono Init
-        # Tmax = 3000
-        # self.conv_h2zr.bias.data.fill_(0)
-        # self.conv_h2zr.bias.data[hidden_dim: 2 * hidden_dim] = \
-        #     -torch.log(nn.init.uniform_(self.conv_h2zr.bias.data[: hidden_dim], 1, Tmax - 1))
-        # self.conv_h2zr.bias.data[: hidden_dim] = -self.conv_h2zr.bias.data[hidden_dim: 2 * hidden_dim]
-        #
-        # self.conv_h2h.bias.data.fill_(0)
-        # self.conv_h2h.bias.data[: hidden_dim] = -self.conv_h2zr.bias.data[hidden_dim: 2 * hidden_dim]
 
 
     def forward(self, xi):
@@ -181,7 +273,7 @@ class ConvGRUCell(nn.Module):
                 tmp = self.conv_h2h(r * self.prev_h) + x_h
             else:
                 tmp = x_h
-            tmp = torch.sigmoid(tmp)
+            tmp = torch.tanh(tmp)
 
             if self.prev_h is not None:
                 h = (1-z) * self.prev_h + z * tmp
@@ -369,3 +461,93 @@ class UpSampleConv(nn.Module):
     def forward(self, x):
         conv1 = self.conv1(F.interpolate(x, scale_factor=self.scale_factor))
         return self.non_linearity(self.bn1(conv1))
+
+
+class HOGLayer(nn.Module):
+    def __init__(self, nbins=10, pool=8, max_angle=math.pi, stride=1, padding=1, dilation=1,
+                 mean_in=False, max_out=False):
+        super(HOGLayer, self).__init__()
+        self.nbins = nbins
+        self.stride = stride
+        self.padding = padding
+        self.dilation = dilation
+        self.pool = pool
+        self.max_angle = max_angle
+        self.max_out = max_out
+        self.mean_in = mean_in
+
+        mat = torch.FloatTensor([[1, 0, -1],
+                                 [2, 0, -2],
+                                 [1, 0, -1]])
+        mat = torch.cat((mat[None], mat.t()[None]), dim=0)
+        self.register_buffer("weight", mat[:,None,:,:])
+        self.pooler = nn.AvgPool2d(pool, stride=pool, padding=0, ceil_mode=False, count_include_pad=True)
+
+    def forward(self, x):
+        if self.mean_in:
+            return self.forward_v1(x)
+        else:
+            return self.forward_v2(x)
+
+    def forward_v1(self, x):
+        if x.size(1) > 1:
+            x = x.mean(dim=1)[:,None,:,:]
+
+        gxy = F.conv2d(x, self.weight, None, self.stride,
+                       self.padding, self.dilation, 1)
+        # 2. Mag/ Phase
+        mag = gxy.norm(dim=1)
+        norm = mag[:, None, :, :]
+        phase = torch.atan2(gxy[:, 0, :, :], gxy[:, 1, :, :])
+
+        # 3. Binning Mag with linear interpolation
+        phase_int = phase / self.max_angle * self.nbins
+        phase_int = phase_int[:, None, :, :]
+
+        n, c, h, w = gxy.shape
+        out = torch.zeros((n, self.nbins, h, w), dtype=torch.float, device=gxy.device)
+        out.scatter_(1, phase_int.floor().long() % self.nbins, norm)
+        out.scatter_add_(1, phase_int.ceil().long() % self.nbins, 1 - norm)
+
+        return self.pooler(out)
+
+    def forward_v2(self, x):
+        batch_size, in_channels, height, width = x.shape
+        weight = self.weight.repeat(in_channels, 1, 1, 1)
+        gxy = F.conv2d(x, weight, None, self.stride,
+                        self.padding, self.dilation, groups=in_channels)
+
+        gxy = gxy.view(batch_size, in_channels, 2, height, width)
+
+        if self.max_out:
+            gxy = gxy.max(dim=1)[0][:,None,:,:,:]
+
+        #2. Mag/ Phase
+        mags = gxy.norm(dim=2)
+        norms = mags[:,:,None,:,:]
+        phases = torch.atan2(gxy[:,:,0,:,:], gxy[:,:,1,:,:])
+
+        #3. Binning Mag with linear interpolation
+        phases_int = phases / self.max_angle * self.nbins
+        phases_int = phases_int[:,:,None,:,:]
+
+        out = torch.zeros((batch_size, in_channels, self.nbins, height, width),
+                          dtype=torch.float, device=gxy.device)
+        out.scatter_(2, phases_int.floor().long()%self.nbins, norms)
+        out.scatter_add_(2, phases_int.ceil().long()%self.nbins, 1 - norms)
+
+        out = out.view(batch_size, in_channels * self.nbins, height, width)
+        out = torch.cat((self.pooler(out), self.pooler(x)), dim=1)
+
+        return out
+
+if __name__ == '__main__':
+    n, c, h, w = 3, 16, 64, 64
+    x = torch.rand(n, c, h, w)
+
+
+    spnet = SpatialGRU(16, 32, 3, 1, 1)
+
+    y = spnet(x)
+
+    print(y.shape)

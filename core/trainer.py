@@ -44,9 +44,9 @@ class SSDTrainer(object):
             start = time.time()
             self.optimizer.zero_grad()
             loc_preds, cls_preds = self.net(inputs)
-            loc_targets, cls_targets = utils.encode_boxes(targets, self.box_coder, args.cuda, self.all_timesteps)
+            loc_targets, cls_targets, w_targets = utils.encode_boxes(targets, self.box_coder, args.cuda, self.all_timesteps)
 
-            loc_loss, cls_loss = self.criterion(loc_preds, loc_targets, cls_preds, cls_targets)
+            loc_loss, cls_loss = self.criterion(loc_preds, loc_targets, cls_preds, cls_targets, w_targets)
             loss = loc_loss + cls_loss
             loss.backward()
             self.optimizer.step()

@@ -88,8 +88,10 @@ class SSDBoxCoder:
 
         if self.use_cuda:
             index = torch.cuda.LongTensor(len(default_boxes)).fill_(-1)
+            weights = torch.cuda.FloatTensor(len(default_boxes)).fill_(1.0)
         else:
             index = torch.LongTensor(len(default_boxes)).fill_(-1)
+            weights = torch.FloatTensor(len(default_boxes)).fill_(1.0)
 
 
         masked_ious = ious.clone()
@@ -104,7 +106,10 @@ class SSDBoxCoder:
         mask = (index<0) & (ious.max(1)[0]>=self.iou_threshold)
         if mask.any():
             # https: // github.com / kuangliu / torchcv / issues / 23
-            index[mask] = ious[mask].max(1)[1]
+            weights[mask], index[mask] = ious[mask].max(1)
+
+            #weights[mask] = (weights[mask] - weights[mask].min())/(weights[mask].max() - weights[mask].min())
+            # index[mask] = ious[mask].max(1)[1]
             # index[mask] = ious[mask.nonzero().squeeze()].max(1)[1]
 
         boxes = boxes[index.clamp(min=0)]  # negative index not supported
@@ -116,7 +121,8 @@ class SSDBoxCoder:
         loc_targets = torch.cat([loc_xy,loc_wh], 1)
         cls_targets = 1 + labels[index.clamp(min=0)]
         cls_targets[index<0] = 0
-        return loc_targets, cls_targets
+        return loc_targets, cls_targets, weights
+
 
     def decode(self, loc_preds, cls_preds, score_thresh=0.6, nms_thresh=0.45):
         '''Decode predicted loc/cls back to real box locations and class labels.
