@@ -4,6 +4,7 @@ import os
 import argparse
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 import core.recurrent as rnn
 import core.utils as utils
@@ -49,13 +50,13 @@ class Warping(nn.Module):
                                             grid_h[None, :, :, None]), 3), False)
 
     def forward(self, img_1, disp_f):
-        warp_im_1 = nn.functional.grid_sample(img_1, disp_f.permute(0, 2, 3, 1).contiguous() + self.grid)
+        warp_im_1 = F.grid_sample(img_1, disp_f.permute(0, 2, 3, 1).contiguous() + self.grid)
 
         return warp_im_1
 
 
 class RAECell(nn.Module):
-    def __init__(self, inp):
+    def __init__(self, inp, mode='normal'):
         super(RAECell, self).__init__()
         self.conv1 = conv_bn(inp, 32, 1)
         self.conv2 = conv_dw(32, 64, 1)
@@ -69,23 +70,59 @@ class RAECell(nn.Module):
         self.unpool2 = nn.MaxUnpool2d(2, 2)
         self.unpool3 = nn.MaxUnpool2d(2, 2)
 
-        self.dconv3 = conv_lstm(128, 64, 1)
-        self.dconv2 = conv_lstm(64, 32, 1)
-        self.dconv1 = conv_lstm(32, 2) #predict the flow
 
-        self.warper = Warping(64, 64)
 
+        self.lstm1 = conv_lstm(128, 128) #stateful
+        self.lstm2 = conv_lstm(128, 128) #stateful
+
+        self.mode = mode
+
+        if mode == 'homography':
+            #global homography per image
+            self.avgpool = nn.AdaptiveAvgPool2d((3,3))
+            self.fc_loc = nn.Sequential(
+                nn.Linear(128 * 3 ** 2, 32),
+                nn.ReLU(True),
+                nn.Linear(32, 4)
+            )
+            # initialized to identity in bias + zero transformation
+            self.fc_loc[2].weight.data.zero_()
+            self.fc_loc[2].bias.data.copy_(torch.tensor([1, 0, 0,
+                                                          0, 1, 0], dtype=torch.float))
+        else:    
+            self.dconv3 = conv_dw(128, 64, 1)
+            self.dconv2 = conv_dw(64, 32, 1)
+           
+            if mode == 'flow':
+                self.dconv1 = nn.Conv2d(32, 2, 3, stride=1, padding=1)
+                self.warper = Warping(64, 64)
+            else:
+                self.dconv1 = nn.Conv2d(32, inp, 3, stride=1, padding=1)
+        
     def forward(self, images):
-    	x = images
+        x = images
         x, p1 = self.pool1(self.conv1(x))
         x, p2 = self.pool2(self.conv2(x))
         x, p3 = self.pool3(self.conv3(x))
 
-        x = self.dconv3(self.unpool3(x, p3))
-        x = self.dconv2(self.unpool2(x, p2))
-        flow = self.dconv1(self.unpool1(x, p1))
+        x = self.lstm1(x)
+        x = self.lstm2(x) + x
 
-        x = self.warper(images, flow)
+        if self.mode == 'homography':
+            xs = self.avgpool(x)
+            xs = xs.view(xs.size(0), -1)
+            theta = self.fc_loc(xs)
+            theta = theta.view(-1, 2, 3)
+            grid = F.affine_grid(theta, images.size())
+            x = nn.functional.grid_sample(images, grid)
+        else:
+            x = self.dconv3(self.unpool3(x, p3))
+            x = self.dconv2(self.unpool2(x, p2))
+            x = self.dconv1(self.unpool1(x, p1))
+
+            if hasattr(self, "warper"):
+                x = self.warper(images, x)
+
         return x
 
 
@@ -100,11 +137,11 @@ if __name__ == '__main__':
     dataset = SquaresVideos(t=time, c=cin, h=height, w=width, batchsize=batchsize, normalize=False)
     dataset.num_frames = train_iter
 
-    seq = rnn.RNN(RAECell(cin))
+    seq = rnn.RNN(RAECell(cin, mode='normal'))
     if cuda:
         seq.cuda()
 
-    logdir = '/home/eperot/logdir/rnn_flow/'
+    logdir = '/home/eperot/logdir/rnn_cv_combine_peephole/'
     writer = SummaryWriter(logdir)
 
 
@@ -113,50 +150,66 @@ if __name__ == '__main__':
     # criterion = nn.MSELoss()
     criterion = nn.SmoothL1Loss()
 
+    proba = 1
+    gt_every = 1
+    alpha = 1
+
     for epoch in range(epochs):
+
+        gt_every =    gt_every + epoch * 0.05
+        proba *= 0.9
+        alpha *= 0.9
+
+        alpha = max(0.2, alpha)
+
+
         #train round
-        print('TRAIN:')
+        print('TRAIN: PROBA RESET: ', proba)
         seq.reset()
         for batch_idx, data in enumerate(dataset):
+            if np.random.rand() < proba:
+                dataset.reset()
+                seq.reset()
+
             batch, _ = dataset.next()
             batch = batch.cuda() if cuda else batch
             input, target = batch[:-1], batch[1:]
             optimizer.zero_grad()
-            out = seq(input)
+            out = seq(input, alpha=alpha)
             loss = criterion(out, target)
             loss.backward()
             optimizer.step()
             if batch_idx%10 == 0:
-            	print('loss:', loss.item())
+                print('loss:', loss.item())
             writer.add_scalar('train_loss', loss.data.item(), batch_idx + epoch * len(dataset))
 
         #val round: make video, initialize from real seq
         print('DEMO:')
         with torch.no_grad():
-            periods = 50
+            periods = 20
             nrows = 2
             ncols = batchsize / nrows
             seq.reset()
             grid = np.zeros((periods * time, nrows, ncols, dataset.height, dataset.width, 3), dtype=np.uint8)
 
             for period in range(periods):
-	            batch, _ = dataset.next()
-	            batch = batch.cuda() if cuda else batch
-	            out = seq(batch)
-	            images = out.cpu().data.numpy()
-	            for t in range(time):
-	                for i in range(batchsize):
-	                    y = i / ncols
-	                    x = i % ncols
-	                    img = np.moveaxis(images[t, i], 0, 2)
-	                    img = (img-img.min())/(img.max()-img.min())
-	                    grid[t + period * time, y, x] = (img*255).astype(np.uint8)
+                batch, _ = dataset.next()
+                batch = batch.cuda() if cuda else batch
+                out = seq(batch)
+                images = out.cpu().data.numpy()
+                for t in range(time):
+                    for i in range(batchsize):
+                        y = i / ncols
+                        x = i % ncols
+                        img = np.moveaxis(images[t, i], 0, 2)
+                        img = (img-img.min())/(img.max()-img.min())
+                        grid[t + period * time, y, x] = (img*255).astype(np.uint8)
 
             grid = grid.swapaxes(2, 3).reshape(periods * time, nrows * dataset.height, ncols * dataset.width, 3)
             utils.add_video(writer, 'test_with_xt', grid, global_step=epoch, fps=30)
 
 
-
+            priods = 3
             grid = np.zeros((periods * time, nrows, ncols, dataset.height, dataset.width, 3), dtype=np.uint8)
             batch, _ = dataset.next()
             batch = batch.cuda() if cuda else batch
