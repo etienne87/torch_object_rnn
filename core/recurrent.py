@@ -84,7 +84,7 @@ class RNN(nn.Module):
         for t, xt in enumerate(xseq):
             if ht is not None:
             	xt = alpha * xt + (1-alpha) * ht.detach()
-            ht = self.cell(x)
+            ht = self.cell(xt)
             result.append(ht[None])
 
         #For auto-regressive use-cases
