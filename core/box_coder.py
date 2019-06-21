@@ -12,12 +12,13 @@ class SSDBoxCoder:
         self.fm_sizes = ssd_model.fm_sizes
         self.height = ssd_model.height
         self.width = ssd_model.width
+        self.fm_len = []
         self.default_boxes = self._get_default_boxes()
         self.default_boxes_xyxy =  change_box_order(self.default_boxes, 'xywh2xyxy')
         self.iou_threshold = 0.5
         self.use_cuda = False
         self.variances = (0.2, 0.2)
-
+        
     def reset(self, ssd_model):
         self.steps = ssd_model.steps
         self.box_sizes = ssd_model.box_sizes
@@ -35,10 +36,13 @@ class SSDBoxCoder:
 
     def _get_default_boxes(self):
         boxes = []
+        nanchors = 2 * len(self.aspect_ratios) + 2
         for i, fm_size in enumerate(self.fm_sizes):
             f_y, f_x = fm_size
             s_y, s_x = self.steps[i]
             print('sy, sx: ', s_y, s_x)
+
+            self.fm_len.append(f_y * f_x * nanchors)
             s = self.box_sizes[i]
             for h in range(f_y):
                 for w in range(f_x):
@@ -106,10 +110,7 @@ class SSDBoxCoder:
         mask = (index<0) & (ious.max(1)[0]>=self.iou_threshold)
         if mask.any():
             # https: // github.com / kuangliu / torchcv / issues / 23
-            weights[mask], index[mask] = ious[mask].max(1)
-
-            #weights[mask] = (weights[mask] - weights[mask].min())/(weights[mask].max() - weights[mask].min())
-            # index[mask] = ious[mask].max(1)[1]
+            index[mask] = ious[mask].max(1)[1]
             # index[mask] = ious[mask.nonzero().squeeze()].max(1)[1]
 
         boxes = boxes[index.clamp(min=0)]  # negative index not supported
@@ -121,7 +122,7 @@ class SSDBoxCoder:
         loc_targets = torch.cat([loc_xy,loc_wh], 1)
         cls_targets = 1 + labels[index.clamp(min=0)]
         cls_targets[index<0] = 0
-        return loc_targets, cls_targets, weights
+        return loc_targets, cls_targets
 
 
     def decode(self, loc_preds, cls_preds, score_thresh=0.6, nms_thresh=0.45):

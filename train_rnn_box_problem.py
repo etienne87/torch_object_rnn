@@ -5,13 +5,16 @@ import argparse
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 import math
+import time
 
 
 import core.recurrent as rnn
 import core.utils as utils
 from core.box import box_nms, box_iou, change_box_order
+from core.box_coder import SSDBoxCoder
 from core.ssd_loss import SSDLoss
 
 
@@ -46,193 +49,32 @@ def conv_lstm(cin, cout, stride=1):
     return rnn.LSTMCell(cin, cout, opx, oph, nonlinearity=torch.tanh)
 
 
-def meshgrid(x, y, row_major=True):
-    a = torch.arange(0, x).float()
-    b = torch.arange(0, y).float()
-    xx = a.repeat(y).view(-1,1)
-    yy = b.view(-1,1).repeat(1,x).view(-1,1)
-    return torch.cat([xx,yy],1) if row_major else torch.cat([yy,xx],1)
-
-
 def one_hot_embedding(labels, num_classes):
     y = torch.eye(num_classes, device=labels.device)  # [D,D]
     return y[labels]  # [N,D]
 
 
-class BoxCoder:
-    """Encode a list of feature map boxes
+def prepare_fmap_input(box_coder, loc_targets, cls_targets, num_classes, batchsize):
+    r"""Use fmap sizes to encode
+    loc_targets: TxN, D, 4
+    cls_targets: TxN, D, 1
+
+    output packed T, N, (4+C), H, W to feed the network!
     """
-    def __init__(self, input_size=128, num_fms=4):
-        self.anchor_sizes = 2**np.linspace(5, np.log(input_size)/np.log(2), num_fms)
-        self.anchor_areas = [item*item for item in self.anchor_sizes.tolist()]
-        self.aspect_ratios = (1/2., 1/1., 2/1.)
-        self.scale_ratios = (1., pow(2,1/3.), pow(2,2/3.))
-
-        input_size = torch.tensor([float(input_size), float(input_size)])
-        self.default_boxes, self.fm_sizes, self.fm_len = self._get_default_boxes(input_size=input_size)
-        self.default_boxes_xyxy =  change_box_order(self.default_boxes, 'xywh2xyxy')
-        self.use_cuda = False
-    
-    def cuda(self):
-          self.default_boxes = self.default_boxes.cuda()
-          self.default_boxes_xyxy = self.default_boxes_xyxy.cuda()
-          self.use_cuda = True    
-
-    def _get_anchor_wh(self):
-        '''Compute anchor width and height for each feature map.
-        Returns:
-          anchor_wh: (tensor) anchor wh, sized [#fm, #anchors_per_cell, 2].
-        '''
-        anchor_wh = []
-        for s in self.anchor_areas:
-            for ar in self.aspect_ratios:  # w/h = ar
-                h = math.sqrt(s/ar)
-                w = ar * h
-                for sr in self.scale_ratios:  # scale
-                    anchor_h = h*sr
-                    anchor_w = w*sr
-                    anchor_wh.append([anchor_w, anchor_h])
-        num_fms = len(self.anchor_areas)
-        return torch.tensor(anchor_wh).view(num_fms,-1, 2)
-
-    def _get_default_boxes(self, input_size):
-        num_fms = len(self.anchor_areas)
-        anchor_wh = self._get_anchor_wh()
-        fm_sizes = [(input_size/pow(2.,i+3)).ceil() for i in range(num_fms)]
-
-        print('fm sizes: ', fm_sizes)
-        boxes = []
-        fm_len = []
-        size = 0
-        for i in range(num_fms):
-            fm_size = fm_sizes[i]
-            grid_size = input_size / fm_size
-            fm_w, fm_h = int(fm_size[0]), int(fm_size[1])
-            xy = meshgrid(fm_w,fm_h) + 0.5  # [fm_h*fm_w, 2]
-            xy = (xy * grid_size).view(fm_h,fm_w,1,2).expand(fm_h,fm_w,9,2)
-            wh = anchor_wh[i].view(1,1,9,2).expand(fm_h,fm_w,9,2)
-            box = torch.cat([xy-wh/2.,xy+wh/2.], 3)  # [x,y,x,y]
-            box = box.view(-1,4)
-            boxes.append(box)
-            fm_len.append(len(box))
-
-        boxes = torch.cat(boxes, 0)
-
-        return boxes, fm_sizes, fm_len
-
-    def prepare_fmap_input(self, loc_targets, cls_targets, num_classes):
-        r"""Use fmap sizes to encode
-        loc_targets: TxN, D, 4
-        cls_targets: TxN, D, 1
-        """
-        import pdb
-        pdb.set_trace()
-        n_anchors = len(self.aspect_ratios) * len(self.scale_ratios)
-        cls_targets = one_hot_embedding(cls_targets, num_classes)
-        loc = torch.cat((loc_targets, cls_targets), dim=2)
-        out = torch.split(loc, self.fm_len, dim=1)
-        res = []
-        for fm_size, tensor in zip(self.fm_sizes, out):
-            fm_h, fm_w = fm_size
-            n, l, c = tensor.size()
-            assert l == fm_h * fm_w
-            ans = tensor.view(n, fm_h, fm_w, n_anchors * c)
-            res.append(ans)
-        return res
-
-    def encode(self, boxes, labels):
-        def argmax(x):
-            v, i = x.max(0)
-            j = v.max(0)[1].item() #was (0)[1][0] which causes Pytorch Warning for Scalars
-            return (i[j], j)
-
-        default_boxes = self.default_boxes_xyxy
-
-        ious = box_iou(default_boxes, boxes)  # [#anchors, #obj]
-
-        if self.use_cuda:
-            index = torch.cuda.LongTensor(len(default_boxes)).fill_(-1)
-        else:
-            index = torch.LongTensor(len(default_boxes)).fill_(-1)
-
-        masked_ious = ious.clone()
-        while True:
-            i, j = argmax(masked_ious)
-            if masked_ious[i,j] < 1e-6:
-                break
-            index[i] = j
-            masked_ious[i,:] = 0
-            masked_ious[:,j] = 0
-
-        mask = (index<0) & (ious.max(1)[0]>=0.5)
-        if mask.any():
-            index[mask] = ious[mask].max(1)[1]
-
-        boxes = boxes[index.clamp(min=0)]  # negative index not supported
-        boxes = change_box_order(boxes, 'xyxy2xywh')
-        default_boxes = self.default_boxes
-
-        loc_xy = (boxes[:,:2]-default_boxes[:,:2]) / default_boxes[:,2:] 
-        loc_wh = torch.log(boxes[:,2:]/default_boxes[:,2:]) 
-        loc_targets = torch.cat([loc_xy,loc_wh], 1)
-        cls_targets = 1 + labels[index.clamp(min=0)]
-        cls_targets[index<0] = 0
-        return loc_targets, cls_targets
-
-    def decode(self, loc_preds, cls_preds, score_thresh=0.6, nms_thresh=0.45):
-        xy = loc_preds[:,:2] * self.variances[0] * self.default_boxes[:,2:] + self.default_boxes[:,:2]
-        wh = torch.exp(loc_preds[:,2:] * self.variances[1]) * self.default_boxes[:,2:]
-        box_preds = torch.cat([xy-wh/2, xy+wh/2], 1)
-        boxes = []
-        labels = []
-        scores = []
-        num_classes = cls_preds.size(1)
-        for i in range(num_classes-1):
-            score = cls_preds[:,i+1]  # class i corresponds to (i+1) column
-            mask = score > score_thresh
-            if not mask.any():
-                continue
-
-            box = box_preds[mask]
-            score = score[mask]
-
-            if nms_thresh == 1.0:
-                boxes.append(box)
-                labels.append(torch.LongTensor(len(box)).fill_(i))
-                scores.append(score)
-            else:
-                keep = box_nms(box, score, nms_thresh)
-                boxes.append(box[keep])
-                labels.append(torch.LongTensor(len(box[keep])).fill_(i))
-                scores.append(score[keep])
-
-        if len(boxes) > 0:
-            boxes = torch.cat(boxes, 0)
-            labels = torch.cat(labels, 0)
-            scores = torch.cat(scores, 0)
-            return boxes, labels, scores
-        else:
-            return None, None, None
-
-
-
-
-
-class BoxTracker(nn.Module):
-    #this thing takes input image 
-    #the RNN is fed with either CNN(image(t)) and a combination GT(t-1) and hidden(t-1)
-    def __init__(self, num_classes=2, num_fms=1):
-        super(BoxTracker, self).__init__()
-        nanchors = 9
-        c = nanchors * (4 * nclasses)
-        self.c = c
-        self.cell = conv_lstm(c, 64)
-        self.box = nn.Conv2d(64, c, 3, stride=1, padding=1)
-
-    def forward(self, x):
-        x = self.rnn1(x)
-        x = self.box(x)
-        return x
+    n_anchors = 2 * len(box_coder.aspect_ratios) + 2
+    cls_targets = one_hot_embedding(cls_targets, num_classes)
+    loc = torch.cat((loc_targets, cls_targets), dim=2)
+    out = torch.split(loc, box_coder.fm_len, dim=1)
+    res = []
+    for fm_size, tensor in zip(box_coder.fm_sizes, out):
+        fm_h, fm_w = fm_size
+        n, l, c = tensor.size()
+        assert l == fm_h * fm_w * n_anchors
+        ans = tensor.view(n, fm_h, fm_w, n_anchors * c)
+        ans = ans.permute([0, 3, 1, 2])
+        ans = rnn.batch_to_time(ans, batchsize)
+        res.append(ans)
+    return res
 
 
 def encode_boxes(targets, box_coder, cuda):
@@ -254,36 +96,167 @@ def encode_boxes(targets, box_coder, cuda):
     return loc_targets, cls_targets
 
 
+def decode_boxes(box_map, num_classes, num_anchors):
+	"""
+	box_map: T, N, C, H, W
+	"""
+	fm_h, fm_w = box_map.shape[-2:]
+	nboxes = fm_h * fm_w * num_anchors
+	box_map = rnn.time_to_batch(box_map)
+	box_map = box_map.permute([0, 2, 3, 1]).contiguous().view(box_map.size(0), nboxes, 4+num_classes)
+	return box_map[..., :4], box_map[..., 4:]
+	
+
+
+def remove_first(loc_targets, cls_targets, n):
+	loc = rnn.batch_to_time(loc_targets, n)[1:]
+	cls = rnn.batch_to_time(cls_targets, n)[1:]
+	return rnn.time_to_batch(loc), rnn.time_to_batch(cls)
+
+
+def remove_last(loc_targets, cls_targets, n):
+	loc = rnn.batch_to_time(loc_targets, n)[:-1]
+	cls = rnn.batch_to_time(cls_targets, n)[:-1]
+	return rnn.time_to_batch(loc), rnn.time_to_batch(cls)
+
+
+
+
+def get_box_params(sources, h, w):
+    image_size = float(min(h, w))
+    steps = []
+    box_sizes = []
+    fm_sizes = []
+    s_min, s_max = 0.1, 0.9
+    m = float(len(sources))
+    for k, src in enumerate(sources):
+    	h2, w2 = src
+        fm_sizes.append((h2, w2))
+        step_y, step_x = math.floor(float(h) / h2), math.floor(float(w) / w2)
+        steps.append((step_y, step_x))
+        s_k = s_min + (s_max - s_min) * k / m
+        box_sizes.append(math.floor(s_k * image_size))
+    s_k = s_min + (s_max - s_min)
+    box_sizes.append(s_k * image_size)
+    return fm_sizes, steps, box_sizes
+
+
+
+class BoxTracker(nn.Module):
+    #this thing takes input image 
+    #the RNN is fed with either CNN(image(t)) and a combination GT(t-1) and hidden(t-1)
+    def __init__(self, nanchors, num_classes=2):
+        super(BoxTracker, self).__init__()
+        self.c = nanchors * (4 + nclasses)
+
+        self.cell = conv_lstm(self.c, 64)
+        self.box = nn.Conv2d(64, self.c, 1, stride=1, padding=0, bias=False)
+
+        #self.box = nn.Conv2d(self.c, self.c, 1, stride=1, padding=0, bias=False)
+        #self.box.weight.data = torch.eye(self.c).view(self.c, self.c, 1, 1)
+
+    def forward(self, x):
+        #x = self.conv(x)
+        x = self.cell(x)
+        x = self.box(x)
+        return x
+
+
+class ARSSD(nn.Module):
+    def __init__(self, num_classes, height, width):
+        super(ARSSD, self).__init__()
+
+        #here we simulate the image preliminary cnn
+        sources = [(width/8, width/8), 
+                    (width/16, width/16), 
+                    (width/32, width/32)]
+
+        self.height = height
+        self.width = width
+        self.num_classes = num_classes
+        self.fm_sizes, self.steps, self.box_sizes = get_box_params(sources, 64, 64)
+        self.aspect_ratios = []
+        self.num_anchors = 2 * len(self.aspect_ratios) + 2
+
+
+        self.box_trackers = nn.ModuleList([
+            rnn.RNN(BoxTracker(self.num_anchors, num_classes)),
+            rnn.RNN(BoxTracker(self.num_anchors, num_classes)),
+            rnn.RNN(BoxTracker(self.num_anchors, num_classes))
+        ])
+
+    def forward(self, xl):
+        loc_preds, cls_preds = [], []
+        for bt, x in zip(self.box_trackers, xl):
+            y = bt(x) 
+            loc, cls = decode_boxes(y, self.num_classes, self.num_anchors)
+            loc_preds.append(loc)
+            cls_preds.append(cls)
+
+        loc_preds = torch.cat(loc_preds, dim=1)
+        cls_preds = torch.cat(cls_preds, dim=1)
+        return loc_preds, cls_preds
+
+    def reset(self):
+        for i in range(len(self.box_trackers)):
+            self.box_trackers[i].reset()
+
+
+
+#Stupid check
+def stupid_check(dataset, box_coder, cuda, num_classes):
+    _, targets = dataset.next()
+    loc_targets, cls_targets = encode_boxes(targets, box_coder, cuda)
+    fmaps = prepare_fmap_input(box_coder, loc_targets, cls_targets, nclasses, batchsize)
+    loc_preds, cls_preds = [], []
+    for fmap in fmaps:
+        loc, cls = decode_boxes(fmap, num_classes, net.num_anchors)
+        loc_preds.append(loc)
+        cls_preds.append(cls)
+    loc_preds = torch.cat(loc_preds, dim=1)
+    cls_preds = torch.cat(cls_preds, dim=1)
+    cls_preds = cls_preds.max(dim=-1)[1]
+    test = loc_targets - loc_preds
+    test2 = cls_targets - cls_preds
+    assert test.sum().item() == 0
+    assert test2.sum().item() == 0
+
+
 
 if __name__ == '__main__':
-    classes, cin, time, height, width = 2, 3, 10, 64, 64
-    batchsize = 16
+    num_classes, cin, tbins, height, width = 2, 3, 5, 64, 64
+    batchsize = 8
     epochs = 100
-    cuda = False
-    train_iter = 100
+    cuda = 1
+    train_iter = 30
     nclasses = 2
-    dataset = SquaresVideos(t=time, c=cin, h=height, w=width, batchsize=batchsize, normalize=False)
+    dataset = SquaresVideos(t=tbins, c=cin, h=height, w=width, batchsize=batchsize, normalize=False)
     dataset.num_frames = train_iter
 
-    box_coder = BoxCoder(input_size=256, num_fms=1)
-    seq = rnn.RNN(BoxTracker())
+
+    net = ARSSD(num_classes, height, width)
+
+    box_coder = SSDBoxCoder(net)
+
 
     if cuda:
-        seq.cuda()
+        net.cuda()
         box_coder.cuda()
 
 
-    logdir = '/home/eperot/box_experiments/rnn_cv_combine_peephole/'
+    logdir = '/home/eperot/boxexp/sanity_check_train/'
     writer = SummaryWriter(logdir)
 
 
-    optimizer = optim.Adam(seq.parameters(), lr=0.001, betas=(0.9, 0.999), eps=1e-8, weight_decay=0)
+    optimizer = optim.Adam(net.parameters(), lr=0.1, betas=(0.9, 0.999), eps=1e-8, weight_decay=0)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.99)
     criterion = SSDLoss(num_classes=2)
+    # criterion = nn.MSELoss()
 
     proba = 1
     gt_every = 1
     alpha = 1
+
 
     for epoch in range(epochs):
 
@@ -294,83 +267,78 @@ if __name__ == '__main__':
 
 
         #train round
+ 
         print('TRAIN: PROBA RESET: ', proba)
-        seq.reset()
+        net.reset()
         for batch_idx, data in enumerate(dataset):
             if np.random.rand() < proba:
                 dataset.reset()
-                seq.reset()
+                net.reset()
 
             _, targets = dataset.next()
 
             loc_targets, cls_targets = encode_boxes(targets, box_coder, cuda)
-
-
-            fmaps = box_coder.prepare_fmap_input(loc_targets, cls_targets, nclasses)
-
-
-
-
-            """
-            batch = batch.cuda() if cuda else batch
-            input, target = batch[:-1], batch[1:]
+            
+            fmaps = prepare_fmap_input(box_coder, loc_targets, cls_targets, nclasses, batchsize)
+            # loc_targets, cls_targets = remove_first(loc_targets, cls_targets, batchsize)
+            
             optimizer.zero_grad()
-            out = seq(input, alpha=alpha)
-            loss = criterion(out, target)
+
+            loc_preds, cls_preds = net(fmaps)
+
+            # loc_preds, cls_preds = remove_last(loc_preds, cls_preds, batchsize)
+            loc_loss, cls_loss = criterion(loc_preds, loc_targets, cls_preds, cls_targets)
+            loss = loc_loss + cls_loss
+
+            # loss = criterion(loc_preds, loc_targets) + criterion(torch.sigmoid(cls_preds), one_hot_embedding(cls_targets, num_classes))
+
             loss.backward()
+
             optimizer.step()
-            if batch_idx%10 == 0:
+            if batch_idx%3 == 0:
                 print('loss:', loss.item())
             writer.add_scalar('train_loss', loss.data.item(), batch_idx + epoch * len(dataset))
-            """
+            
 
         #val round: make video, initialize from real seq
-        """
         print('DEMO:')
         with torch.no_grad():
             periods = 20
             nrows = 2
             ncols = batchsize / nrows
-            seq.reset()
-            grid = np.zeros((periods * time, nrows, ncols, dataset.height, dataset.width, 3), dtype=np.uint8)
+            net.reset()
+            grid = np.zeros((periods * tbins, nrows, ncols, dataset.height, dataset.width, 3), dtype=np.uint8)
 
             for period in range(periods):
-                batch, _ = dataset.next()
-                batch = batch.cuda() if cuda else batch
-                out = seq(batch)
-                images = out.cpu().data.numpy()
-                for t in range(time):
+                _, targets = dataset.next()
+                loc_targets, cls_targets = encode_boxes(targets, box_coder, cuda)
+                fmaps = prepare_fmap_input(box_coder, loc_targets, cls_targets, nclasses, batchsize)
+                loc_preds, cls_preds = net(fmaps)
+
+                loc_preds = rnn.batch_to_time(loc_preds, batchsize)
+                cls_preds = rnn.batch_to_time(cls_preds, batchsize)
+                for t in range(tbins):
                     for i in range(batchsize):
                         y = i / ncols
                         x = i % ncols
-                        img = np.moveaxis(images[t, i], 0, 2)
-                        img = (img-img.min())/(img.max()-img.min())
-                        grid[t + period * time, y, x] = (img*255).astype(np.uint8)
+                        img = grid[t + period * tbins, y, x]
 
-            grid = grid.swapaxes(2, 3).reshape(periods * time, nrows * dataset.height, ncols * dataset.width, 3)
+                        boxes, labels, scores = box_coder.decode(loc_preds[t, i].data,
+                                                                  F.softmax(cls_preds[t, i], dim=1).data,
+                                                                  nms_thresh=0.6)
+                        if boxes is not None:
+                            bboxes = utils.boxarray_to_boxes(boxes, labels, dataset.labelmap)
+                            img = utils.draw_bboxes(img, bboxes)
+
+                        grid[t + period * tbins, y, x] = img
+
+
+            grid = grid.swapaxes(2, 3).reshape(periods * tbins, nrows * dataset.height, ncols * dataset.width, 3)
             utils.add_video(writer, 'test_with_xt', grid, global_step=epoch, fps=30)
 
 
-            priods = 3
-            grid = np.zeros((periods * time, nrows, ncols, dataset.height, dataset.width, 3), dtype=np.uint8)
-            batch, _ = dataset.next()
-            batch = batch.cuda() if cuda else batch
-            out = seq(batch, future=periods*time)
-            images = out.cpu().data.numpy()
-            for t in range(periods*time):
-                for i in range(batchsize):
-                    y = i / ncols
-                    x = i % ncols
-                    img = np.moveaxis(images[t, i], 0, 2)
-                    img = (img-img.min())/(img.max()-img.min())
-
-                    grid[t, y, x] = (img*255).astype(np.uint8)
-            grid = grid.swapaxes(2, 3).reshape(periods * time, nrows * dataset.height, ncols * dataset.width, 3)
-            utils.add_video(writer, 'test_hallucinate', grid, global_step=epoch, fps=30)
-        """
-
         scheduler.step()
-
+	
 
 
 
