@@ -18,6 +18,14 @@ class SSDBoxCoder:
         self.iou_threshold = 0.5
         self.use_cuda = False
         self.variances = (0.2, 0.2)
+
+    def print_info(self):
+        print('steps', self.steps)
+        print('box_sizes', self.box_sizes)
+        print('aspect_ratios', self.aspect_ratios)
+        print('fm_sizes', self.fm_sizes)
+        print('img size', self.height, self.width)
+        print('default_boxes', self.default_boxes)
         
     def reset(self, ssd_model):
         self.steps = ssd_model.steps
@@ -97,7 +105,7 @@ class SSDBoxCoder:
             index = torch.LongTensor(len(default_boxes)).fill_(-1)
             weights = torch.FloatTensor(len(default_boxes)).fill_(1.0)
 
-
+    
         masked_ious = ious.clone()
         while True:
             i, j = argmax(masked_ious)
@@ -105,13 +113,16 @@ class SSDBoxCoder:
                 break
             index[i] = j
             masked_ious[i,:] = 0
-            masked_ious[:,j] = 0
+            masked_ious[:,j] = 0 # allow gt to be matched several times
 
         mask = (index<0) & (ious.max(1)[0]>=self.iou_threshold)
         if mask.any():
-            # https: // github.com / kuangliu / torchcv / issues / 23
             index[mask] = ious[mask].max(1)[1]
-            # index[mask] = ious[mask.nonzero().squeeze()].max(1)[1]
+        
+        # Simpler Alternative to association algorithm above
+        #max_ious, index = ious.max(1)
+        #index[max_ious < self.iou_threshold] = -1
+            
 
         boxes = boxes[index.clamp(min=0)]  # negative index not supported
         boxes = change_box_order(boxes, 'xyxy2xywh')

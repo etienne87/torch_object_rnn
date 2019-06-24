@@ -5,6 +5,18 @@ import torch
 from functools import partial
 
 
+def time_to_batch(x):
+    t, n = x.size()[:2]
+    x = x.view(n * t, *x.size()[2:])
+    return x
+
+def batch_to_time(x, n=32):
+    nt = x.size(0)
+    time = int(nt / n)
+    x = x.view(time, n, *x.size()[1:])
+    return x
+
+
 def hard_sigmoid(x, alpha=0.0):
     return torch.clamp(x + 0.5, 0 - alpha, 1 + alpha)
 
@@ -21,9 +33,9 @@ class SequenceWise(nn.Module):
 
     def forward(self, x):
         t, n = x.size(0), x.size(1)
-        x = x.view(t * n, -1)
+        x = time_to_batch(x)
         x = self.module(x)
-        x = x.view(t, n, -1)
+        x = batch_to_time(x, n)
         return x
 
     def __repr__(self):
@@ -74,7 +86,7 @@ class RNN(nn.Module):
         self.cell = cell
         self.reset()
 
-    def forward(self, x, future=0, alpha=1):
+    def forward(self, x, alpha=1, future=0):
         self.detach_hidden()
         xseq = x.unbind(0)
         result = []
@@ -82,8 +94,9 @@ class RNN(nn.Module):
 
         #First treat sequence
         for t, xt in enumerate(xseq):
-            if ht is not None:
-            	xt = alpha * xt + (1-alpha) * ht.detach()
+        	#this is a trick and should not be used in deterministic cases
+            if ht is not None and torch.rand(1).item() > alpha and t > 1:
+             	xt = ht.detach()
             ht = self.cell(xt)
             result.append(ht[None])
 
@@ -113,7 +126,7 @@ class LSTMCell(RNNCell):
         super(LSTMCell, self).__init__(hard)
         self.hidden_dim = hidden_dim
         self.x2h = x2h_func(in_channels, 4 * self.hidden_dim)
-        self.h2h = h2h_func(self.hidden_dim * 2, 4 * self.hidden_dim)
+        self.h2h = h2h_func(self.hidden_dim, 4 * self.hidden_dim)
         self.act = nonlinearity
         self.prev_hidden = None
         self.reset()
@@ -128,10 +141,8 @@ class LSTMCell(RNNCell):
         if self.prev_hidden is None:
             tmp = self.x2h(xt)
         else:
-            #tmp = self.x2h(xt) + self.h2h(prev_h)
-            prev_h = torch.cat([prev_h, prev_c], dim=1)
             tmp = self.x2h(xt) + self.h2h(prev_h)
-
+            
         cc_i, cc_f, cc_o, cc_g = tmp.chunk(4, 1) #torch.split(tmp, self.hidden_dim, dim=1)
         f = torch.sigmoid(cc_f)
         i = torch.sigmoid(cc_i)

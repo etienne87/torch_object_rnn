@@ -11,6 +11,7 @@ import math
 import time
 
 
+from core.modules import ConvLSTM
 import core.recurrent as rnn
 import core.utils as utils
 from core.box import box_nms, box_iou, change_box_order
@@ -44,8 +45,8 @@ def conv_dw(inp, oup, stride):
 
 
 def conv_lstm(cin, cout, stride=1):
-    oph = partial(nn.Conv2d, kernel_size=3, padding=1, stride=1, bias=True)
-    opx = partial(conv_bn, stride=stride)
+    oph = partial(nn.Conv2d, kernel_size=3, padding=1, stride=1, bias=False)
+    opx = partial(nn.Conv2d, kernel_size=3, padding=1, stride=1, bias=False)
     return rnn.LSTMCell(cin, cout, opx, oph, nonlinearity=torch.tanh)
 
 
@@ -120,8 +121,6 @@ def remove_last(loc_targets, cls_targets, n):
 	return rnn.time_to_batch(loc), rnn.time_to_batch(cls)
 
 
-
-
 def get_box_params(sources, h, w):
     image_size = float(min(h, w))
     steps = []
@@ -149,17 +148,18 @@ class BoxTracker(nn.Module):
         super(BoxTracker, self).__init__()
         self.c = nanchors * (4 + nclasses)
 
-        self.cell = conv_lstm(self.c, 64)
-        self.box = nn.Conv2d(64, self.c, 1, stride=1, padding=0, bias=False)
+        hidden = 128
 
-        #self.box = nn.Conv2d(self.c, self.c, 1, stride=1, padding=0, bias=False)
-        #self.box.weight.data = torch.eye(self.c).view(self.c, self.c, 1, 1)
-
+        self.cell1 = conv_lstm(self.c, hidden)
+        self.cell2 = conv_lstm(hidden, hidden)
+        self.box = nn.Conv2d(hidden, self.c, 1, stride=1, padding=0, bias=False)
+       
+       
     def forward(self, x):
-        #x = self.conv(x)
-        x = self.cell(x)
-        x = self.box(x)
-        return x
+        x = self.cell1(x)
+        x = self.cell2(x)
+        out = self.box(x)
+        return out
 
 
 class ARSSD(nn.Module):
@@ -167,9 +167,9 @@ class ARSSD(nn.Module):
         super(ARSSD, self).__init__()
 
         #here we simulate the image preliminary cnn
-        sources = [(width/8, width/8), 
-                    (width/16, width/16), 
-                    (width/32, width/32)]
+        sources = [(height/8, width/8), 
+                    (height/16, width/16), 
+                    (height/32, width/32)]
 
         self.height = height
         self.width = width
@@ -185,10 +185,10 @@ class ARSSD(nn.Module):
             rnn.RNN(BoxTracker(self.num_anchors, num_classes))
         ])
 
-    def forward(self, xl):
+    def forward(self, xl, alpha=1.0, future=0):
         loc_preds, cls_preds = [], []
         for bt, x in zip(self.box_trackers, xl):
-            y = bt(x) 
+            y = bt(x, alpha, future) 
             loc, cls = decode_boxes(y, self.num_classes, self.num_anchors)
             loc_preds.append(loc)
             cls_preds.append(cls)
@@ -222,13 +222,19 @@ def stupid_check(dataset, box_coder, cuda, num_classes):
     assert test2.sum().item() == 0
 
 
+def stupid_check_prepare_fmap_inputs(dataset, box_coder, cuda, num_classes):
+    _, targets = dataset.next()
+    loc_targets, cls_targets = encode_boxes(targets, box_coder, cuda)
+    fmaps = prepare_fmap_input(box_coder, loc_targets, cls_targets, nclasses, batchsize)
+
+
 
 if __name__ == '__main__':
-    num_classes, cin, tbins, height, width = 2, 3, 5, 64, 64
+    num_classes, cin, tbins, height, width = 2, 3, 10, 64, 64
     batchsize = 8
     epochs = 100
     cuda = 1
-    train_iter = 30
+    train_iter = 100
     nclasses = 2
     dataset = SquaresVideos(t=tbins, c=cin, h=height, w=width, batchsize=batchsize, normalize=False)
     dataset.num_frames = train_iter
@@ -238,59 +244,55 @@ if __name__ == '__main__':
 
     box_coder = SSDBoxCoder(net)
 
+    #box_coder.print_info()
+
 
     if cuda:
         net.cuda()
         box_coder.cuda()
 
 
-    logdir = '/home/eperot/boxexp/sanity_check_train/'
+    logdir = '/home/eperot/boxexp/sanity_check_train_conv_lstm_3/'
     writer = SummaryWriter(logdir)
 
 
-    optimizer = optim.Adam(net.parameters(), lr=0.1, betas=(0.9, 0.999), eps=1e-8, weight_decay=0)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.99)
+    optimizer = optim.Adam(net.parameters(), lr=0.01, betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.1)
     criterion = SSDLoss(num_classes=2)
-    # criterion = nn.MSELoss()
-
+   
     proba = 1
     gt_every = 1
     alpha = 1
 
-
     for epoch in range(epochs):
 
-        gt_every =    gt_every + epoch * 0.05
-        proba *= 0.9
-        alpha *= 0.9
-        alpha = max(0.2, alpha)
-
+        
 
         #train round
  
         print('TRAIN: PROBA RESET: ', proba)
         net.reset()
         for batch_idx, data in enumerate(dataset):
-            if np.random.rand() < proba:
-                dataset.reset()
-                net.reset()
+            #if np.random.rand() < proba:
+                #dataset.reset()
+                #net.reset()
 
             _, targets = dataset.next()
 
             loc_targets, cls_targets = encode_boxes(targets, box_coder, cuda)
             
             fmaps = prepare_fmap_input(box_coder, loc_targets, cls_targets, nclasses, batchsize)
-            # loc_targets, cls_targets = remove_first(loc_targets, cls_targets, batchsize)
+            loc_targets, cls_targets = remove_first(loc_targets, cls_targets, batchsize)
             
             optimizer.zero_grad()
 
-            loc_preds, cls_preds = net(fmaps)
+            loc_preds, cls_preds = net(fmaps, alpha)
 
-            # loc_preds, cls_preds = remove_last(loc_preds, cls_preds, batchsize)
+            loc_preds, cls_preds = remove_last(loc_preds, cls_preds, batchsize)
+            
+
             loc_loss, cls_loss = criterion(loc_preds, loc_targets, cls_preds, cls_targets)
             loss = loc_loss + cls_loss
-
-            # loss = criterion(loc_preds, loc_targets) + criterion(torch.sigmoid(cls_preds), one_hot_embedding(cls_targets, num_classes))
 
             loss.backward()
 
@@ -303,7 +305,8 @@ if __name__ == '__main__':
         #val round: make video, initialize from real seq
         print('DEMO:')
         with torch.no_grad():
-            periods = 20
+
+            periods = 5
             nrows = 2
             ncols = batchsize / nrows
             net.reset()
@@ -325,7 +328,8 @@ if __name__ == '__main__':
 
                         boxes, labels, scores = box_coder.decode(loc_preds[t, i].data,
                                                                   F.softmax(cls_preds[t, i], dim=1).data,
-                                                                  nms_thresh=0.6)
+                                                                  nms_thresh=0.6,
+                                                                  score_thresh=0.3)
                         if boxes is not None:
                             bboxes = utils.boxarray_to_boxes(boxes, labels, dataset.labelmap)
                             img = utils.draw_bboxes(img, bboxes)
@@ -336,9 +340,41 @@ if __name__ == '__main__':
             grid = grid.swapaxes(2, 3).reshape(periods * tbins, nrows * dataset.height, ncols * dataset.width, 3)
             utils.add_video(writer, 'test_with_xt', grid, global_step=epoch, fps=30)
 
+            periods = 5
+            grid = np.zeros((periods * tbins, nrows, ncols, dataset.height, dataset.width, 3), dtype=np.uint8)
+            batch, _ = dataset.next()
+            _, targets = dataset.next()
+            loc_targets, cls_targets = encode_boxes(targets, box_coder, cuda)
+            fmaps = prepare_fmap_input(box_coder, loc_targets, cls_targets, nclasses, batchsize)
+            loc_preds, cls_preds = net(fmaps, future=int(periods*tbins))
+            loc_preds = rnn.batch_to_time(loc_preds, batchsize)
+            cls_preds = rnn.batch_to_time(cls_preds, batchsize)
+            for t in range(periods*tbins):
+                for i in range(batchsize):
+                    y = i / ncols
+                    x = i % ncols
+                    img = grid[t, y, x]
+
+                    boxes, labels, scores = box_coder.decode(loc_preds[t, i].data,
+                                                              F.softmax(cls_preds[t, i], dim=1).data,
+                                                              nms_thresh=0.6,
+                                                              score_thresh=0.3)
+                    if boxes is not None:
+                        bboxes = utils.boxarray_to_boxes(boxes, labels, dataset.labelmap)
+                        img = utils.draw_bboxes(img, bboxes)
+
+                    grid[t, y, x] = img
+
+            grid = grid.swapaxes(2, 3).reshape(periods * tbins, nrows * dataset.height, ncols * dataset.width, 3)
+            utils.add_video(writer, 'test_hallucinate', grid, global_step=epoch, fps=30)
+
 
         scheduler.step()
 	
+        proba *= 0.9
+        alpha *= 0.9
+        alpha = max(0.2, alpha)
+
 
 
 
