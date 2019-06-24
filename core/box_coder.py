@@ -69,6 +69,48 @@ class SSDBoxCoder:
 
         return torch.Tensor(boxes)  # xywh
 
+    def match(self, boxes):
+        """return default boxes that match boxes
+        """
+        def argmax(x):
+            v, i = x.max(0)
+            j = v.max(0)[1].item() #was (0)[1][0] which causes Pytorch Warning for Scalars
+            return (i[j], j)
+
+        default_boxes = self.default_boxes_xyxy
+
+        ious = box_iou(default_boxes, boxes)  # [#anchors, #obj]
+        if self.use_cuda:
+            index = torch.cuda.LongTensor(len(default_boxes)).fill_(-1)
+            weights = torch.cuda.FloatTensor(len(default_boxes)).fill_(1.0)
+        else:
+            index = torch.LongTensor(len(default_boxes)).fill_(-1)
+            weights = torch.FloatTensor(len(default_boxes)).fill_(1.0)
+
+    
+        masked_ious = ious.clone()
+        while True:
+            i, j = argmax(masked_ious)
+            if masked_ious[i,j] < 1e-6:
+                break
+            index[i] = j
+            masked_ious[i,:] = 0
+            masked_ious[:,j] = 0 # allow gt to be matched several times
+
+        mask = (index<0) & (ious.max(1)[0]>=self.iou_threshold)
+        if mask.any():
+            index[mask] = ious[mask].max(1)[1]
+
+        anchors = self.default_boxes[index >= 0]
+
+        xy = anchors[:,:2]
+        wh = anchors[:,2:]
+
+        box_preds = torch.cat([xy-wh/2, xy+wh/2], 1)
+        return box_preds
+        
+
+
     def encode(self, boxes, labels):
         '''Encode target bounding boxes and class labels.
 

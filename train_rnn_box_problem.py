@@ -9,7 +9,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import math
 import time
-
+import cv2
 
 from core.modules import ConvLSTM
 import core.recurrent as rnn
@@ -146,9 +146,9 @@ class BoxTracker(nn.Module):
     #the RNN is fed with either CNN(image(t)) and a combination GT(t-1) and hidden(t-1)
     def __init__(self, nanchors, num_classes=2):
         super(BoxTracker, self).__init__()
-        self.c = nanchors * (4 + nclasses)
+        self.c = nanchors * (4 + num_classes)
 
-        hidden = 128
+        hidden = 256
 
         self.cell1 = conv_lstm(self.c, hidden)
         self.cell2 = conv_lstm(hidden, hidden)
@@ -174,7 +174,7 @@ class ARSSD(nn.Module):
         self.height = height
         self.width = width
         self.num_classes = num_classes
-        self.fm_sizes, self.steps, self.box_sizes = get_box_params(sources, 64, 64)
+        self.fm_sizes, self.steps, self.box_sizes = get_box_params(sources, height, width)
         self.aspect_ratios = []
         self.num_anchors = 2 * len(self.aspect_ratios) + 2
 
@@ -228,9 +228,51 @@ def stupid_check_prepare_fmap_inputs(dataset, box_coder, cuda, num_classes):
     fmaps = prepare_fmap_input(box_coder, loc_targets, cls_targets, nclasses, batchsize)
 
 
+def highlight_anchor_boxes_answering(cuda):
+    size = 256
+    dataset = SquaresVideos(t=5, c=3, h=size, w=size, batchsize=1, normalize=False)
+    dataset.num_frames = 100
+
+    net = ARSSD(2, size, size)
+    box_coder = SSDBoxCoder(net)
+    box_coder.iou_threshold = 0.5
+    print(box_coder.print_info())
+    if cuda:
+        net.cuda()
+        box_coder.cuda()
+
+    while 1:
+        _, targets = dataset.next()
+
+        box_preds = []
+        box_gt = []
+        for t in range(len(targets[0])):
+            boxes = targets[t][0][:, :-1]
+            if cuda:
+                boxes = boxes.cuda()
+            anchors = box_coder.match(boxes)
+
+            img = np.zeros((size,size,3), dtype=np.uint8)
+
+            gt = boxes.cpu().numpy()
+            x1, y1, x2, y2 = gt[0,0], gt[0,1], gt[0,2], gt[0,3]
+
+            cv2.rectangle(img, (x1, y1), (x2, y2), (255,255,255), 2)
+
+            if anchors is not None:
+                anchors = anchors.cpu().numpy()
+                for i in range(anchors.shape[0]):
+                    x1, y1, x2, y2 = anchors[i,0], anchors[i,1], anchors[i,2], anchors[i,3]
+                    cv2.rectangle(img, (x1, y1), (x2, y2), (255,0,0), 2)
+
+            cv2.imshow('img', img)
+            cv2.waitKey(5)
+
+
+
 
 if __name__ == '__main__':
-    num_classes, cin, tbins, height, width = 2, 3, 10, 64, 64
+    num_classes, cin, tbins, height, width = 2, 3, 10, 128, 128
     batchsize = 8
     epochs = 100
     cuda = 1
@@ -252,12 +294,12 @@ if __name__ == '__main__':
         box_coder.cuda()
 
 
-    logdir = '/home/eperot/boxexp/train_conv_lstm_ar_combine2/'
+    logdir = '/home/eperot/boxexp/probabilistic_lr001_bigger/'
     writer = SummaryWriter(logdir)
 
 
-    optimizer = optim.Adam(net.parameters(), lr=0.01, betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-4)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.1)
+    optimizer = optim.Adam(net.parameters(), lr=0.001, betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.5)
     criterion = SSDLoss(num_classes=2)
    
     proba = 1
@@ -266,14 +308,13 @@ if __name__ == '__main__':
 
     for epoch in range(epochs):
         #train round
-        print('TRAIN: PROBA RESET: ', proba)
+        print('TRAIN: PROBA RESET: ', proba, ' ALPHA: ', alpha)
         net.reset()
         for batch_idx, data in enumerate(dataset):
-            """
             if np.random.rand() < proba:
                 dataset.reset()
                 net.reset()
-            """
+            
             _, targets = dataset.next()
 
             loc_targets, cls_targets = encode_boxes(targets, box_coder, cuda)
@@ -370,7 +411,7 @@ if __name__ == '__main__':
 	
         proba *= 0.9
         alpha *= 0.9
-        #alpha = max(0.2, alpha)
+        alpha = max(0.3, alpha)
 
 
 

@@ -1,4 +1,5 @@
 # pylint: disable-all
+import random
 import torch.nn as nn
 from torch.nn import functional as F
 import torch
@@ -85,7 +86,7 @@ class RNN(nn.Module):
         self.tanh = F.hardtanh if hard else torch.tanh
         self.cell = cell
         self.time = 0
-        self.mode = 'combine'
+        self.mode = 'probabilistic'
         self.reset()
 
     def forward(self, x, alpha=1, future=0):
@@ -97,8 +98,9 @@ class RNN(nn.Module):
         #First treat sequence
         for t, xt in enumerate(xseq):
             if self.mode == 'probabilistic':
-            	if ht is not None and torch.rand(1).item() > alpha and self.time > 1:
-            		xt = ht.detach() 
+                v = random.uniform(0, 1)
+                if ht is not None and v > alpha and self.time > 1:
+                    xt = ht.detach() 
             elif self.mode == 'combine':
 	            if ht is not None and self.time > 1:
 	             	xt = ht.detach() * (1- alpha) + xt * alpha

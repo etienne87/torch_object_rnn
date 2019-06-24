@@ -22,6 +22,7 @@ class FocalLoss(nn.Module):
     def __init__(self, num_classes):
         super(FocalLoss, self).__init__()
         self.num_classes = num_classes
+        self.normalize = True
 
     def _focal_loss(self, x, y):
         '''Focal loss.
@@ -76,6 +77,8 @@ class FocalLoss(nn.Module):
         masked_cls_preds = cls_preds[mask].view(-1,self.num_classes)
         cls_loss = self._focal_loss(masked_cls_preds, cls_targets[pos_neg])
 
-        loc_loss /= num_pos
-        cls_loss /= num_pos
+        #normalization could be optional?
+        if self.normalize:
+	        loc_loss /= num_pos
+	        cls_loss /= num_pos
         return loc_loss, cls_loss
