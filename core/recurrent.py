@@ -84,6 +84,8 @@ class RNN(nn.Module):
         self.sigmoid = hard_sigmoid if hard else torch.sigmoid
         self.tanh = F.hardtanh if hard else torch.tanh
         self.cell = cell
+        self.time = 0
+        self.mode = 'combine'
         self.reset()
 
     def forward(self, x, alpha=1, future=0):
@@ -94,11 +96,15 @@ class RNN(nn.Module):
 
         #First treat sequence
         for t, xt in enumerate(xseq):
-        	#this is a trick and should not be used in deterministic cases
-            if ht is not None and torch.rand(1).item() > alpha and t > 1:
-             	xt = ht.detach()
+            if self.mode == 'probabilistic':
+            	if ht is not None and torch.rand(1).item() > alpha and self.time > 1:
+            		xt = ht.detach() 
+            elif self.mode == 'combine':
+	            if ht is not None and self.time > 1:
+	             	xt = ht.detach() * (1- alpha) + xt * alpha
             ht = self.cell(xt)
             result.append(ht[None])
+            self.time += 1
 
         #For auto-regressive use-cases
         if future:
@@ -116,6 +122,7 @@ class RNN(nn.Module):
                 module.detach_hidden()
 
     def reset(self, mask=None):
+    	self.time = 0
         for name, module in self.cell._modules.iteritems():
             if isinstance(module, RNNCell):
                 module.reset(mask)

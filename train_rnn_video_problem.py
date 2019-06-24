@@ -34,6 +34,11 @@ def conv_dw(inp, oup, stride):
     )
 
 
+def vip(inp, oup, op, stride):
+    return nn.Sequential(op(inp, oup, stride=2*stride),
+           nn.UpsamplingBilinear2d(scale_factor=2))
+
+
 def conv_lstm(cin, cout, stride=1):
     oph = partial(nn.Conv2d, kernel_size=3, padding=1, stride=1, bias=True)
     opx = partial(conv_bn, stride=stride)

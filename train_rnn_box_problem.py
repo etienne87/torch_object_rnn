@@ -234,7 +234,7 @@ if __name__ == '__main__':
     batchsize = 8
     epochs = 100
     cuda = 1
-    train_iter = 100
+    train_iter = 300
     nclasses = 2
     dataset = SquaresVideos(t=tbins, c=cin, h=height, w=width, batchsize=batchsize, normalize=False)
     dataset.num_frames = train_iter
@@ -252,7 +252,7 @@ if __name__ == '__main__':
         box_coder.cuda()
 
 
-    logdir = '/home/eperot/boxexp/sanity_check_train_conv_lstm_3/'
+    logdir = '/home/eperot/boxexp/train_conv_lstm_ar_combine2/'
     writer = SummaryWriter(logdir)
 
 
@@ -265,18 +265,15 @@ if __name__ == '__main__':
     alpha = 1
 
     for epoch in range(epochs):
-
-        
-
         #train round
- 
         print('TRAIN: PROBA RESET: ', proba)
         net.reset()
         for batch_idx, data in enumerate(dataset):
-            #if np.random.rand() < proba:
-                #dataset.reset()
-                #net.reset()
-
+            """
+            if np.random.rand() < proba:
+                dataset.reset()
+                net.reset()
+            """
             _, targets = dataset.next()
 
             loc_targets, cls_targets = encode_boxes(targets, box_coder, cuda)
@@ -373,7 +370,7 @@ if __name__ == '__main__':
 	
         proba *= 0.9
         alpha *= 0.9
-        alpha = max(0.2, alpha)
+        #alpha = max(0.2, alpha)
 
 
 

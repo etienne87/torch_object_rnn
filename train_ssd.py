@@ -7,7 +7,6 @@ import torch.backends.cudnn as cudnn
 
 from core.ssd import SSD
 from core.box_coder import SSDBoxCoder
-from core.box_coder2 import RetinaBoxCoder
 from core.ssd_loss import SSDLoss
 from core.focal_loss import FocalLoss
 from core.trainer import SSDTrainer
