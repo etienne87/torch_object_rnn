@@ -56,63 +56,6 @@ def move_box(x1, y1, x2, y2, vx, vy, vs, width, height, min_width, min_height):
     return box, flags
 
 
-class SquaresImages:
-    """
-    Toy Detection DataBase for image detection.
-    Make a Rectangle filled with white or black and its bbox
-    """
-
-    def __init__(self, batchsize=32, h=300, w=300, normalize=False, cuda=False):
-        self.batchsize = batchsize
-        self.num_frames = 100000
-        self.height, self.width = h, w
-        self.minheight, self.minwidth = 40, 40
-        self.cuda = cuda
-        self.rate = 0
-        self.normalize = normalize
-        self.labelmap = ['square']
-        self.multi_aspect_ratios = False
-
-    def cuda(self, cuda):
-        self.cuda = cuda
-
-    def __len__(self):
-        return self.num_frames
-
-    def next(self):
-        x = torch.zeros(self.batchsize, 1, self.height, self.width)
-        y = []
-        for i in range(self.batchsize):
-
-            if self.multi_aspect_ratios:
-                x1 = np.random.randint(0, self.width - 1 - self.minwidth)
-                y1 = np.random.randint(0, self.height - 1 - self.minheight)
-                x2 = np.random.randint(x1 + self.minwidth, self.width)
-                y2 = np.random.randint(y1 + self.minheight, self.height)
-            else:
-                s = np.random.randint(self.minheight, 4 * self.minheight)
-                xmax = np.maximum(self.width - 1 - s, 1)
-                ymax = np.maximum(self.height - 1 - s, 1)
-                x1 = np.random.randint(0, xmax)
-                y1 = np.random.randint(0, ymax)
-                x2 = x1 + s
-                y2 = y1 + s
-
-            x1_, y1_, x2_, y2_ = clamp_xyxy(x1, y1, x2, y2, self.width - 1, self.height - 1)
-
-            x[i, 0, y1_:y2_, x1_:x2_] = 1
-            # assert (x[i].min() != x[i].max())
-
-            # Normalize (0,1)
-            if self.normalize:
-                x1, x2 = float(x1) / self.width, float(x2) / self.width
-                y1, y2 = float(y1) / self.height, float(y2) / self.height
-            box = np.array([x1, y1, x2, y2, 0], dtype=np.float32).reshape(1, 5)
-            y.append(torch.from_numpy(box))
-
-        return x, y
-
-
 class MovingSquare:
     """
      Responsible for endless MovingSquare
@@ -123,7 +66,8 @@ class MovingSquare:
         self.minheight, self.minwidth = 30, 30
         self.stop_num = 0
         self.max_stop = max_stop
-        self.color = 0.5 + torch.rand(c) / 2
+        self.shape_class = np.random.randint(3)
+        self.color = (0.5 + np.random.rand(c)/2).tolist()
         self.iter = 0
         self.reset()
         self.run()
@@ -193,9 +137,9 @@ class MovingSquare:
         return (x1, y1, x2, y2)
 
 
-class SquareAnimation:
+class Animation:
     """
-     Responsible for endless WhiteSquare Animation
+     Responsible for endless Animation
     """
 
     def __init__(self, t=10, h=300, w=300, c=1, max_stop=15, mode='none'):
@@ -204,7 +148,7 @@ class SquareAnimation:
         self.channels = c
         self.mode = mode
 
-        self.num_objects = 1 #np.random.randint(1, 5)
+        self.num_objects = 1 #np.random.randint(0, 2)
         self.objects = []
         for i in range(self.num_objects):
             self.objects += [MovingSquare(t, h, w, c, max_stop)]
@@ -214,8 +158,8 @@ class SquareAnimation:
     def reset(self):
         for object in self.objects:
             object.reset()
-        self.prev_img = torch.zeros(self.channels, self.height, self.width)
-        self.img = torch.zeros(self.channels, self.height, self.width)
+        self.prev_img = np.zeros((self.height, self.width, self.channels), dtype=np.float32)
+        self.img = np.zeros((self.height, self.width, self.channels), dtype=np.float32)
 
     def run(self):
         self.prev_img[...] = self.img
@@ -225,28 +169,26 @@ class SquareAnimation:
         for i, object in enumerate(self.objects):
             x1, y1, x2, y2 = object.run()
 
-            for c in range(self.channels):
-                self.img[c, y1:y2, x1:x2] += object.color[c]
+            if object.shape_class == 0:
+                cv2.rectangle(self.img, (x1, y1), (x2, y2), object.color, -1)
+            elif object.shape_class == 1:
+                pt1 = x1, y2
+                pt2 = x2, y2
+                pt3 = (x1+x2)/2, y1
+                triangle_cnt = np.array([pt1, pt2, pt3])
+                cv2.drawContours(self.img, [triangle_cnt], 0, (0,255,0), -1)
+            else:
+                ptc = (x1+x2)/2, (y1+y2)/2
+                radius = int((x2-x1)/2/np.sqrt(2))
+                cv2.circle(self.img, ptc, radius, object.color, -1)
+                
             boxes[i] = np.array([x1, y1, x2, y2, 0])
 
 
         self.first_iteration = False
 
-        # diff = self.img - self.prev_img
-        # if self.mode == 'diff':
-        #     output = diff
-        # else:
-        #     output = self.img
-        #
-        # # if np.random.rand() < 0.8:
-        # #     output[...] = 0
-        #
-        # # noise
-        # output -= 0.5 * (torch.rand(self.height, self.width) > 0.99).float()
-        # output += 0.5 * (torch.rand(self.height, self.width) > 0.99).float()
-        # output *= (torch.rand(self.height, self.width) > 0.2).float()
-
-        output = self.img
+    
+        output = np.transpose(self.img, [2, 0, 1])
         return output, boxes
 
 
@@ -267,7 +209,7 @@ class SquaresVideos:
         self.labelmap = ['square']
         self.multi_aspect_ratios = False
         self.max_stops = max_stops
-        self.animations = [SquareAnimation(t, h, w, c, self.max_stops, mode) for i in range(self.batchsize)]
+        self.animations = [Animation(t, h, w, c, self.max_stops, mode) for i in range(self.batchsize)]
 
     def reset(self):
         for anim in self.animations:
@@ -275,7 +217,7 @@ class SquaresVideos:
 
     def reset_size(self, height, width):
         self.height, self.width = height, width
-        self.animations = [SquareAnimation(self.time, height, width, self.channels, self.max_stops) for i in
+        self.animations = [Animation(self.time, height, width, self.channels, self.max_stops) for i in
                            range(self.batchsize)]
 
     def __len__(self):
@@ -289,7 +231,7 @@ class SquaresVideos:
         for i, anim in enumerate(self.animations):
             for t in range(self.time):
                 im, boxes = anim.run()
-                x[t, i, :] = im
+                x[t, i, :] = torch.from_numpy(im)
                 y[t].append(torch.from_numpy(boxes))
 
         return x, y
@@ -302,7 +244,7 @@ class SquaresVideos:
 if __name__ == '__main__':
     from core.utils import boxarray_to_boxes, draw_bboxes, make_single_channel_display
 
-    dataloader = SquaresVideos(t=10, c=3, h=64, w=64, batchsize=1)
+    dataloader = SquaresVideos(t=10, c=3, h=128, w=128, batchsize=1)
 
     start = 0
 
