@@ -39,13 +39,15 @@ class FocalLoss(nn.Module):
         '''
         alpha = 0.25
         gamma = 3
-        t = one_hot_embedding(y, self.num_classes)
+        z = one_hot_embedding(y, self.num_classes)
         p = x.sigmoid()
-        pt = torch.where(t>0, p, 1-p)    # pt = p if t > 0 else 1-p
+        pt = torch.where(z>0, p, 1-p)    # pt = p if t > 0 else 1-p
         w = (1-pt).pow(gamma)
-        w = torch.where(t>0, alpha*w, (1-alpha)*w)
-        loss = F.binary_cross_entropy_with_logits(x, t, w, size_average=False)
-        return loss
+        weights = torch.where(z>0, alpha*w, (1-alpha)*w)
+        losses = F.relu(x) - x * z + torch.log(1 + torch.exp(-torch.abs(x)))
+        loss = losses * weights
+
+        return loss.mean(dim=-1)
 
     def softmax_focal_loss(self, x, y):
         '''Softmax Focal loss.

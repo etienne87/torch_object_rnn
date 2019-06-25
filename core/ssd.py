@@ -92,8 +92,8 @@ class SSD(nn.Module):
         loc_preds = torch.cat(loc_preds, 1)
         cls_preds = torch.cat(cls_preds, 1)
 
-        if not self.train:
-            cls_preds = self.act(cls_preds, dim=1)
+        if not self.training:
+            cls_preds = self.act(cls_preds, dim=2)
 
         return loc_preds, cls_preds
 

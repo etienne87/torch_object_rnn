@@ -176,7 +176,7 @@ class Animation:
                 pt2 = x2, y2
                 pt3 = (x1+x2)/2, y1
                 triangle_cnt = np.array([pt1, pt2, pt3])
-                cv2.drawContours(self.img, [triangle_cnt], 0, (0,255,0), -1)
+                cv2.drawContours(self.img, [triangle_cnt], 0, object.color, -1)
             else:
                 ptc = (x1+x2)/2, (y1+y2)/2
                 radius = int((x2-x1)/2)
