@@ -66,7 +66,7 @@ class MovingSquare:
         self.minheight, self.minwidth = 30, 30
         self.stop_num = 0
         self.max_stop = max_stop
-        self.shape_class = np.random.randint(3)
+        self.class_id = np.random.randint(3)
         self.color = (0.5 + np.random.rand(c)/2).tolist()
         self.iter = 0
         self.reset()
@@ -169,9 +169,9 @@ class Animation:
         for i, object in enumerate(self.objects):
             x1, y1, x2, y2 = object.run()
 
-            if object.shape_class == 0:
+            if object.class_id == 0:
                 cv2.rectangle(self.img, (x1, y1), (x2, y2), object.color, -1)
-            elif object.shape_class == 1:
+            elif object.class_id == 1:
                 pt1 = x1, y2
                 pt2 = x2, y2
                 pt3 = (x1+x2)/2, y1
@@ -179,10 +179,10 @@ class Animation:
                 cv2.drawContours(self.img, [triangle_cnt], 0, (0,255,0), -1)
             else:
                 ptc = (x1+x2)/2, (y1+y2)/2
-                radius = int((x2-x1)/2/np.sqrt(2))
+                radius = int((x2-x1)/2)
                 cv2.circle(self.img, ptc, radius, object.color, -1)
                 
-            boxes[i] = np.array([x1, y1, x2, y2, 0])
+            boxes[i] = np.array([x1, y1, x2, y2, object.class_id])
 
 
         self.first_iteration = False
@@ -206,7 +206,7 @@ class SquaresVideos:
         self.time, self.height, self.width = t, h, w
         self.rate = 0
         self.normalize = normalize
-        self.labelmap = ['square']
+        self.labelmap = ['square', 'triangle', 'circle']
         self.multi_aspect_ratios = False
         self.max_stops = max_stops
         self.animations = [Animation(t, h, w, c, self.max_stops, mode) for i in range(self.batchsize)]
@@ -249,8 +249,6 @@ if __name__ == '__main__':
     start = 0
 
     for i, (x, y) in enumerate(dataloader):
-        print(1000 * (time.time() - start), ' to get x, y')
-
         start = time.time()
         for j in range(x.size(1)):
 
@@ -268,13 +266,8 @@ if __name__ == '__main__':
                     show[...] = img
                     img = show
 
-                #img = draw_bboxes(img, bboxes)
+                img = draw_bboxes(img, bboxes)
                 cv2.imshow('example', img)
                 key = cv2.waitKey(5)
                 if key == 27:
                     exit()
-
-        end = time.time() - start
-        print('display batch: ', end * 1000)
-
-        start = time.time()

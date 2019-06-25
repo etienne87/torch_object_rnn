@@ -34,7 +34,7 @@ def main():
 
     os.environ['OMP_NUM_THREADS'] = '1'
 
-    classes, cin, time, height, width = 2, 1, 10, 128, 128
+    classes, cin, time, height, width = 4, 3, 10, 128, 128
 
     nrows = 4
 
@@ -67,8 +67,8 @@ def main():
         box_coder.cuda()
 
 
-    #criterion = SSDLoss(num_classes=classes)
-    criterion = FocalLoss(num_classes=classes)
+    criterion = SSDLoss(num_classes=classes)
+    # criterion = FocalLoss(num_classes=classes)
     optimizer = optim.Adam(net.parameters(), lr=args.lr, betas=(0.9, 0.999), eps=1e-8, weight_decay=0)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.99)
     trainer = SSDTrainer(args.logdir, net, box_coder, criterion, optimizer, all_timesteps=True)

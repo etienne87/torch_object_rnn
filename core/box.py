@@ -85,6 +85,7 @@ def box_iou(box1, box2):
     iou = inter / (area1[:,None] + area2 - inter)
     return iou
 
+
 def box_nms(bboxes, scores, threshold=0.5):
     '''Non maximum suppression.
 
