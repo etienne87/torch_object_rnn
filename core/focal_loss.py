@@ -65,7 +65,7 @@ class FocalLoss(nn.Module):
         r = torch.arange(x.size(0))
         pt = F.softmax(x, dim=1)[r,y]
         weights = (1-pt).pow(gamma)
-        print(weights.min(), weights.max())
+        #print(weights.min(), weights.max())
         ce = -F.log_softmax(x, dim=1)[r,y]
         loss = self.alpha * weights * ce
         return loss.mean()

@@ -150,7 +150,7 @@ class Animation:
         self.t = t
         self.max_stop = max_stop
 
-        self.num_objects = 1 #np.random.randint(0, 2)
+        self.num_objects = np.random.randint(1, 3)
         self.objects = []
         for i in range(self.num_objects):
             self.objects += [MovingSquare(t, h, w, c, max_stop)]
@@ -271,6 +271,6 @@ if __name__ == '__main__':
 
                 img = draw_bboxes(img, bboxes)
                 cv2.imshow('example', img)
-                key = cv2.waitKey(5)
+                key = cv2.waitKey(0)
                 if key == 27:
                     exit()
