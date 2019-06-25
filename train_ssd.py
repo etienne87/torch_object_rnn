@@ -46,16 +46,18 @@ def main():
     dataset.num_frames = args.train_iter
     dataloader = dataset
 
-    criterion = SSDLoss(num_classes=classes)
-    #criterion = FocalLoss(num_classes=classes)
+    #criterion = SSDLoss(num_classes=classes)
+    criterion = FocalLoss(num_classes=classes, softmax=True)
 
 
     # Model
     print('==> Building model..')
-    net = SSD(feature_extractor=ConvRNNFeatureExtractor, num_classes=classes, cin=cin, height=height, width=width, act=F.softmax)
+    net = SSD(feature_extractor=ConvRNNFeatureExtractor,
+              num_classes=classes, cin=cin, height=height, width=width, act="softmax")
 
     if args.cuda:
         net.cuda()
+        criterion.cuda()
         cudnn.benchmark = True
 
     best_loss = float('inf')  # best test loss

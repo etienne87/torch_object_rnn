@@ -19,10 +19,12 @@ def one_hot_embedding(labels, num_classes):
 
 
 class FocalLoss(nn.Module):
-    def __init__(self, num_classes):
+    def __init__(self, num_classes, softmax=False):
         super(FocalLoss, self).__init__()
         self.num_classes = num_classes
-        self.softmax = False
+        self.softmax = softmax
+        self.alpha = nn.Parameter(torch.ones(num_classes, 1).float())
+
 
     def sigmoid_focal_loss(self, x, y):
         '''Sigmoid Focal loss.
@@ -38,22 +40,18 @@ class FocalLoss(nn.Module):
           (tensor) focal loss.
         '''
         alpha = 0.25
-        gamma = 3
+        gamma = 2
         z = one_hot_embedding(y, self.num_classes)
         p = x.sigmoid()
         pt = torch.where(z>0, p, 1-p)    # pt = p if t > 0 else 1-p
-        w = (1-pt).pow(gamma)
-        weights = torch.where(z>0, alpha*w, (1-alpha)*w)
+        weights = (1-pt).pow(gamma)
+        weights = torch.where(z>0, alpha*weights, (1-alpha)*weights)
         losses = F.relu(x) - x * z + torch.log(1 + torch.exp(-torch.abs(x)))
         loss = losses * weights
-
-        return loss.mean(dim=-1)
+        return loss.mean()
 
     def softmax_focal_loss(self, x, y):
         '''Softmax Focal loss.
-
-        This is described in the original paper.
-        With BCELoss, the background should not be counted in num_classes.
 
         Args:
           x: (tensor) predictions, sized [N,D].
@@ -63,12 +61,14 @@ class FocalLoss(nn.Module):
           (tensor) focal loss.
         '''
         alpha = 0.25
-        gamma = 3
-        pt = F.softmax(x)[:,y]
-        w = (1-pt).pow(gamma)
-        p = -F.log_softmax(x, dim=1)[torch.arange(100),y].sum(dim=0)
-        loss = w * p
-        return loss.sum(dim=0)
+        gamma = 2
+        r = torch.arange(x.size(0))
+        pt = F.softmax(x, dim=1)[r,y]
+        weights = (1-pt).pow(gamma)
+        print(weights.min(), weights.max())
+        ce = -F.log_softmax(x, dim=1)[r,y]
+        loss = self.alpha * weights * ce
+        return loss.mean()
 
 
     def forward(self, loc_preds, loc_targets, cls_preds, cls_targets):
@@ -91,7 +91,7 @@ class FocalLoss(nn.Module):
         # loc_loss = SmoothL1Loss(pos_loc_preds, pos_loc_targets)
         #===============================================================
         mask = pos.unsqueeze(2).expand_as(loc_preds)       # [N,#anchors,4]
-        loc_loss = F.smooth_l1_loss(loc_preds[mask], loc_targets[mask], size_average=False)
+        loc_loss = F.smooth_l1_loss(loc_preds[mask], loc_targets[mask], size_average=True)
 
         #===============================================================
         # cls_loss = FocalLoss(cls_preds, cls_targets)
@@ -105,7 +105,5 @@ class FocalLoss(nn.Module):
         else:
             cls_loss = self.sigmoid_focal_loss(masked_cls_preds, cls_targets[pos_neg])
 
-        #normalization could be optional?
-        loc_loss /= num_pos
-        cls_loss /= num_pos
+
         return loc_loss, cls_loss

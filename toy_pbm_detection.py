@@ -147,6 +147,8 @@ class Animation:
         self.width = w
         self.channels = c
         self.mode = mode
+        self.t = t
+        self.max_stop = max_stop
 
         self.num_objects = 1 #np.random.randint(0, 2)
         self.objects = []
@@ -156,8 +158,9 @@ class Animation:
         self.run()
 
     def reset(self):
-        for object in self.objects:
-            object.reset()
+        self.objects = []
+        for i in range(self.num_objects):
+            self.objects += [MovingSquare(self.t, self.height, self.width, self.channels, self.max_stop)]
         self.prev_img = np.zeros((self.height, self.width, self.channels), dtype=np.float32)
         self.img = np.zeros((self.height, self.width, self.channels), dtype=np.float32)
 

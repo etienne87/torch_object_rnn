@@ -35,7 +35,7 @@ def get_box_params(sources, h, w):
 
 
 class SSD(nn.Module):
-    def __init__(self, feature_extractor, num_classes=2, cin=2, height=300, width=300, act=F.softmax):
+    def __init__(self, feature_extractor, num_classes=2, cin=2, height=300, width=300, act='softmax'):
         super(SSD, self).__init__()
         self.num_classes = num_classes
         self.height, self.width = height, width
@@ -93,7 +93,10 @@ class SSD(nn.Module):
         cls_preds = torch.cat(cls_preds, 1)
 
         if not self.training:
-            cls_preds = self.act(cls_preds, dim=2)
+            if self.act == 'softmax':
+                cls_preds = F.softmax(cls_preds, dim=2)
+            else:
+                cls_preds = torch.sigmoid(cls_preds)
 
         return loc_preds, cls_preds
 
