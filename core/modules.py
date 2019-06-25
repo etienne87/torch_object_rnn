@@ -63,11 +63,6 @@ class ConvLSTMCell(nn.Module):
             cc_i, cc_f, cc_o, cc_g = torch.split(tmp, self.hidden_dim, dim=1)
             i = torch.sigmoid(cc_i)
             f = torch.sigmoid(cc_f)
-
-            #cc_f, cc_o, cc_g = torch.split(tmp, self.hidden_dim, dim=1)
-            #f = torch.sigmoid(cc_f)
-            #i = 1 - f
-
             o = torch.sigmoid(cc_o)
             g = torch.tanh(cc_g)
             if self.prev_c is None:
@@ -104,7 +99,7 @@ class ConvLSTM(nn.Module):
 
         self.cin = nInputPlane
         self.cout = nOutputPlane
-        self.conv1 = nn.Conv2d(nInputPlane, 3 * nOutputPlane, kernel_size=kernel_size, stride=stride, dilation=dilation,
+        self.conv1 = nn.Conv2d(nInputPlane, 4 * nOutputPlane, kernel_size=kernel_size, stride=stride, dilation=dilation,
                                padding=padding,
                                bias=True)
 
@@ -120,109 +115,6 @@ class ConvLSTM(nn.Module):
         h = self.timepool(y)
         return h
 
-
-class SpatialGRUCell(nn.Module):
-    r"""SpatialGRUCell module, applies sequential part of LSTM.
-        Row-by-Row or Col-by-Col
-    """
-
-    def __init__(self, hidden_dim, kernel_size, bias, dim=3):
-        super(SpatialGRUCell, self).__init__()
-        self.hidden_dim = hidden_dim
-        self.spdim = dim
-
-        # Fully-Gated
-        self.conv_h2zr = nn.Sequential(
-                         nn.BatchNorm1d(self.hidden_dim),
-                         nn.Conv1d(in_channels=self.hidden_dim,
-                                   out_channels=2 * self.hidden_dim,
-                                   kernel_size=kernel_size,
-                                   padding=1,
-                                   bias=bias))
-
-        self.conv_h2h = nn.Sequential(
-                        nn.BatchNorm1d(self.hidden_dim),
-                        nn.Conv1d(in_channels=self.hidden_dim,
-                                  out_channels=self.hidden_dim,
-                                  kernel_size=kernel_size,
-                                  padding=1,
-                                  bias=bias))
-
-        self.reset()
-
-    def forward(self, xi):
-        xiseq = xi.split(1, self.spdim)  # n,c,h,w -> h x (n,c,w) or w x (n,c,h)
-
-        # if self.prev_h is not None:
-        #     self.prev_h = self.prev_h.detach()
-
-        self.reset()
-
-        result = []
-        for t, xt in enumerate(xiseq):
-            xt = xt.squeeze(self.spdim)
-
-            # split x & h in 3
-            x_zr, x_h = xt[:, :2 * self.hidden_dim], xt[:, 2 * self.hidden_dim:]
-
-            if self.prev_h is not None:
-                tmp = self.conv_h2zr(self.prev_h) + x_zr
-            else:
-                tmp = x_zr
-
-            cc_z, cc_r = torch.split(tmp, self.hidden_dim, dim=1)
-            z = torch.sigmoid(cc_z)
-            r = torch.sigmoid(cc_r)
-
-            if self.prev_h is not None:
-                tmp = self.conv_h2h(r * self.prev_h) + x_h
-            else:
-                tmp = x_h
-            tmp = torch.tanh(tmp)
-
-            if self.prev_h is not None:
-                h = (1 - z) * self.prev_h + z * tmp
-            else:
-                h = z * tmp
-
-
-            result.append(h.unsqueeze(self.spdim))
-            self.prev_h = h
-
-        res = torch.cat(result, dim=self.spdim)
-        return res
-
-    def reset(self):
-        self.prev_h = None
-
-
-class SpatialGRU(nn.Module):
-    r"""ConvGRU module.
-    """
-    def __init__(self, nInputPlane, nOutputPlane, kernel_size, stride, padding, dilation=1):
-        super(SpatialGRU, self).__init__()
-
-        self.cin = nInputPlane
-        self.cout = nOutputPlane
-        self.conv1 = nn.Conv2d(nInputPlane, 3 * nOutputPlane, kernel_size=kernel_size, stride=stride, dilation=dilation,
-                               padding=padding,
-                               bias=True)
-
-        self.bn1 = nn.BatchNorm2d(nInputPlane)
-
-        self.conv2 = nn.Conv2d(nOutputPlane, 3 * nOutputPlane, kernel_size=kernel_size, stride=stride, dilation=dilation,
-                               padding=padding,
-                               bias=True)
-
-        self.bn2 = nn.BatchNorm2d(nOutputPlane)
-
-        self.xpool = SpatialGRUCell(nOutputPlane, 3, True, dim=3)
-        self.ypool = SpatialGRUCell(nOutputPlane, 3, True, dim=2)
-
-    def forward(self, x):
-        x = self.xpool(self.conv1(self.bn1(x)))
-        h = self.ypool(self.conv2(self.bn2(x)))
-        return h
 
 
 class ConvGRUCell(nn.Module):

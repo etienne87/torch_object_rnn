@@ -22,10 +22,10 @@ class FocalLoss(nn.Module):
     def __init__(self, num_classes):
         super(FocalLoss, self).__init__()
         self.num_classes = num_classes
-        self.normalize = True
+        self.softmax = False
 
-    def _focal_loss(self, x, y):
-        '''Focal loss.
+    def sigmoid_focal_loss(self, x, y):
+        '''Sigmoid Focal loss.
 
         This is described in the original paper.
         With BCELoss, the background should not be counted in num_classes.
@@ -46,6 +46,28 @@ class FocalLoss(nn.Module):
         w = torch.where(t>0, alpha*w, (1-alpha)*w)
         loss = F.binary_cross_entropy_with_logits(x, t, w.data, size_average=False)
         return loss
+
+    def softmax_focal_loss(self, x, y):
+        '''Softmax Focal loss.
+
+        This is described in the original paper.
+        With BCELoss, the background should not be counted in num_classes.
+
+        Args:
+          x: (tensor) predictions, sized [N,D].
+          y: (tensor) targets, sized [N,].
+
+        Return:
+          (tensor) focal loss.
+        '''
+        alpha = 0.25
+        gamma = 3
+        pt = F.softmax(x)[:,y]
+        w = (1-pt).pow(gamma)
+        p = -F.logsoftmax(x)[:,y]
+        loss = w * p
+        return loss.sum(dim=0)
+
 
     def forward(self, loc_preds, loc_targets, cls_preds, cls_targets):
         '''Compute loss between (loc_preds, loc_targets) and (cls_preds, cls_targets).
@@ -75,10 +97,13 @@ class FocalLoss(nn.Module):
         pos_neg = cls_targets > -1  # exclude ignored anchors
         mask = pos_neg.unsqueeze(2).expand_as(cls_preds)
         masked_cls_preds = cls_preds[mask].view(-1,self.num_classes)
-        cls_loss = self._focal_loss(masked_cls_preds, cls_targets[pos_neg])
+
+        if self.softmax:
+            cls_loss = self.softmax_focal_loss(masked_cls_preds, cls_targets[pos_neg])
+        else:
+            cls_loss = self.sigmoid_focal_loss(masked_cls_preds, cls_targets[pos_neg])
 
         #normalization could be optional?
-        if self.normalize:
-	        loc_loss /= num_pos
-	        cls_loss /= num_pos
+        loc_loss /= num_pos
+        cls_loss /= num_pos
         return loc_loss, cls_loss

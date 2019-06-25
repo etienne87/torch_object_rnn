@@ -2,6 +2,7 @@ from __future__ import print_function
 import argparse
 import os
 import torch
+import torch.nn.functional as F
 import torch.optim as optim
 import torch.backends.cudnn as cudnn
 
@@ -45,9 +46,13 @@ def main():
     dataset.num_frames = args.train_iter
     dataloader = dataset
 
+    # criterion = SSDLoss(num_classes=classes)
+    criterion = FocalLoss(num_classes=classes)
+
+
     # Model
     print('==> Building model..')
-    net = SSD(feature_extractor=ConvRNNFeatureExtractor, num_classes=classes, cin=cin, height=height, width=width)
+    net = SSD(feature_extractor=ConvRNNFeatureExtractor, num_classes=classes, cin=cin, height=height, width=width, act=F.sigmoid)
 
     if args.cuda:
         net.cuda()
@@ -67,8 +72,7 @@ def main():
         box_coder.cuda()
 
 
-    criterion = SSDLoss(num_classes=classes)
-    # criterion = FocalLoss(num_classes=classes)
+    
     optimizer = optim.Adam(net.parameters(), lr=args.lr, betas=(0.9, 0.999), eps=1e-8, weight_decay=0)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.99)
     trainer = SSDTrainer(args.logdir, net, box_coder, criterion, optimizer, all_timesteps=True)

@@ -2,6 +2,7 @@
 from __future__ import division
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.autograd import Variable
 import math
 from deform_conv import ConvOffset2D
@@ -34,7 +35,7 @@ def get_box_params(sources, h, w):
 
 
 class SSD(nn.Module):
-    def __init__(self, feature_extractor, num_classes=2, cin=2, height=300, width=300):
+    def __init__(self, feature_extractor, num_classes=2, cin=2, height=300, width=300, act=F.softmax):
         super(SSD, self).__init__()
         self.num_classes = num_classes
         self.height, self.width = height, width
@@ -62,6 +63,8 @@ class SSD(nn.Module):
             self.cls_layers += [
                 nn.Conv2d(self.in_channels[i], self.num_anchors[i] * self.num_classes, kernel_size=3, padding=1)]
 
+        self.act = F.softmax
+
     def get_ssd_params(self):
         x = Variable(torch.randn(1, 1, self.cin, self.height, self.width))
         sources = self.extractor(x)
@@ -88,5 +91,9 @@ class SSD(nn.Module):
 
         loc_preds = torch.cat(loc_preds, 1)
         cls_preds = torch.cat(cls_preds, 1)
+
+        if not self.train:
+            cls_preds = self.act(cls_preds, dim=1)
+
         return loc_preds, cls_preds
 

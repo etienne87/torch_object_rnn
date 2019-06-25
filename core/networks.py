@@ -1,5 +1,5 @@
 import torch.nn as nn
-from modules import Conv2d, ConvLSTM, ConvGRU, SpatialGRU, batch_to_time, time_to_batch
+from modules import Conv2d, ConvLSTM, ConvGRU, batch_to_time, time_to_batch
 
 
 class ConvRNNFeatureExtractor(nn.Module):
@@ -7,14 +7,13 @@ class ConvRNNFeatureExtractor(nn.Module):
         super(ConvRNNFeatureExtractor, self).__init__()
         self.cin = cin
         base = 8
-        self.conv0 = Conv2d(cin, base, kernel_size=7, stride=2, padding=3, addcoords=False)
-        self.conv1 = Conv2d(base, base * 2, kernel_size=7, stride=2, padding=3)
-        self.conv2 = Conv2d(base*2, base * 4, kernel_size=7, stride=2, padding=3)
-
-        self.conv3 = ConvLSTM(base * 4, base * 4, kernel_size=7, stride=2, padding=3)
-        self.conv4 = ConvLSTM(base * 4, base * 4, kernel_size=7, stride=2, padding=3)
-        self.conv5 = ConvLSTM(base * 4, base * 4, kernel_size=7, stride=2, padding=3)
-        self.conv6 = ConvLSTM(base * 4, base * 4, kernel_size=7, stride=2, padding=3)
+        self.conv1 = Conv2d(cin, base, kernel_size=7, stride=2, padding=3, addcoords=False)
+        self.conv2 = Conv2d(base, base * 4, kernel_size=7, stride=2, padding=3)
+        
+        self.conv3 = ConvLSTM(base * 4, base * 8, kernel_size=7, stride=2, padding=3)
+        self.conv4 = ConvLSTM(base * 8, base * 16, kernel_size=7, stride=1, dilation=1, padding=3)
+        self.conv5 = ConvLSTM(base * 16, base * 16, kernel_size=7, stride=1, dilation=2, padding=3)
+        self.conv6 = ConvLSTM(base * 16, base * 16, kernel_size=7, stride=1, dilation=3, padding=3*2)
 
         self.end_point_channels = [self.conv3.cout,  # 8
                                    self.conv4.cout,  # 16
@@ -27,7 +26,6 @@ class ConvRNNFeatureExtractor(nn.Module):
         sources = list()
 
         x0, n = time_to_batch(x)
-        x0 = self.conv0(x0)
         x1 = self.conv1(x0)
         x2 = self.conv2(x1)
         x2 = batch_to_time(x2, n)
@@ -55,3 +53,4 @@ class ConvRNNFeatureExtractor(nn.Module):
             if isinstance(module, ConvLSTM) or \
                isinstance(module, ConvGRU):
                 module.timepool.reset()
+

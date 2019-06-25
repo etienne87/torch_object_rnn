@@ -32,6 +32,9 @@ class SSDTrainer(object):
         train_loss = 0
         self.net.extractor.return_all = self.all_timesteps
 
+        dataset.reset()
+        proba_reset = 1 * (0.9)**epoch
+
         start = 0
         runtime_stats = {'dataloader': 0, 'network': 0}
         for batch_idx, data in enumerate(dataset):
@@ -40,6 +43,11 @@ class SSDTrainer(object):
             inputs, targets = data
             if args.cuda:
                 inputs = inputs.cuda()
+
+            if np.random.rand() < proba_reset:
+            	dataset.reset()
+            	self.net.reset()
+
 
             start = time.time()
             self.optimizer.zero_grad()
@@ -106,6 +114,8 @@ class SSDTrainer(object):
         self.net.reset()
         self.net.extractor.return_all = True
 
+        dataset.reset()
+
         periods = args.test_iter
         batchsize = dataset.batchsize
         time = dataset.time
@@ -131,7 +141,7 @@ class SSDTrainer(object):
                     img = self.make_image(images[t, i])
                     # assert img.shape == grid[0, 0].shape
                     boxes, labels, scores = self.box_coder.decode(loc_preds[t, i].data,
-                                                                  F.softmax(cls_preds[t, i], dim=1).data,
+                                                                  cls_preds[t, i].data,
                                                                   nms_thresh=0.6)
                     if boxes is not None:
                         bboxes = utils.boxarray_to_boxes(boxes, labels, dataset.labelmap)
