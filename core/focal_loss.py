@@ -64,7 +64,7 @@ class FocalLoss(nn.Module):
         gamma = 3
         pt = F.softmax(x)[:,y]
         w = (1-pt).pow(gamma)
-        p = -F.logsoftmax(x)[:,y]
+        p = -F.log_softmax(x, dim=1)[torch.arange(100),y].sum(dim=0)
         loss = w * p
         return loss.sum(dim=0)
 

@@ -142,7 +142,7 @@ class SSDTrainer(object):
                     # assert img.shape == grid[0, 0].shape
                     boxes, labels, scores = self.box_coder.decode(loc_preds[t, i].data,
                                                                   cls_preds[t, i].data,
-                                                                  nms_thresh=0.6)
+                                                                  nms_thresh=0.4)
                     if boxes is not None:
                         bboxes = utils.boxarray_to_boxes(boxes, labels, dataset.labelmap)
                         img = utils.draw_bboxes(img, bboxes)

@@ -63,7 +63,7 @@ class SSD(nn.Module):
             self.cls_layers += [
                 nn.Conv2d(self.in_channels[i], self.num_anchors[i] * self.num_classes, kernel_size=3, padding=1)]
 
-        self.act = F.softmax
+        self.act = act
 
     def get_ssd_params(self):
         x = Variable(torch.randn(1, 1, self.cin, self.height, self.width))

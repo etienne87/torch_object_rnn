@@ -17,7 +17,7 @@ class SSDBoxCoder:
         self.default_boxes_xyxy =  change_box_order(self.default_boxes, 'xywh2xyxy')
         self.iou_threshold = 0.5
         self.use_cuda = False
-        self.variances = (0.2, 0.2)
+        self.variances = (0.1, 0.1)
 
     def print_info(self):
         print('steps', self.steps)
