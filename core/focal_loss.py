@@ -44,7 +44,7 @@ class FocalLoss(nn.Module):
         pt = torch.where(t>0, p, 1-p)    # pt = p if t > 0 else 1-p
         w = (1-pt).pow(gamma)
         w = torch.where(t>0, alpha*w, (1-alpha)*w)
-        loss = F.binary_cross_entropy_with_logits(x, t, w.data, size_average=False)
+        loss = F.binary_cross_entropy_with_logits(x, t, w, size_average=False)
         return loss
 
     def softmax_focal_loss(self, x, y):
