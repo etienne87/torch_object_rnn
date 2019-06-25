@@ -7,13 +7,14 @@ class ConvRNNFeatureExtractor(nn.Module):
         super(ConvRNNFeatureExtractor, self).__init__()
         self.cin = cin
         base = 8
-        self.conv1 = Conv2d(cin, base, kernel_size=7, stride=2, padding=3, addcoords=False)
-        self.conv2 = Conv2d(base, base * 2, kernel_size=7, stride=2, padding=3)
+        self.conv0 = Conv2d(cin, base, kernel_size=7, stride=2, padding=3, addcoords=False)
+        self.conv1 = Conv2d(base, base * 2, kernel_size=7, stride=2, padding=3)
+        self.conv2 = Conv2d(base*2, base * 4, kernel_size=7, stride=2, padding=3)
 
-        self.conv3 = ConvGRU(base * 2, base * 4, kernel_size=7, stride=2, padding=3)
-        self.conv4 = ConvGRU(base * 4, base * 4, kernel_size=7, stride=1, dilation=1, padding=3)
-        self.conv5 = ConvGRU(base * 4, base * 4, kernel_size=7, stride=1, dilation=2, padding=3)
-        self.conv6 = ConvGRU(base * 4, base * 4, kernel_size=7, stride=1, dilation=3, padding=3*2)
+        self.conv3 = ConvLSTM(base * 4, base * 4, kernel_size=7, stride=2, padding=3)
+        self.conv4 = ConvLSTM(base * 4, base * 4, kernel_size=7, stride=2, padding=3)
+        self.conv5 = ConvLSTM(base * 4, base * 4, kernel_size=7, stride=2, padding=3)
+        self.conv6 = ConvLSTM(base * 4, base * 4, kernel_size=7, stride=2, padding=3)
 
         self.end_point_channels = [self.conv3.cout,  # 8
                                    self.conv4.cout,  # 16
@@ -26,6 +27,7 @@ class ConvRNNFeatureExtractor(nn.Module):
         sources = list()
 
         x0, n = time_to_batch(x)
+        x0 = self.conv0(x0)
         x1 = self.conv1(x0)
         x2 = self.conv2(x1)
         x2 = batch_to_time(x2, n)
@@ -53,39 +55,3 @@ class ConvRNNFeatureExtractor(nn.Module):
             if isinstance(module, ConvLSTM) or \
                isinstance(module, ConvGRU):
                 module.timepool.reset()
-
-
-class FFFeatureExtractor(nn.Module):
-    def __init__(self, cin=1):
-        super(FFFeatureExtractor, self).__init__()
-        self.cin = cin
-        base = 8
-        self.conv1 = Conv2d(cin, base, kernel_size=7, stride=2, padding=3, addcoords=False)
-        self.conv2 = Conv2d(base, base * 2, kernel_size=7, stride=2, padding=3)
-        self.conv3 = Conv2d(base * 2, base * 4, kernel_size=7, stride=2, padding=3)
-        self.conv4 = Conv2d(base * 4, base * 4, kernel_size=7, stride=1, dilation=1, padding=3)
-        self.conv5 = Conv2d(base * 4, base * 4, kernel_size=7, stride=1, dilation=2, padding=3)
-        self.conv6 = Conv2d(base * 4, base * 4, kernel_size=7, stride=1, dilation=3, padding=3 * 2)
-        self.end_point_channels = [self.conv3.cout,  # 8
-                                   self.conv4.cout,  # 16
-                                   self.conv5.cout,  # 32
-                                   self.conv6.cout]  # 64
-
-        self.return_all = True #if set returns rank-5, else returns rank-4 last item
-
-    def forward(self, x):
-        sources = list()
-
-        x0, n = time_to_batch(x)
-        x1 = self.conv1(x0)
-        x2 = self.conv2(x1)
-        x3 = self.conv3(x2)
-        x4 = self.conv4(x3)
-        x5 = self.conv5(x4)
-        x6 = self.conv6(x5)
-
-        sources += [x3, x4, x5, x6]
-        return sources
-
-    def reset(self):
-        pass

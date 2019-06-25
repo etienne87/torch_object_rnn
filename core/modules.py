@@ -24,14 +24,14 @@ class ConvLSTMCell(nn.Module):
         self.hidden_dim = hidden_dim
 
         self.conv_h2h = conv_func(in_channels=self.hidden_dim,
-                                  out_channels=3 * self.hidden_dim,
+                                  out_channels=4 * self.hidden_dim,
                                   kernel_size=kernel_size,
                                   padding=1,
                                   bias=False)
 
         # PeepHole?
         self.conv_c2h = conv_func(in_channels=self.hidden_dim,
-                                  out_channels=3 * self.hidden_dim,
+                                  out_channels=4 * self.hidden_dim,
                                   kernel_size=kernel_size,
                                   padding=1,
                                   bias=False)
@@ -60,12 +60,13 @@ class ConvLSTMCell(nn.Module):
             else:
                 tmp = xt
 
-            # cc_i, cc_f, cc_o, cc_g = torch.split(tmp, self.hidden_dim, dim=1)
-            # i = torch.sigmoid(cc_i)
-
-            cc_f, cc_o, cc_g = torch.split(tmp, self.hidden_dim, dim=1)
+            cc_i, cc_f, cc_o, cc_g = torch.split(tmp, self.hidden_dim, dim=1)
+            i = torch.sigmoid(cc_i)
             f = torch.sigmoid(cc_f)
-            i = 1 - f
+
+            #cc_f, cc_o, cc_g = torch.split(tmp, self.hidden_dim, dim=1)
+            #f = torch.sigmoid(cc_f)
+            #i = 1 - f
 
             o = torch.sigmoid(cc_o)
             g = torch.tanh(cc_g)

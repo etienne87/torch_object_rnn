@@ -135,8 +135,6 @@ class SSDTrainer(object):
                                                                   nms_thresh=0.6)
                     if boxes is not None:
                         bboxes = utils.boxarray_to_boxes(boxes, labels, dataset.labelmap)
-                        import pdb
-                        pdb.set_trace()
                         img = utils.draw_bboxes(img, bboxes)
 
                     grid[t + period * time, y, x] = img
