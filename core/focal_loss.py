@@ -23,7 +23,7 @@ class FocalLoss(nn.Module):
         super(FocalLoss, self).__init__()
         self.num_classes = num_classes
         self.softmax = softmax
-        self.alpha = nn.Parameter(torch.ones(num_classes, 1).float())
+        self.alpha = nn.Parameter(torch.ones(num_classes,).float())
 
 
     def sigmoid_focal_loss(self, x, y):
@@ -39,13 +39,12 @@ class FocalLoss(nn.Module):
         Return:
           (tensor) focal loss.
         '''
-        alpha = 0.25
         gamma = 2
         z = one_hot_embedding(y, self.num_classes)
         p = x.sigmoid()
         pt = torch.where(z>0, p, 1-p)    # pt = p if t > 0 else 1-p
         weights = (1-pt).pow(gamma)
-        weights = torch.where(z>0, alpha*weights, (1-alpha)*weights)
+        weights = torch.where(z>0, 0.25*weights, (1-0.25)*weights)
         losses = F.relu(x) - x * z + torch.log(1 + torch.exp(-torch.abs(x)))
         loss = losses * weights
         return loss.mean()
@@ -60,14 +59,12 @@ class FocalLoss(nn.Module):
         Return:
           (tensor) focal loss.
         '''
-        alpha = 0.25
         gamma = 2
         r = torch.arange(x.size(0))
         pt = F.softmax(x, dim=1)[r,y]
-        weights = (1-pt).pow(gamma)
-        #print(weights.min(), weights.max())
+        weights = (1-pt).pow(gamma) #should normalize?
         ce = -F.log_softmax(x, dim=1)[r,y]
-        loss = self.alpha * weights * ce
+        loss = weights * ce * self.alpha[y]
         return loss.mean()
 
 

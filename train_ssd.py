@@ -47,13 +47,13 @@ def main():
     dataloader = dataset
 
     #criterion = SSDLoss(num_classes=classes)
-    criterion = FocalLoss(num_classes=classes, softmax=True)
+    criterion = FocalLoss(num_classes=classes, softmax=False)
 
 
     # Model
     print('==> Building model..')
     net = SSD(feature_extractor=ConvRNNFeatureExtractor,
-              num_classes=classes, cin=cin, height=height, width=width, act="softmax")
+              num_classes=classes, cin=cin, height=height, width=width, act="sigmoid")
 
     if args.cuda:
         net.cuda()

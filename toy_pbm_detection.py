@@ -150,7 +150,7 @@ class Animation:
         self.t = t
         self.max_stop = max_stop
 
-        self.num_objects = np.random.randint(1, 3)
+        self.num_objects = 1 #np.random.randint(1, 3)
         self.objects = []
         for i in range(self.num_objects):
             self.objects += [MovingSquare(t, h, w, c, max_stop)]
