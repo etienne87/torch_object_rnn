@@ -94,6 +94,7 @@ class RNN(nn.Module):
         xseq = x.unbind(0)
         result = []
         ht = None
+        xt = None
 
         #First treat sequence
         for t, xt in enumerate(xseq):
@@ -102,8 +103,8 @@ class RNN(nn.Module):
                 if ht is not None and v > alpha and self.time > 1:
                     xt = ht.detach() 
             elif self.mode == 'combine':
-	            if ht is not None and self.time > 1:
-	             	xt = ht.detach() * (1- alpha) + xt * alpha
+                if ht is not None and self.time > 1:
+                    xt = ht.detach() * (1- alpha) + xt * alpha
             ht = self.cell(xt)
             result.append(ht[None])
             self.time += 1
@@ -124,7 +125,7 @@ class RNN(nn.Module):
                 module.detach_hidden()
 
     def reset(self, mask=None):
-    	self.time = 0
+        self.time = 0
         for name, module in self.cell._modules.iteritems():
             if isinstance(module, RNNCell):
                 module.reset(mask)
@@ -152,7 +153,7 @@ class LSTMCell(RNNCell):
         else:
             tmp = self.x2h(xt) + self.h2h(prev_h)
             
-        cc_i, cc_f, cc_o, cc_g = tmp.chunk(4, 1) #torch.split(tmp, self.hidden_dim, dim=1)
+        cc_i, cc_f, cc_o, cc_g = torch.split(tmp, self.hidden_dim, dim=1) #tmp.chunk(4, 1) #
         f = torch.sigmoid(cc_f)
         i = torch.sigmoid(cc_i)
         o = torch.sigmoid(cc_o)
