@@ -61,12 +61,12 @@ class MovingSquare:
      Responsible for endless MovingSquare
     """
 
-    def __init__(self, t=10, h=300, w=300, c=1, max_stop=15):
+    def __init__(self, t=10, h=300, w=300, c=1, max_stop=15, max_classes=3):
         self.time, self.height, self.width = t, h, w
         self.minheight, self.minwidth = 30, 30
         self.stop_num = 0
         self.max_stop = max_stop
-        self.class_id = np.random.randint(3)
+        self.class_id = np.random.randint(max_classes)
         self.color = (0.5 + np.random.rand(c)/2).tolist()
         self.iter = 0
         self.reset()
@@ -142,25 +142,26 @@ class Animation:
      Responsible for endless Animation
     """
 
-    def __init__(self, t=10, h=300, w=300, c=1, max_stop=15, mode='none'):
+    def __init__(self, t=10, h=300, w=300, c=1, max_stop=15, mode='none', max_classes=1, max_objects=1):
         self.height = h
         self.width = w
         self.channels = c
         self.mode = mode
         self.t = t
         self.max_stop = max_stop
-
-        self.num_objects = 1 #np.random.randint(1, 3)
+        self.max_classes = max_classes
+        self.num_objects = np.random.randint(1, max_objects + 1)
         self.objects = []
         for i in range(self.num_objects):
-            self.objects += [MovingSquare(t, h, w, c, max_stop)]
+            self.objects += [MovingSquare(t, h, w, c, max_stop, max_classes=max_classes)]
         self.reset()
         self.run()
 
     def reset(self):
         self.objects = []
         for i in range(self.num_objects):
-            self.objects += [MovingSquare(self.t, self.height, self.width, self.channels, self.max_stop)]
+            self.objects += [MovingSquare(self.t, self.height, self.width, self.channels, self.max_stop,
+                                          max_classes=self.max_classes)]
         self.prev_img = np.zeros((self.height, self.width, self.channels), dtype=np.float32)
         self.img = np.zeros((self.height, self.width, self.channels), dtype=np.float32)
 
@@ -187,11 +188,12 @@ class Animation:
                 
             boxes[i] = np.array([x1, y1, x2, y2, object.class_id])
 
-
         self.first_iteration = False
-
-    
-        output = np.transpose(self.img, [2, 0, 1])
+        if self.mode == 'diff':
+            output = self.img - self.prev_img
+            output = np.transpose(output, [2, 0, 1])
+        else:
+            output = np.transpose(self.img, [2, 0, 1])
         return output, boxes
 
 
@@ -202,7 +204,7 @@ class SquaresVideos:
     """
 
     def __init__(self, batchsize=32, t=10, h=300, w=300, c=3,
-                 normalize=False, max_stops=30, mode='diff'):
+                 normalize=False, max_stops=30, max_classes=3, mode='diff'):
         self.batchsize = batchsize
         self.num_frames = 100000
         self.channels = c
@@ -212,7 +214,8 @@ class SquaresVideos:
         self.labelmap = ['square', 'triangle', 'circle']
         self.multi_aspect_ratios = False
         self.max_stops = max_stops
-        self.animations = [Animation(t, h, w, c, self.max_stops, mode) for i in range(self.batchsize)]
+        self.mode = mode
+        self.animations = [Animation(t, h, w, c, self.max_stops, mode, max_classes=max_classes) for i in range(self.batchsize)]
 
     def reset(self):
         for anim in self.animations:
@@ -220,7 +223,7 @@ class SquaresVideos:
 
     def reset_size(self, height, width):
         self.height, self.width = height, width
-        self.animations = [Animation(self.time, height, width, self.channels, self.max_stops) for i in
+        self.animations = [Animation(self.time, height, width, self.channels, self.max_stops, self.mode) for i in
                            range(self.batchsize)]
 
     def __len__(self):
@@ -247,7 +250,7 @@ class SquaresVideos:
 if __name__ == '__main__':
     from core.utils import boxarray_to_boxes, draw_bboxes, make_single_channel_display
 
-    dataloader = SquaresVideos(t=10, c=3, h=128, w=128, batchsize=1)
+    dataloader = SquaresVideos(t=10, c=1, h=256, w=256, batchsize=1, mode='diff')
 
     start = 0
 
