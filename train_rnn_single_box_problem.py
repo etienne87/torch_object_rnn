@@ -33,7 +33,7 @@ def encode_boxes_fc(targets):
 
 
 if __name__ == '__main__':
-    num_classes, cin, tbins, height, width = 2, 3, 50, 64, 64
+    num_classes, cin, tbins, height, width = 2, 3, 200, 64, 64
     batchsize = 8
     epochs = 100
     cuda = 1
@@ -68,7 +68,9 @@ if __name__ == '__main__':
             # if np.random.rand() < proba:
             #     dataset.reset()
             #     net.reset()
-            
+            dataset.reset()
+            net.reset()
+
             _, targets = dataset.next()
             optimizer.zero_grad()
 
@@ -77,7 +79,7 @@ if __name__ == '__main__':
                 x = x.cuda()
 
             target = x[1:]
-            out = net(x, alpha=alpha)[:-1]
+            out = net(x[:-1], alpha=alpha)#[:-1]
 
             loss = criterion(out, target)
 
@@ -141,7 +143,8 @@ if __name__ == '__main__':
                     box = (out[t, i] * 64).cpu().data.numpy()
                     pt1 = (box[0], box[1])
                     pt2 = (box[2], box[3])
-                    cv2.rectangle(img, pt1, pt2, (0, 255, 0), 2)
+                    color = (0,255,0) if t <= tbins else (255,0,0)
+                    cv2.rectangle(img, pt1, pt2, color, 2)
 
                     grid[t, y, x] = img
 
@@ -151,7 +154,7 @@ if __name__ == '__main__':
         scheduler.step()
         proba *= 0.9
         alpha *= 0.9
-        alpha = max(0.7, alpha)
+        alpha = max(0.1, alpha)
 
 
 

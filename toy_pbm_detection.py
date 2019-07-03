@@ -1,5 +1,5 @@
 from __future__ import print_function
-import time
+import time as timer
 import torch
 import numpy as np
 import cv2
@@ -20,6 +20,8 @@ TOP = 3
 BOTTOM = 4
 LEFT = 5
 RIGHT = 6
+
+STOP_AT_BEGINNING = True
 
 
 def move_box(x1, y1, x2, y2, vx, vy, vs, width, height, min_width, min_height):
@@ -71,6 +73,9 @@ class MovingSquare:
         self.iter = 0
         self.reset()
         self.run()
+
+        if STOP_AT_BEGINNING:
+            self.stop_num = np.random.randint(3, 10)
 
     def reset(self):
         s = np.random.randint(self.minheight, 3 * self.minheight)
@@ -142,7 +147,7 @@ class Animation:
      Responsible for endless Animation
     """
 
-    def __init__(self, t=10, h=300, w=300, c=1, max_stop=15, mode='none', max_classes=1, max_objects=1):
+    def __init__(self, t=10, h=300, w=300, c=1, max_stop=15, mode='none', max_classes=1, max_objects=1, render=True):
         self.height = h
         self.width = w
         self.channels = c
@@ -152,6 +157,7 @@ class Animation:
         self.max_classes = max_classes
         self.num_objects = np.random.randint(1, max_objects + 1)
         self.objects = []
+        self.render = render
         for i in range(self.num_objects):
             self.objects += [MovingSquare(t, h, w, c, max_stop, max_classes=max_classes)]
         self.reset()
@@ -166,12 +172,18 @@ class Animation:
         self.img = np.zeros((self.height, self.width, self.channels), dtype=np.float32)
 
     def run(self):
-        self.prev_img[...] = self.img
+        if self.render:
+            self.prev_img[...] = self.img
+            self.img[...] = 0
 
-        self.img[...] = 0
+
         boxes = np.zeros((len(self.objects), 5), dtype=np.float32)
         for i, object in enumerate(self.objects):
             x1, y1, x2, y2 = object.run()
+            boxes[i] = np.array([x1, y1, x2, y2, object.class_id])
+
+            if not self.render:
+                continue
 
             if object.class_id == 0:
                 cv2.rectangle(self.img, (x1, y1), (x2, y2), object.color, -1)
@@ -185,8 +197,10 @@ class Animation:
                 ptc = (x1+x2)/2, (y1+y2)/2
                 radius = int((x2-x1)/2)
                 cv2.circle(self.img, ptc, radius, object.color, -1)
-                
-            boxes[i] = np.array([x1, y1, x2, y2, object.class_id])
+
+        if not self.render:
+            return None, boxes
+
 
         self.first_iteration = False
         if self.mode == 'diff':
@@ -215,7 +229,8 @@ class SquaresVideos:
         self.multi_aspect_ratios = False
         self.max_stops = max_stops
         self.mode = mode
-        self.animations = [Animation(t, h, w, c, self.max_stops, mode, max_classes=max_classes) for i in range(self.batchsize)]
+        self.render = False
+        self.animations = [Animation(t, h, w, c, self.max_stops, mode, max_classes=max_classes, render=self.render) for i in range(self.batchsize)]
 
     def reset(self):
         for anim in self.animations:
@@ -234,11 +249,16 @@ class SquaresVideos:
         x = torch.zeros(self.time, self.batchsize, self.channels, self.height, self.width)
         y = [[] for t in range(self.time)]
 
+        if not self.render:
+            x = None
+
         for i, anim in enumerate(self.animations):
             for t in range(self.time):
                 im, boxes = anim.run()
-                x[t, i, :] = torch.from_numpy(im)
+                if self.render:
+                   x[t, i, :] = torch.from_numpy(im)
                 y[t].append(torch.from_numpy(boxes))
+
 
         return x, y
 
@@ -251,7 +271,6 @@ if __name__ == '__main__':
     from core.utils import boxarray_to_boxes, draw_bboxes, make_single_channel_display
 
     dataloader = SquaresVideos(t=10, c=1, h=256, w=256, batchsize=1, mode='diff')
-
     start = 0
 
     for i, (x, y) in enumerate(dataloader):

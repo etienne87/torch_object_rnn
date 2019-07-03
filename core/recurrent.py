@@ -100,7 +100,7 @@ class RNN(nn.Module):
         for t, xt in enumerate(xseq):
             if self.mode == 'probabilistic':
                 v = random.uniform(0, 1)
-                if ht is not None and v > alpha and self.time > 1:
+                if ht is not None and v > alpha and self.time > 2:
                     xt = ht.detach() 
             elif self.mode == 'combine':
                 if ht is not None and self.time > 1:
