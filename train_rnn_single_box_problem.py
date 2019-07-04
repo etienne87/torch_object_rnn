@@ -95,7 +95,7 @@ if __name__ == '__main__':
 
         with torch.no_grad():
 
-            periods = 5
+            periods = 1
             nrows = 2
             ncols = batchsize / nrows
             net.reset()
@@ -154,7 +154,7 @@ if __name__ == '__main__':
         scheduler.step()
         proba *= 0.9
         alpha *= 0.9
-        alpha = max(0.1, alpha)
+        #alpha = max(0.1, alpha)
 
 
 
