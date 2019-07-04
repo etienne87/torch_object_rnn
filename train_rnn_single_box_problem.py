@@ -11,6 +11,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import math
 import cv2
+from functools import partial
 
 import core.recurrent as rnn
 import core.utils as utils
@@ -31,24 +32,87 @@ def encode_boxes_fc(targets):
     return x
 
 
+class Sequence(nn.Module):
+    def __init__(self, batchsize):
+        super(Sequence, self).__init__()
+        self.lstm1 = nn.LSTMCell(4, 128)
+        self.lstm2 = nn.LSTMCell(128, 128)
+        self.linear = nn.Linear(128, 4)
+        self.batchsize = batchsize
+
+        self.register_buffer('h_t', torch.zeros(self.batchsize, 128, dtype=torch.float))
+        self.register_buffer('c_t', torch.zeros(self.batchsize, 128, dtype=torch.float))
+        self.register_buffer('h_t2', torch.zeros(self.batchsize, 128, dtype=torch.float))
+        self.register_buffer('c_t2', torch.zeros(self.batchsize, 128, dtype=torch.float))
+
+    def forward(self, input, future = 0, alpha=1):
+        outputs = []
+        output = None
+        h_t, c_t = self.h_t.detach(), self.c_t.detach()
+        h_t2, c_t2 = self.h_t2.detach(), self.c_t2.detach()
+
+        for i, input_t in enumerate(input.unbind(0)):
+
+            if output is not None:
+                if np.random.rand() > max(0.1, alpha):
+                    input_t = output.detach()
+
+            h_t, c_t = self.lstm1(input_t, (h_t, c_t))
+            h_t2, c_t2 = self.lstm2(h_t, (h_t2, c_t2))
+            output = self.linear(h_t2)
+            outputs += [output[None]]
+
+        for i in range(future):# if we should predict the future
+            h_t, c_t = self.lstm1(output, (h_t, c_t))
+            h_t2, c_t2 = self.lstm2(h_t, (h_t2, c_t2))
+            output = self.linear(h_t2)
+            outputs += [output[None]]
+
+        self.h_t, self.c_t = h_t, c_t
+        self.h_t2, self.c_t2 = h_t2, c_t2
+
+        outputs = torch.cat(outputs, 0)
+        return outputs
+
+    def reset(self):
+        self.h_t[...] = 0
+        self.c_t[...] = 0
+        self.h_t2[...] = 0
+        self.c_t2[...] = 0
+
+def ln_lin(cin, cout):
+    return nn.Sequential(nn.LayerNorm(cin), nn.Linear(cin, cout, bias=True))
+
+def bn_lin(cin, count):
+    return nn.Sequential(nn.BatchNorm(cin), nn.Linear(cin, cout, bias=True))
+
+def fc_lstm(cin, cout):
+    oph = partial(nn.Linear, bias=True)
+    opx = partial(nn.Linear, bias=True)
+    return rnn.LSTMCell(cin, cout, opx, oph, nonlinearity=torch.tanh)
+
 
 if __name__ == '__main__':
-    num_classes, cin, tbins, height, width = 2, 3, 200, 64, 64
+    num_classes, cin, tbins, height, width = 2, 3, 100, 128, 128
     batchsize = 8
-    epochs = 100
+    epochs = 5
     cuda = 1
     train_iter = 100
     nclasses = 2
-    dataset = SquaresVideos(t=tbins, c=cin, h=height, w=width, batchsize=batchsize, max_classes=num_classes-1)
+    dataset = SquaresVideos(t=tbins, c=cin, h=height, w=width, batchsize=batchsize, max_classes=num_classes-1, render=False)
     dataset.num_frames = train_iter
 
-    net = rnn.RNN(nn.Sequential(rnn.lstm_fc(4, 128), rnn.lstm_fc(128, 128), nn.Linear(128, 4)))
+    net = rnn.RNN(nn.Sequential(fc_lstm(4, 128),
+                                fc_lstm(128, 128),
+                                nn.Linear(128, 4)))
+    # net = Sequence(batchsize).double()
+    rnn = rnn.init(net, 1000)
 
     if cuda:
         net.cuda()
 
 
-    logdir = '/home/eperot/boxexp/tmp_fc/'
+    logdir = '/home/eperot/boxexp/fc_alpha_v3/'
     writer = SummaryWriter(logdir)
 
 
@@ -65,21 +129,19 @@ if __name__ == '__main__':
         print('TRAIN: PROBA RESET: ', proba, ' ALPHA: ', alpha)
         net.reset()
         for batch_idx, data in enumerate(dataset):
-            # if np.random.rand() < proba:
-            #     dataset.reset()
-            #     net.reset()
-            dataset.reset()
-            net.reset()
+            if np.random.rand() < proba:
+                dataset.reset()
+                net.reset()
 
             _, targets = dataset.next()
             optimizer.zero_grad()
 
-            x = encode_boxes_fc(targets) / 64
+            x = encode_boxes_fc(targets) / height
             if cuda:
                 x = x.cuda()
 
             target = x[1:]
-            out = net(x[:-1], alpha=alpha)#[:-1]
+            out = net(x, alpha=alpha)[:-1]
 
             loss = criterion(out, target)
 
@@ -103,7 +165,8 @@ if __name__ == '__main__':
 
             for period in range(periods):
                 _, targets = dataset.next()
-                x = encode_boxes_fc(targets) / 64
+
+                x = encode_boxes_fc(targets) / height
                 if cuda:
                     x = x.cuda()
                 out = net(x)
@@ -113,7 +176,7 @@ if __name__ == '__main__':
                         x = i % ncols
                         img = grid[t + period * tbins, y, x]
 
-                        box = (out[t, i] * 64).cpu().data.numpy()
+                        box = (out[t, i] * height).cpu().data.numpy().astype(np.int32)
 
                         pt1 = (box[0], box[1])
                         pt2 = (box[2], box[3])
@@ -129,7 +192,7 @@ if __name__ == '__main__':
             batch, _ = dataset.next()
             _, targets = dataset.next()
 
-            x = encode_boxes_fc(targets) / 64
+            x = encode_boxes_fc(targets) / height
             if cuda:
                 x = x.cuda()
 
@@ -140,7 +203,7 @@ if __name__ == '__main__':
                     x = i % ncols
                     img = grid[t, y, x]
 
-                    box = (out[t, i] * 64).cpu().data.numpy()
+                    box = (out[t, i] * height).cpu().data.numpy().astype(np.int32)
                     pt1 = (box[0], box[1])
                     pt2 = (box[2], box[3])
                     color = (0,255,0) if t <= tbins else (255,0,0)
