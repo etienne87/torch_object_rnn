@@ -26,7 +26,7 @@ TOP = 3
 BOTTOM = 4
 LEFT = 5
 RIGHT = 6
-STOP_AT_BEGINNING = False
+STOP_AT_BEGINNING = True
 
 
 def move_box(x1, y1, x2, y2, vx, vy, vs, width, height, min_width, min_height):
@@ -106,6 +106,9 @@ class MovingSquare:
             self.vs = 1 - self.vs
 
     def run(self):
+        return self.run_random()
+
+    def run_circular(self):
         h, w = self.y2-self.y1, self.x2-self.x1
         yc, xc = (self.y2+self.y1)/2, (self.x2+self.x1)/2
         xc, yc = rotate(xc, yc, self.width/2, self.height/2, math.pi / self.va)
@@ -114,7 +117,7 @@ class MovingSquare:
         self.iter += 1
         return self.x1, self.y1, self.x2, self.y2
 
-    def run_rand(self):
+    def run_random(self):
         if self.stop_num == 0:
 
             box, flags = move_box(self.x1, self.y1, self.x2, self.y2,
@@ -179,6 +182,7 @@ class Animation:
             self.objects += [MovingSquare(t, h, w, c, max_stop, max_classes=max_classes)]
         self.reset()
         self.run()
+        self.prev_boxes = None
 
     def reset(self):
         self.objects = []
@@ -192,7 +196,6 @@ class Animation:
         if self.render:
             self.prev_img[...] = self.img
             self.img[...] = 0
-
 
         boxes = np.zeros((len(self.objects), 5), dtype=np.float32)
         for i, object in enumerate(self.objects):
@@ -284,16 +287,42 @@ class SquaresVideos:
             yield self.next()
 
 
+#Automatically gives you previous target in addition to current one
+class PrevNext:
+    def __init__(self):
+        self.prev_target = None
+
+    def reset(self):
+        self.prev_target = None
+
+    def __call__(self, x, y):
+        if self.prev_target is None:
+            x = x[1:]
+            py = y[:-1]
+            ny = y[1:]
+        else:
+            x = x
+            ny = y
+            py = [self.prev_target] + y[:-1]
+
+        self.prev_target = y[-1]
+        return x, ny, py
+
+
+
 if __name__ == '__main__':
     from core.utils import boxarray_to_boxes, draw_bboxes, make_single_channel_display
 
-    dataloader = SquaresVideos(t=10, c=1, h=256, w=256, batchsize=1, mode='none', render=False)
+    dataloader = SquaresVideos(t=10, c=1, h=256, w=256, batchsize=1, mode='diff', render=True)
+    prevnext = PrevNext()
     start = 0
 
     for i, (x, y) in enumerate(dataloader):
-        for j in range(1):
 
-            for t in range(10):
+        x, y, py = prevnext(x, y)
+
+        for j in range(1):
+            for t in range(len(y)):
                 boxes = y[t][j].cpu()
                 bboxes = boxarray_to_boxes(boxes[:, :4], boxes[:, 4], dataloader.labelmap)
 
@@ -310,6 +339,12 @@ if __name__ == '__main__':
                     img = np.zeros((256,256,3), dtype=np.uint8)
 
                 img = draw_bboxes(img, bboxes)
+
+                #draw prev:
+                boxes = py[t][j].cpu()
+                bboxes = boxarray_to_boxes(boxes[:, :4], boxes[:, 4], dataloader.labelmap)
+                img = draw_bboxes(img, bboxes, (255,255,255))
+
                 cv2.imshow('example', img)
                 key = cv2.waitKey(5)
                 if key == 27:
