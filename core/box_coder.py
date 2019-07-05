@@ -140,30 +140,27 @@ class SSDBoxCoder:
 
         ious = box_iou(default_boxes, boxes)  # [#anchors, #obj]
 
-        if self.use_cuda:
-            index = torch.cuda.LongTensor(len(default_boxes)).fill_(-1)
-            weights = torch.cuda.FloatTensor(len(default_boxes)).fill_(1.0)
-        else:
-            index = torch.LongTensor(len(default_boxes)).fill_(-1)
-            weights = torch.FloatTensor(len(default_boxes)).fill_(1.0)
-
-    
-        masked_ious = ious.clone()
-        while True:
-            i, j = argmax(masked_ious)
-            if masked_ious[i,j] < 1e-6:
-                break
-            index[i] = j
-            masked_ious[i,:] = 0
-            masked_ious[:,j] = 0 # allow gt to be matched several times
-
-        mask = (index<0) & (ious.max(1)[0]>=self.iou_threshold)
-        if mask.any():
-            index[mask] = ious[mask].max(1)[1]
+        # if self.use_cuda:
+        #     index = torch.cuda.LongTensor(len(default_boxes)).fill_(-1)
+        # else:
+        #     index = torch.LongTensor(len(default_boxes)).fill_(-1)
+        #
+        # masked_ious = ious.clone()
+        # while True:
+        #     i, j = argmax(masked_ious)
+        #     if masked_ious[i,j] < 1e-6:
+        #         break
+        #     index[i] = j
+        #     masked_ious[i,:] = 0
+        #     masked_ious[:,j] = 0 # allow gt to be matched several times
+        #
+        # mask = (index<0) & (ious.max(1)[0]>=self.iou_threshold)
+        # if mask.any():
+        #     index[mask] = ious[mask].max(1)[1]
         
-        # Simpler Alternative to association algorithm above
-        #max_ious, index = ious.max(1)
-        #index[max_ious < self.iou_threshold] = -1
+        # Simpler Alternative to association algorithm above (works roughly the same)
+        max_ious, index = ious.max(1)
+        index[max_ious < self.iou_threshold] = -1
             
 
         boxes = boxes[index.clamp(min=0)]  # negative index not supported

@@ -45,9 +45,8 @@ class SSDTrainer(object):
                 inputs = inputs.cuda()
 
             if np.random.rand() < proba_reset:
-            	dataset.reset()
-            	self.net.reset()
-
+                dataset.reset()
+                self.net.reset()
 
             start = time.time()
             self.optimizer.zero_grad()

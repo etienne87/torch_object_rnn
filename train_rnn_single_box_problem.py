@@ -83,28 +83,29 @@ class Sequence(nn.Module):
 def ln_lin(cin, cout):
     return nn.Sequential(nn.LayerNorm(cin), nn.Linear(cin, cout, bias=True))
 
-def bn_lin(cin, count):
-    return nn.Sequential(nn.BatchNorm(cin), nn.Linear(cin, cout, bias=True))
+def bn_lin(cin, cout):
+    return nn.Sequential(nn.BatchNorm1d(cin), nn.Linear(cin, cout, bias=True))
 
 def fc_lstm(cin, cout):
     oph = partial(nn.Linear, bias=True)
-    opx = partial(nn.Linear, bias=True)
+    opx = partial(bn_lin)
     return rnn.LSTMCell(cin, cout, opx, oph, nonlinearity=torch.tanh)
+
 
 
 if __name__ == '__main__':
     num_classes, cin, tbins, height, width = 2, 3, 100, 128, 128
     batchsize = 8
-    epochs = 5
+    epochs = 7
     cuda = 1
     train_iter = 100
     nclasses = 2
     dataset = SquaresVideos(t=tbins, c=cin, h=height, w=width, batchsize=batchsize, max_classes=num_classes-1, render=False)
     dataset.num_frames = train_iter
 
-    net = rnn.RNN(nn.Sequential(fc_lstm(4, 128),
-                                fc_lstm(128, 128),
-                                nn.Linear(128, 4)))
+    hidden = 128
+    net = rnn.RNN(nn.Sequential(fc_lstm(4, hidden), fc_lstm(hidden, hidden), nn.Linear(hidden, 4)))
+
     # net = Sequence(batchsize).double()
     rnn = rnn.init(net, 1000)
 
@@ -112,7 +113,7 @@ if __name__ == '__main__':
         net.cuda()
 
 
-    logdir = '/home/eperot/boxexp/fc_alpha_v3/'
+    logdir = '/home/eperot/boxexp/fc_alpha_random/'
     writer = SummaryWriter(logdir)
 
 
@@ -122,7 +123,7 @@ if __name__ == '__main__':
 
     proba = 1
     gt_every = 1
-    alpha = 1
+    alpha = 0.8
 
     for epoch in range(epochs):
         #train round

@@ -114,7 +114,7 @@ class MovingSquare:
         self.iter += 1
         return self.x1, self.y1, self.x2, self.y2
 
-    def run_bounce(self):
+    def run_rand(self):
         if self.stop_num == 0:
 
             box, flags = move_box(self.x1, self.y1, self.x2, self.y2,
@@ -123,22 +123,22 @@ class MovingSquare:
 
 
             if TOOSMALL in flags:
-                self.vs = 1/self.vs #np.random.uniform(0.02, 0.05)
+                self.vs = 1 + np.random.uniform(0.02, 0.05)
 
             if TOOBIG in flags:
-                self.vs = 1/self.vs  #np.random.uniform(0.02, 0.05)
+                self.vs = 1 - np.random.uniform(0.02, 0.05)
 
             if LEFT in flags:
-                self.vx = -self.vx #np.random.randint(1, 7)
+                self.vx = np.random.randint(1, 7)
 
             if RIGHT in flags:
-                self.vx = -self.vx #-np.random.randint(1, 7)
+                self.vx = -np.random.randint(1, 7)
 
             if BOTTOM in flags:
-                self.vy = -self.vy #-np.random.randint(1, 7)
+                self.vy = -np.random.randint(1, 7)
 
             if TOP in flags:
-                self.vy = -self.vy #np.random.randint(1, 7)
+                self.vy = np.random.randint(1, 7)
 
 
             self.x1, self.y1, self.x2, self.y2 = box
