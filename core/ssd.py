@@ -37,6 +37,18 @@ def init_prior_probability(shape, prior_probability=0.01):
     return torch.ones(shape) * -math.log((1 - prior_probability) / prior_probability)
 
 
+def decode_boxes(box_map, num_classes, num_anchors):
+    """
+    box_map: N, C, H, W
+    # N, C, H, W -> N, H, W, C -> N, HWNa, 4+Classes
+    """
+    fm_h, fm_w = box_map.shape[-2:]
+    nboxes = fm_h * fm_w * num_anchors
+
+    box_map = box_map.permute([0, 2, 3, 1]).contiguous().view(box_map.size(0), nboxes, 4 + num_classes)
+    return box_map[..., :4], box_map[..., 4:]
+
+
 class SSD(nn.Module):
     def __init__(self, feature_extractor, num_classes=2, cin=2, height=300, width=300, act='softmax'):
         super(SSD, self).__init__()
@@ -53,14 +65,17 @@ class SSD(nn.Module):
         self.in_channels = self.extractor.end_point_channels
         self.num_anchors = [2 * len(self.aspect_ratios) + 2 for i in range(len(self.in_channels))]
 
-        self.loc_layers = nn.ModuleList()
-        self.cls_layers = nn.ModuleList()
+        # self.loc_layers = nn.ModuleList()
+        # self.cls_layers = nn.ModuleList()
+        # for i in range(len(self.in_channels)):
+        #     self.loc_layers += [nn.Conv2d(self.in_channels[i], self.num_anchors[i]*4, kernel_size=3, padding=1)]
+        #     self.cls_layers += [
+        #         nn.Conv2d(self.in_channels[i], self.num_anchors[i] * self.num_classes, kernel_size=3, padding=1)]
 
+        self.pred_layers = nn.ModuleList()
         for i in range(len(self.in_channels)):
-            self.loc_layers += [nn.Conv2d(self.in_channels[i], self.num_anchors[i]*4, kernel_size=3, padding=1)]
-            self.cls_layers += [
-                nn.Conv2d(self.in_channels[i], self.num_anchors[i] * self.num_classes, kernel_size=3, padding=1)]
-            self.cls_layers[-1].bias.data = init_prior_probability(self.cls_layers[-1].bias.data.shape)
+            self.pred_layers += [nn.Conv2d(self.in_channels[i], self.num_anchors[i]*(4+self.num_classes),
+                                           kernel_size=3, padding=1, stride=1)]
 
         self.act = act
 
@@ -77,13 +92,19 @@ class SSD(nn.Module):
         cls_preds = []
         xs = self.extractor(x)
         for i, x in enumerate(xs):
-            loc_pred = self.loc_layers[i](x)
-            loc_pred = loc_pred.permute(0, 2, 3, 1).contiguous()
-            loc_preds.append(loc_pred.view(loc_pred.size(0), -1, 4))
+            # loc_pred = self.loc_layers[i](x)
+            # loc_pred = loc_pred.permute(0, 2, 3, 1).contiguous()
+            # loc_preds.append(loc_pred.view(loc_pred.size(0), -1, 4))
+            #
+            # cls_pred = self.cls_layers[i](x)
+            # cls_pred = cls_pred.permute(0, 2, 3, 1).contiguous()
+            # cls_preds.append(cls_pred.view(cls_pred.size(0), -1, self.num_classes))
 
-            cls_pred = self.cls_layers[i](x)
-            cls_pred = cls_pred.permute(0, 2, 3, 1).contiguous()
+            pred = self.pred_layers[i](x)
+            loc_pred, cls_pred = decode_boxes(pred, self.num_classes, self.num_anchors[i])
+            loc_preds.append(loc_pred.view(loc_pred.size(0), -1, 4))
             cls_preds.append(cls_pred.view(cls_pred.size(0), -1, self.num_classes))
+
 
         loc_preds = torch.cat(loc_preds, 1)
         cls_preds = torch.cat(cls_preds, 1)

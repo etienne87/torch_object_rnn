@@ -15,81 +15,13 @@ from core.box_coder import SSDBoxCoder
 from core.ssd_loss import SSDLoss
 
 from tensorboardX import SummaryWriter
-from functools import partial
-from toy_pbm_detection import SquaresVideos
-
-# Stupid check
-"""
-def stupid_check(dataset, box_coder, cuda, num_classes):
-    _, targets = dataset.next()
-    loc_targets, cls_targets = encode_boxes(targets, box_coder, cuda)
-    fmaps = prepare_fmap_input(box_coder, loc_targets, cls_targets, nclasses, batchsize)
-    loc_preds, cls_preds = [], []
-    for fmap in fmaps:
-        loc, cls = decode_boxes(fmap, num_classes, net.num_anchors)
-        loc_preds.append(loc)
-        cls_preds.append(cls)
-    loc_preds = torch.cat(loc_preds, dim=1)
-    cls_preds = torch.cat(cls_preds, dim=1)
-    cls_preds = cls_preds.max(dim=-1)[1]
-    test = loc_targets - loc_preds
-    test2 = cls_targets - cls_preds
-    assert test.sum().item() == 0
-    assert test2.sum().item() == 0
-
-
-def stupid_check_prepare_fmap_inputs(dataset, box_coder, cuda, num_classes):
-    _, targets = dataset.next()
-    loc_targets, cls_targets = encode_boxes(targets, box_coder, cuda)
-    fmaps = prepare_fmap_input(box_coder, loc_targets, cls_targets, nclasses, batchsize)
-
-
-def highlight_anchor_boxes_answering(cuda):
-    size = 256
-    dataset = SquaresVideos(t=5, c=3, h=size, w=size, batchsize=1, normalize=False)
-    dataset.num_frames = 100
-
-    net = ARSSD(2, size, size)
-    box_coder = SSDBoxCoder(net)
-    box_coder.iou_threshold = 0.5
-    print(box_coder.print_info())
-    if cuda:
-        net.cuda()
-        box_coder.cuda()
-
-    while 1:
-        _, targets = dataset.next()
-
-        box_preds = []
-        box_gt = []
-        for t in range(len(targets[0])):
-            boxes = targets[t][0][:, :-1]
-            if cuda:
-                boxes = boxes.cuda()
-            anchors = box_coder.match(boxes)
-
-            img = np.zeros((size,size,3), dtype=np.uint8)
-
-            gt = boxes.cpu().numpy()
-            x1, y1, x2, y2 = gt[0,0], gt[0,1], gt[0,2], gt[0,3]
-
-            cv2.rectangle(img, (x1, y1), (x2, y2), (255,255,255), 2)
-
-            if anchors is not None:
-                anchors = anchors.cpu().numpy()
-                for i in range(anchors.shape[0]):
-                    x1, y1, x2, y2 = anchors[i,0], anchors[i,1], anchors[i,2], anchors[i,3]
-                    cv2.rectangle(img, (x1, y1), (x2, y2), (255,0,0), 2)
-
-            cv2.imshow('img', img)
-            cv2.waitKey(5)
-"""
+from toy_pbm_detection import SquaresVideos, PrevNext
 
 
 def conv_bn(inp, oup, stride):
     return nn.Sequential(
         nn.Conv2d(inp, oup, 3, stride, 1, bias=False),
-        nn.BatchNorm2d(oup),
+        nn.BatchNorm2d(oup, momentum=0.01),
         nn.ReLU(inplace=True)
     )
 
@@ -104,49 +36,6 @@ def conv_dw(inp, oup, stride):
         nn.BatchNorm2d(oup),
         nn.ReLU(inplace=True),
     )
-
-
-def conv_lstm(cin, cout, stride=1):
-    oph = partial(nn.Conv2d, kernel_size=3, padding=1, stride=1, bias=False)
-    # opx = partial(nn.Conv2d, kernel_size=3, padding=1, stride=1, bias=False)
-    opx = partial(conv_bn, stride=stride)
-    return rnn.LSTMCell(cin, cout, opx, oph, nonlinearity=torch.tanh)
-
-
-class ConvLSTMCell(nn.Module):
-    def __init__(self, in_channels, hidden_dim, stride=1):
-        super(ConvLSTMCell, self).__init__()
-        self.hidden_dim = hidden_dim
-
-        self.prev_hidden = None
-        self.reset()
-        self.alpha = 1.0
-
-    def forward(self, xt):
-        if self.prev_hidden is None:
-            prev_h, prev_c = None, None
-        else:
-            prev_h, prev_c = self.prev_hidden
-
-        if self.prev_hidden is None:
-            tmp = self.x2h(xt)
-        else:
-            tmp = self.x2h(xt) + self.h2h(prev_h)
-
-        cc_i, cc_f, cc_o, cc_g = torch.split(tmp, self.hidden_dim, dim=1)  # tmp.chunk(4, 1) #
-        f = torch.sigmoid(cc_f)
-        i = torch.sigmoid(cc_i)
-        o = torch.sigmoid(cc_o)
-        g = self.act(cc_g)
-
-        if self.prev_hidden:
-            c = f * prev_c + i * g
-        else:
-            c = i * g
-
-        h = o * self.act(c)
-        self.prev_hidden = [h, c]
-        return h
 
 
 def one_hot_embedding(labels, num_classes):
@@ -208,18 +97,6 @@ def decode_boxes(box_map, num_classes, num_anchors):
     return box_map[..., :4], box_map[..., 4:]
 
 
-def remove_first(loc_targets, cls_targets, n):
-    loc = rnn.batch_to_time(loc_targets, n)[1:]
-    cls = rnn.batch_to_time(cls_targets, n)[1:]
-    return rnn.time_to_batch(loc), rnn.time_to_batch(cls)
-
-
-def remove_last(loc_targets, cls_targets, n):
-    loc = rnn.batch_to_time(loc_targets, n)[:-1]
-    cls = rnn.batch_to_time(cls_targets, n)[:-1]
-    return rnn.time_to_batch(loc), rnn.time_to_batch(cls)
-
-
 def get_box_params(sources, h, w):
     image_size = float(min(h, w))
     steps = []
@@ -256,7 +133,7 @@ class BoxTracker(nn.Module):
         self.h2gt = nn.Conv2d(self.cout, self.gtc, kernel_size=3, stride=1, padding=1)
         self.reset()
 
-    def preprocess_output(self, ht, hard=False):
+    def preprocess_output(self, ht, spatial=False):
         """
         C: Nanchors x (4+Classes)
         ht: (N, C, H, W) -> (N, Nanchors, (4+Classes), H, W)
@@ -272,11 +149,6 @@ class BoxTracker(nn.Module):
         tmp = ht.view(n, self.nanchors, 4 + self.num_classes, h, w)
         loc = tmp[:, :, :4, :, :]
         cls = F.softmax(tmp[:, :, 4:, :, :], dim=2)
-        if hard:
-            amax = cls.max(dim=2)[1][:, :, None, :, :]
-            o = torch.ones_like(amax).float()
-            cls[...] = 0
-            cls.scatter_(2, amax, o)
         tmp = torch.cat((loc, cls), dim=2).view(n, chn, h, w)
         return tmp
 
@@ -318,13 +190,8 @@ class BoxTracker(nn.Module):
                 gt = self.preprocess_output(ht.detach())
 
             tmp = self.gt2h(gt) + self.h2h(self.prev_h) + xt
-            cc_i, cc_f, cc_o, cc_g = torch.split(tmp, self.cout, dim=1)
-            i = torch.sigmoid(cc_i)
-            f = torch.sigmoid(cc_f)
-            o = torch.sigmoid(cc_o)
-            g = torch.tanh(cc_g)
-            c = f * self.prev_c + i * g
-            h = o * torch.tanh(c)
+
+            h, c = BoxTracker.lstm_update(self.prev_c, tmp)
             self.prev_h = h
             self.prev_c = c
 
@@ -340,13 +207,7 @@ class BoxTracker(nn.Module):
                 gt = self.preprocess_output(ht.detach())
 
                 tmp = self.gt2h(gt) + self.h2h(self.prev_h)  # no xt
-                cc_i, cc_f, cc_o, cc_g = torch.split(tmp, self.cout, dim=1)
-                i = torch.sigmoid(cc_i)
-                f = torch.sigmoid(cc_f)
-                o = torch.sigmoid(cc_o)
-                g = torch.tanh(cc_g)
-                c = f * self.prev_c + i * g
-                h = o * torch.tanh(c)
+                h, c = BoxTracker.lstm_update(self.prev_c, tmp)
                 self.prev_h = h
                 self.prev_c = c
 
@@ -369,10 +230,11 @@ class ARSSD(nn.Module):
     def __init__(self, num_classes, height, width):
         super(ARSSD, self).__init__()
 
+        base = 16
         self.cnn = rnn.SequenceWise(
             nn.Sequential(
-                conv_bn(1, 8, 2),
-                conv_bn(8, 16, 2))
+                conv_bn(1, base, 2),
+                conv_bn(base, base<<1, 2))
         )
 
         # here we simulate the image preliminary cnn
@@ -388,9 +250,9 @@ class ARSSD(nn.Module):
         self.num_anchors = 2 * len(self.aspect_ratios) + 2
 
         self.box_trackers = nn.ModuleList([
-            BoxTracker(16, 32, self.num_anchors, num_classes, stride=2),
-            BoxTracker(32, 64, self.num_anchors, num_classes, stride=2),
-            BoxTracker(64, 128, self.num_anchors, num_classes, stride=2)
+            BoxTracker(base<<1, base<<2, self.num_anchors, num_classes, stride=2),
+            BoxTracker(base<<2, base<<3, self.num_anchors, num_classes, stride=2),
+            BoxTracker(base<<3, base<<3, self.num_anchors, num_classes, stride=2)
         ])
 
     def forward(self, images, gts, alpha=1.0, future=0):
@@ -430,25 +292,27 @@ if __name__ == '__main__':
                             batchsize=batchsize, max_classes=num_classes - 1, render=True)
     dataset.num_frames = train_iter
 
+    prevnext = PrevNext()
+
     conv_encoding = True
 
     net = ARSSD(num_classes, height, width)
-    box_coder = SSDBoxCoder(net, 0.3)
+    box_coder = SSDBoxCoder(net, 0.5)
 
     if cuda:
         net.cuda()
         box_coder.cuda()
 
-    logdir = 'boxexp/test1/'
+    logdir = 'boxexp/random_alpha_0_during_test/'
     writer = SummaryWriter(logdir)
 
-    optimizer = optim.Adam(net.parameters(), lr=0.01, betas=(0.9, 0.99), eps=1e-8, weight_decay=1e-6)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.5)
+    optimizer = optim.Adam(net.parameters(), lr=0.001, betas=(0.9, 0.99), eps=1e-8, weight_decay=1e-6)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.9)
     criterion = SSDLoss(num_classes=2)
 
-    proba = 1
+    proba = 0.5
     gt_every = 1
-    alpha = 1
+    alpha = 0.5
 
     for epoch in range(epochs):
         # train round
@@ -460,16 +324,19 @@ if __name__ == '__main__':
                 net.reset()
 
             images, targets = dataset.next()
+            images, targets, prev_targets = prevnext(images, targets)
+
+
             optimizer.zero_grad()
 
             if cuda:
                 images = images.cuda()
 
             loc_targets, cls_targets = encode_boxes(targets, box_coder, cuda)
-            fmaps = prepare_fmap_input(box_coder, loc_targets, cls_targets, nclasses, batchsize)
-            loc_targets, cls_targets = remove_first(loc_targets, cls_targets, batchsize)
+            prev_loc_targets, prev_cls_targets = encode_boxes(prev_targets, box_coder, cuda)
+            fmaps = prepare_fmap_input(box_coder, prev_loc_targets, prev_cls_targets, nclasses, batchsize)
             loc_preds, cls_preds = net(images, fmaps, alpha)
-            loc_preds, cls_preds = remove_last(loc_preds, cls_preds, batchsize)
+
             loc_loss, cls_loss = criterion(loc_preds, loc_targets, cls_preds, cls_targets)
             loss = loc_loss + cls_loss
 
@@ -492,13 +359,15 @@ if __name__ == '__main__':
 
             for period in range(periods):
                 images, targets = dataset.next()
+                images, targets, prev_targets = prevnext(images, targets)
+
 
                 if cuda:
                     images = images.cuda()
 
-                loc_targets, cls_targets = encode_boxes(targets, box_coder, cuda)
-                fmaps = prepare_fmap_input(box_coder, loc_targets, cls_targets, nclasses, batchsize)
-                loc_preds, cls_preds = net(images, fmaps)
+                prev_loc_targets, prev_cls_targets = encode_boxes(prev_targets, box_coder, cuda)
+                fmaps = prepare_fmap_input(box_coder, prev_loc_targets, prev_cls_targets, nclasses, batchsize)
+                loc_preds, cls_preds = net(images, fmaps, alpha=0)
 
                 loc_preds = rnn.batch_to_time(loc_preds, batchsize).data
                 cls_preds = F.softmax(rnn.batch_to_time(cls_preds, batchsize).data, dim=-1)
@@ -526,11 +395,13 @@ if __name__ == '__main__':
 
             grid = np.ones((periods * tbins, nrows, ncols, dataset.height, dataset.width, 3), dtype=np.uint8) * 127
             images, targets = dataset.next()
+            images, targets, prev_targets = prevnext(images, targets)
+
             if cuda:
                 images = images.cuda()
-            loc_targets, cls_targets = encode_boxes(targets, box_coder, cuda)
-            fmaps = prepare_fmap_input(box_coder, loc_targets, cls_targets, nclasses, batchsize)
-            loc_preds, cls_preds = net(images, fmaps, future=int(periods * tbins))
+            prev_loc_targets, prev_cls_targets = encode_boxes(prev_targets, box_coder, cuda)
+            fmaps = prepare_fmap_input(box_coder, prev_loc_targets, prev_cls_targets, nclasses, batchsize)
+            loc_preds, cls_preds = net(images, fmaps, future=int(periods * tbins), alpha=0)
             loc_preds = rnn.batch_to_time(loc_preds, batchsize).data
             cls_preds = F.softmax(rnn.batch_to_time(cls_preds, batchsize).data, dim=-1)
             images = images.cpu().data.numpy()
@@ -563,5 +434,5 @@ if __name__ == '__main__':
 
         scheduler.step()
         proba *= 0.9
-        alpha *= 0.9
-        alpha = max(0.7, alpha)
+        # alpha *= 0.9
+        # alpha = max(0.1, alpha)

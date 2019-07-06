@@ -26,7 +26,7 @@ TOP = 3
 BOTTOM = 4
 LEFT = 5
 RIGHT = 6
-STOP_AT_BEGINNING = True
+STOP_AT_BEGINNING = False
 
 
 def move_box(x1, y1, x2, y2, vx, vy, vs, width, height, min_width, min_height):
@@ -112,8 +112,8 @@ class MovingSquare:
         h, w = self.y2-self.y1, self.x2-self.x1
         yc, xc = (self.y2+self.y1)/2, (self.x2+self.x1)/2
         xc, yc = rotate(xc, yc, self.width/2, self.height/2, math.pi / self.va)
-        self.x1, self.y1 = xc-w/2, yc-h/2
-        self.x2, self.y2 = xc+w/2, yc+h/2
+        self.x1, self.y1 = int(xc-w/2), int(yc-h/2)
+        self.x2, self.y2 = int(xc+w/2), int(yc+h/2)
         self.iter += 1
         return self.x1, self.y1, self.x2, self.y2
 

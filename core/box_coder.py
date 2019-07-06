@@ -5,7 +5,7 @@ from box import box_iou, box_nms, change_box_order
 
 
 class SSDBoxCoder:
-    def __init__(self, ssd_model):
+    def __init__(self, ssd_model, iou_threshold=0.3):
         self.steps = ssd_model.steps
         self.box_sizes = ssd_model.box_sizes
         self.aspect_ratios = ssd_model.aspect_ratios
@@ -15,7 +15,7 @@ class SSDBoxCoder:
         self.fm_len = []
         self.default_boxes = self._get_default_boxes()
         self.default_boxes_xyxy =  change_box_order(self.default_boxes, 'xywh2xyxy')
-        self.iou_threshold = 0.5
+        self.iou_threshold = iou_threshold
         self.use_cuda = False
         self.variances = (0.1, 0.1)
 
