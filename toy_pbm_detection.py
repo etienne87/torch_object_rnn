@@ -287,27 +287,31 @@ class SquaresVideos:
             yield self.next()
 
 
-#Automatically gives you previous target in addition to current one
+#Returns batch shifted by 1 timestep + current
 class PrevNext:
     def __init__(self):
         self.prev_target = None
+        self.prev_image = None
 
     def reset(self):
         self.prev_target = None
+        self.prev_image = None
 
     def __call__(self, x, y):
         if self.prev_target is None:
-            x = x[1:]
-            py = y[:-1]
+            nx = x[1:]
             ny = y[1:]
+            px = x[:-1]
+            py = y[:-1]
         else:
-            x = x
+            nx = x
             ny = y
+            px = torch.cat([self.prev_image[None]] + [x[:-1]], dim=0)
             py = [self.prev_target] + y[:-1]
 
         self.prev_target = y[-1]
-        return x, ny, py
-
+        self.prev_image = x[-1]
+        return nx, px, ny, py
 
 
 if __name__ == '__main__':
@@ -319,7 +323,7 @@ if __name__ == '__main__':
 
     for i, (x, y) in enumerate(dataloader):
 
-        x, y, py = prevnext(x, y)
+        x, px, y, py = prevnext(x, y)
 
         for j in range(1):
             for t in range(len(y)):
@@ -346,6 +350,6 @@ if __name__ == '__main__':
                 img = draw_bboxes(img, bboxes, (255,255,255))
 
                 cv2.imshow('example', img)
-                key = cv2.waitKey(5)
+                key = cv2.waitKey(0)
                 if key == 27:
                     exit()
