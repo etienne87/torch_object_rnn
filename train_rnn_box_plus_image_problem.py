@@ -65,6 +65,9 @@ def prepare_fmap_input(box_coder, loc_targets, cls_targets, num_classes, batchsi
         res.append(ans)
     return res
 
+def merge_prev_next_fmaps(prev, next):
+    return torch.cat((prev, next), dim=1)
+
 
 def encode_boxes(targets, box_coder, cuda):
     loc_targets, cls_targets = [], []
@@ -85,7 +88,7 @@ def encode_boxes(targets, box_coder, cuda):
     return loc_targets, cls_targets
 
 
-def decode_boxes(box_map, num_classes, num_anchors):
+def decode_boxes(box_map, num_classes, num_anchors, predict_pairs=False):
     """
     box_map: T, N, C, H, W
     """
@@ -93,9 +96,12 @@ def decode_boxes(box_map, num_classes, num_anchors):
     nboxes = fm_h * fm_w * num_anchors
     box_map = rnn.time_to_batch(box_map)
     # TN, C, H, W -> TN, H, W, C -> TN, HWNa, 4+Classes
-    box_map = box_map.permute([0, 2, 3, 1]).contiguous().view(box_map.size(0), nboxes, 4 + num_classes)
-    return box_map[..., :4], box_map[..., 4:]
-
+    if predict_pairs:
+        box_map = box_map.permute([0, 2, 3, 1]).contiguous().view(box_map.size(0), nboxes, 2 * (4 + num_classes))
+        return box_map[..., :8], box_map[..., 8:]
+    else:
+        box_map = box_map.permute([0, 2, 3, 1]).contiguous().view(box_map.size(0), nboxes, 4 + num_classes)
+        return box_map[..., :4], box_map[..., 4:]
 
 def get_box_params(sources, h, w):
     image_size = float(min(h, w))
@@ -121,11 +127,15 @@ class BoxTracker(nn.Module):
 
     """
 
-    def __init__(self, cin, cout, nanchors, num_classes=2, stride=2):
+    def __init__(self, cin, cout, nanchors, num_classes=2, stride=2, predict_pairs=False):
         super(BoxTracker, self).__init__()
         self.nanchors = nanchors
         self.num_classes = num_classes
         self.gtc = nanchors * (4 + num_classes)
+        self.predict_pairs = predict_pairs
+        if self.predict_pairs:
+            self.gtc *= 2
+
         self.cout = cout
         self.x2h = rnn.SequenceWise(conv_bn(cin, 4 * cout, stride=stride))
         self.h2h = nn.Conv2d(cout, 4 * cout, kernel_size=3, stride=1, padding=1)
@@ -186,10 +196,11 @@ class BoxTracker(nn.Module):
         # First treat sequence
         for t, (xt, gt) in enumerate(zip(xseq, gtseq)):
             v = random.uniform(0, 1)
-            if ht is not None and v > alpha:
-                gt = self.preprocess_output(ht.detach())
+            # if ht is not None and v > alpha:
+            #     gt = self.preprocess_output(ht.detach())
+            #tmp = self.gt2h(gt) + self.h2h(self.prev_h) + xt
 
-            tmp = self.gt2h(gt) + self.h2h(self.prev_h) + xt
+            tmp = self.h2h(self.prev_h) + xt
 
             h, c = BoxTracker.lstm_update(self.prev_c, tmp)
             self.prev_h = h
@@ -227,7 +238,7 @@ class BoxTracker(nn.Module):
 
 
 class ARSSD(nn.Module):
-    def __init__(self, num_classes, height, width):
+    def __init__(self, num_classes, height, width, predict_pairs=False):
         super(ARSSD, self).__init__()
 
         base = 16
@@ -242,6 +253,7 @@ class ARSSD(nn.Module):
                    (height / 16, width / 16),
                    (height / 32, width / 32)]
 
+        self.predict_pairs = predict_pairs
         self.height = height
         self.width = width
         self.num_classes = num_classes
@@ -250,9 +262,9 @@ class ARSSD(nn.Module):
         self.num_anchors = 2 * len(self.aspect_ratios) + 2
 
         self.box_trackers = nn.ModuleList([
-            BoxTracker(base<<1, base<<2, self.num_anchors, num_classes, stride=2),
-            BoxTracker(base<<2, base<<3, self.num_anchors, num_classes, stride=2),
-            BoxTracker(base<<3, base<<3, self.num_anchors, num_classes, stride=2)
+            BoxTracker(base<<1, base<<2, self.num_anchors, num_classes, stride=2, predict_pairs=predict_pairs),
+            BoxTracker(base<<2, base<<3, self.num_anchors, num_classes, stride=2, predict_pairs=predict_pairs),
+            BoxTracker(base<<3, base<<3, self.num_anchors, num_classes, stride=2, predict_pairs=predict_pairs)
         ])
 
     def forward(self, images, gts, alpha=1.0, future=0):
@@ -265,11 +277,10 @@ class ARSSD(nn.Module):
         :return:
         """
         x = self.cnn(images)
-        hidden = None
         loc_preds, cls_preds = [], []
         for bt, gt in zip(self.box_trackers, gts):
             x, y = bt(x, gt, alpha, future)
-            loc, cls = decode_boxes(y, self.num_classes, self.num_anchors)
+            loc, cls = decode_boxes(y, self.num_classes, self.num_anchors, self.predict_pairs)
             loc_preds.append(loc)
             cls_preds.append(cls)
         loc_preds = torch.cat(loc_preds, dim=1)
@@ -294,25 +305,27 @@ if __name__ == '__main__':
 
     prevnext = PrevNext()
 
-    conv_encoding = True
+    predict_pairs = True
 
-    net = ARSSD(num_classes, height, width)
+    net = ARSSD(num_classes, height, width, predict_pairs)
     box_coder = SSDBoxCoder(net, 0.5)
 
     if cuda:
         net.cuda()
         box_coder.cuda()
 
-    logdir = 'boxexp/random_alpha_0_during_test/'
+    logdir = '/home/eperot/boxexp/simple_both_2/'
     writer = SummaryWriter(logdir)
 
     optimizer = optim.Adam(net.parameters(), lr=0.001, betas=(0.9, 0.99), eps=1e-8, weight_decay=1e-6)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.9)
     criterion = SSDLoss(num_classes=2)
 
+    do_hallucinate = False
     proba = 0.5
     gt_every = 1
-    alpha = 0.5
+    alpha = 1.0
+
 
     for epoch in range(epochs):
         # train round
@@ -324,21 +337,30 @@ if __name__ == '__main__':
                 net.reset()
 
             images, targets = dataset.next()
-            images, targets, prev_targets = prevnext(images, targets)
+            images, prev_images, targets, prev_targets = prevnext(images, targets)
 
 
             optimizer.zero_grad()
 
             if cuda:
-                images = images.cuda()
+                prev_images = prev_images.cuda()
 
             loc_targets, cls_targets = encode_boxes(targets, box_coder, cuda)
             prev_loc_targets, prev_cls_targets = encode_boxes(prev_targets, box_coder, cuda)
             fmaps = prepare_fmap_input(box_coder, prev_loc_targets, prev_cls_targets, nclasses, batchsize)
-            loc_preds, cls_preds = net(images, fmaps, alpha)
 
-            loc_loss, cls_loss = criterion(loc_preds, loc_targets, cls_preds, cls_targets)
-            loss = loc_loss + cls_loss
+            loc_preds, cls_preds = net(prev_images, fmaps)
+
+            if predict_pairs:
+                prev_loc, curr_loc = loc_preds.chunk(2, dim=-1)
+                prev_cls, curr_cls = cls_preds.chunk(2, dim=-1)
+
+                prev_loc_loss, prev_cls_loss = criterion(prev_loc, prev_loc_targets, prev_cls, prev_cls_targets)
+                loc_loss, cls_loss = criterion(curr_loc, loc_targets, curr_cls, cls_targets)
+                loss = loc_loss + cls_loss + prev_loc_loss + prev_cls_loss
+            else:
+                loc_loss, cls_loss = criterion(loc_preds, loc_targets, cls_preds, cls_targets)
+                loss = loc_loss + cls_loss
 
             loss.backward()
 
@@ -359,18 +381,27 @@ if __name__ == '__main__':
 
             for period in range(periods):
                 images, targets = dataset.next()
-                images, targets, prev_targets = prevnext(images, targets)
-
+                images, prev_images, targets, prev_targets = prevnext(images, targets)
 
                 if cuda:
-                    images = images.cuda()
+                    prev_images = prev_images.cuda()
 
                 prev_loc_targets, prev_cls_targets = encode_boxes(prev_targets, box_coder, cuda)
                 fmaps = prepare_fmap_input(box_coder, prev_loc_targets, prev_cls_targets, nclasses, batchsize)
-                loc_preds, cls_preds = net(images, fmaps, alpha=0)
+                loc_preds, cls_preds = net(prev_images, fmaps)
 
-                loc_preds = rnn.batch_to_time(loc_preds, batchsize).data
-                cls_preds = F.softmax(rnn.batch_to_time(cls_preds, batchsize).data, dim=-1)
+                if predict_pairs:
+                    prev_loc_preds, loc_preds = loc_preds.chunk(2, dim=-1)
+                    prev_cls_preds, cls_preds = cls_preds.chunk(2, dim=-1)
+
+                    loc_preds = rnn.batch_to_time(loc_preds, batchsize).data
+                    cls_preds = F.softmax(rnn.batch_to_time(cls_preds, batchsize).data, dim=-1)
+
+                    prev_loc_preds = rnn.batch_to_time(prev_loc_preds, batchsize).data
+                    prev_cls_preds = F.softmax(rnn.batch_to_time(prev_cls_preds, batchsize).data, dim=-1)
+                else:
+                    loc_preds = rnn.batch_to_time(loc_preds, batchsize).data
+                    cls_preds = F.softmax(rnn.batch_to_time(cls_preds, batchsize).data, dim=-1)
                 images = images.cpu().data.numpy()
 
                 for t in range(tbins):
@@ -387,50 +418,60 @@ if __name__ == '__main__':
                             bboxes = utils.boxarray_to_boxes(boxes, labels, dataset.labelmap)
                             img = utils.draw_bboxes(img, bboxes)
 
+                        if predict_pairs:
+                            boxes, labels, scores = box_coder.decode(prev_loc_preds[t, i],
+                                                                     prev_cls_preds[t, i],
+                                                                     nms_thresh=0.6,
+                                                                     score_thresh=0.3)
+                            if boxes is not None:
+                                bboxes = utils.boxarray_to_boxes(boxes, labels, dataset.labelmap)
+                                img = utils.draw_bboxes(img, bboxes, (0,255,0))
+
                         grid[t + period * tbins, y, x] = img
 
             print('DEMO PART 1: DONE')
             grid = grid.swapaxes(2, 3).reshape(periods * tbins, nrows * dataset.height, ncols * dataset.width, 3)
             utils.add_video(writer, 'test_with_xt', grid, global_step=epoch, fps=30)
 
-            grid = np.ones((periods * tbins, nrows, ncols, dataset.height, dataset.width, 3), dtype=np.uint8) * 127
-            images, targets = dataset.next()
-            images, targets, prev_targets = prevnext(images, targets)
+            if do_hallucinate:
+                grid = np.ones((periods * tbins, nrows, ncols, dataset.height, dataset.width, 3), dtype=np.uint8) * 127
+                images, targets = dataset.next()
+                images, prev_images, targets, prev_targets = prevnext(images, targets)
 
-            if cuda:
-                images = images.cuda()
-            prev_loc_targets, prev_cls_targets = encode_boxes(prev_targets, box_coder, cuda)
-            fmaps = prepare_fmap_input(box_coder, prev_loc_targets, prev_cls_targets, nclasses, batchsize)
-            loc_preds, cls_preds = net(images, fmaps, future=int(periods * tbins), alpha=0)
-            loc_preds = rnn.batch_to_time(loc_preds, batchsize).data
-            cls_preds = F.softmax(rnn.batch_to_time(cls_preds, batchsize).data, dim=-1)
-            images = images.cpu().data.numpy()
+                if cuda:
+                    prev_images = prev_images.cuda()
+                prev_loc_targets, prev_cls_targets = encode_boxes(prev_targets, box_coder, cuda)
+                fmaps = prepare_fmap_input(box_coder, prev_loc_targets, prev_cls_targets, nclasses, batchsize)
+                loc_preds, cls_preds = net(prev_images, fmaps, future=int(periods * tbins), alpha=0)
+                loc_preds = rnn.batch_to_time(loc_preds, batchsize).data
+                cls_preds = F.softmax(rnn.batch_to_time(cls_preds, batchsize).data, dim=-1)
+                images = images.cpu().data.numpy()
 
-            for t in range(periods * tbins):
-                for i in range(batchsize):
-                    y = i / ncols
-                    x = i % ncols
-                    if t < tbins:
-                        img = utils.general_frame_display(images[t, i])
-                    else:
-                        img = grid[t, y, x]
+                for t in range(periods * tbins):
+                    for i in range(batchsize):
+                        y = i / ncols
+                        x = i % ncols
+                        if t < tbins:
+                            img = utils.general_frame_display(images[t, i])
+                        else:
+                            img = grid[t, y, x]
 
-                    boxes, labels, scores = box_coder.decode(loc_preds[t, i],
-                                                             cls_preds[t, i],
-                                                             nms_thresh=0.6,
-                                                             score_thresh=0.3)
-                    if boxes is not None:
-                        color = (0, 255, 0) if t <= tbins else (255, 0, 0)
+                        boxes, labels, scores = box_coder.decode(loc_preds[t, i],
+                                                                 cls_preds[t, i],
+                                                                 nms_thresh=0.6,
+                                                                 score_thresh=0.3)
+                        if boxes is not None:
+                            color = (0, 255, 0) if t <= tbins else (255, 0, 0)
 
-                        bboxes = utils.boxarray_to_boxes(boxes, labels, dataset.labelmap)
-                        img = utils.draw_bboxes(img, bboxes, color)
+                            bboxes = utils.boxarray_to_boxes(boxes, labels, dataset.labelmap)
+                            img = utils.draw_bboxes(img, bboxes, color)
 
-                    grid[t, y, x] = img
+                        grid[t, y, x] = img
 
-            grid = grid.swapaxes(2, 3).reshape(periods * tbins, nrows * dataset.height, ncols * dataset.width, 3)
-            utils.add_video(writer, 'test_hallucinate', grid, global_step=epoch, fps=30)
+                grid = grid.swapaxes(2, 3).reshape(periods * tbins, nrows * dataset.height, ncols * dataset.width, 3)
+                utils.add_video(writer, 'test_hallucinate', grid, global_step=epoch, fps=30)
 
-            print('DEMO PART 2: DONE')
+                print('DEMO PART 2: DONE')
 
         scheduler.step()
         proba *= 0.9
