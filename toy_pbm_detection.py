@@ -26,7 +26,7 @@ TOP = 3
 BOTTOM = 4
 LEFT = 5
 RIGHT = 6
-STOP_AT_BEGINNING = False
+STOP_AT_BEGINNING = True
 
 
 def move_box(x1, y1, x2, y2, vx, vy, vs, width, height, min_width, min_height):
@@ -80,7 +80,7 @@ class MovingSquare:
         self.run()
 
         if STOP_AT_BEGINNING:
-            self.stop_num = np.random.randint(3, 10)
+            self.stop_num = np.random.randint(10, 30)
 
     def reset(self):
         s = np.random.randint(self.minheight, self.height-self.minheight)
@@ -183,6 +183,7 @@ class Animation:
         self.reset()
         self.run()
         self.prev_boxes = None
+        self.first_iteration = True
 
     def reset(self):
         self.objects = []
@@ -191,6 +192,7 @@ class Animation:
                                           max_classes=self.max_classes)]
         self.prev_img = np.zeros((self.height, self.width, self.channels), dtype=np.float32)
         self.img = np.zeros((self.height, self.width, self.channels), dtype=np.float32)
+        self.first_iteration = True
 
     def run(self):
         if self.render:
@@ -222,12 +224,16 @@ class Animation:
             return None, boxes
 
 
-        self.first_iteration = False
+
         if self.mode == 'diff':
             output = self.img - self.prev_img
             output = np.transpose(output, [2, 0, 1])
+            if self.first_iteration:
+                output[...] = 0
         else:
             output = np.transpose(self.img, [2, 0, 1])
+
+        self.first_iteration = False
         return output, boxes
 
 

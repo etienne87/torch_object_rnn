@@ -139,7 +139,7 @@ class BoxTracker(nn.Module):
         self.cout = cout
         self.x2h = rnn.SequenceWise(conv_bn(cin, 4 * cout, stride=stride))
         self.h2h = nn.Conv2d(cout, 4 * cout, kernel_size=3, stride=1, padding=1)
-        self.gt2h = nn.Conv2d(self.gtc, 4 * cout, kernel_size=3, stride=1, padding=1)
+        self.gt2h = nn.Conv2d(self.gtc + 1, 4 * cout, kernel_size=3, stride=1, padding=1)
         self.h2gt = nn.Conv2d(self.cout, self.gtc, kernel_size=3, stride=1, padding=1)
         self.reset()
 
@@ -195,12 +195,23 @@ class BoxTracker(nn.Module):
         result = []
         # First treat sequence
         for t, (xt, gt) in enumerate(zip(xseq, gtseq)):
-            v = random.uniform(0, 1)
+            #v = random.uniform(0, 1)
             # if ht is not None and v > alpha:
             #     gt = self.preprocess_output(ht.detach())
-            #tmp = self.gt2h(gt) + self.h2h(self.prev_h) + xt
 
-            tmp = self.h2h(self.prev_h) + xt
+
+            if self.time < 2 and alpha>0:
+                n, c, h, w = xt.shape
+                gt_present = torch.ones((n, 1, h, w), dtype=torch.float, device=x.device)
+                gt = torch.cat((gt_present, gt), dim=1)
+            else:
+                n, c, h, w = xt.shape
+                gt_present = torch.zeros((n, 1, h, w), dtype=torch.float, device=x.device)
+                # if ht is not None:
+                #     gt = self.preprocess_output(ht.detach())
+                gt = torch.cat((gt_present, gt * 0), dim=1)
+
+            tmp = self.gt2h(gt) + self.h2h(self.prev_h) + xt
 
             h, c = BoxTracker.lstm_update(self.prev_c, tmp)
             self.prev_h = h
@@ -292,6 +303,7 @@ class ARSSD(nn.Module):
             self.box_trackers[i].reset()
 
 
+
 if __name__ == '__main__':
     num_classes, cin, tbins, height, width = 2, 1, 10, 128, 128
     batchsize = 8
@@ -303,9 +315,11 @@ if __name__ == '__main__':
                             batchsize=batchsize, max_classes=num_classes - 1, render=True)
     dataset.num_frames = train_iter
 
+
     prevnext = PrevNext()
 
-    predict_pairs = True
+
+    predict_pairs = False
 
     net = ARSSD(num_classes, height, width, predict_pairs)
     box_coder = SSDBoxCoder(net, 0.5)
@@ -314,7 +328,7 @@ if __name__ == '__main__':
         net.cuda()
         box_coder.cuda()
 
-    logdir = '/home/eperot/boxexp/simple_both_2/'
+    logdir = '/home/eperot/boxexp/never_feed_gt/'
     writer = SummaryWriter(logdir)
 
     optimizer = optim.Adam(net.parameters(), lr=0.001, betas=(0.9, 0.99), eps=1e-8, weight_decay=1e-6)
@@ -324,8 +338,7 @@ if __name__ == '__main__':
     do_hallucinate = False
     proba = 0.5
     gt_every = 1
-    alpha = 1.0
-
+    alpha = 0.0
 
     for epoch in range(epochs):
         # train round
@@ -343,18 +356,17 @@ if __name__ == '__main__':
             optimizer.zero_grad()
 
             if cuda:
-                prev_images = prev_images.cuda()
+                images = images.cuda()
 
             loc_targets, cls_targets = encode_boxes(targets, box_coder, cuda)
             prev_loc_targets, prev_cls_targets = encode_boxes(prev_targets, box_coder, cuda)
             fmaps = prepare_fmap_input(box_coder, prev_loc_targets, prev_cls_targets, nclasses, batchsize)
 
-            loc_preds, cls_preds = net(prev_images, fmaps)
+            loc_preds, cls_preds = net(images, fmaps)
 
             if predict_pairs:
                 prev_loc, curr_loc = loc_preds.chunk(2, dim=-1)
                 prev_cls, curr_cls = cls_preds.chunk(2, dim=-1)
-
                 prev_loc_loss, prev_cls_loss = criterion(prev_loc, prev_loc_targets, prev_cls, prev_cls_targets)
                 loc_loss, cls_loss = criterion(curr_loc, loc_targets, curr_cls, cls_targets)
                 loss = loc_loss + cls_loss + prev_loc_loss + prev_cls_loss
@@ -380,23 +392,25 @@ if __name__ == '__main__':
             grid = np.ones((periods * tbins, nrows, ncols, dataset.height, dataset.width, 3), dtype=np.uint8) * 127
 
             for period in range(periods):
+                if period%2 == 0:
+                    dataset.reset()
+                    net.reset()
+
                 images, targets = dataset.next()
                 images, prev_images, targets, prev_targets = prevnext(images, targets)
 
                 if cuda:
-                    prev_images = prev_images.cuda()
+                    images = images.cuda()
 
                 prev_loc_targets, prev_cls_targets = encode_boxes(prev_targets, box_coder, cuda)
                 fmaps = prepare_fmap_input(box_coder, prev_loc_targets, prev_cls_targets, nclasses, batchsize)
-                loc_preds, cls_preds = net(prev_images, fmaps)
+                loc_preds, cls_preds = net(images, fmaps, alpha=0)
 
                 if predict_pairs:
                     prev_loc_preds, loc_preds = loc_preds.chunk(2, dim=-1)
                     prev_cls_preds, cls_preds = cls_preds.chunk(2, dim=-1)
-
                     loc_preds = rnn.batch_to_time(loc_preds, batchsize).data
                     cls_preds = F.softmax(rnn.batch_to_time(cls_preds, batchsize).data, dim=-1)
-
                     prev_loc_preds = rnn.batch_to_time(prev_loc_preds, batchsize).data
                     prev_cls_preds = F.softmax(rnn.batch_to_time(prev_cls_preds, batchsize).data, dim=-1)
                 else:
@@ -439,10 +453,10 @@ if __name__ == '__main__':
                 images, prev_images, targets, prev_targets = prevnext(images, targets)
 
                 if cuda:
-                    prev_images = prev_images.cuda()
+                    images = images.cuda()
                 prev_loc_targets, prev_cls_targets = encode_boxes(prev_targets, box_coder, cuda)
                 fmaps = prepare_fmap_input(box_coder, prev_loc_targets, prev_cls_targets, nclasses, batchsize)
-                loc_preds, cls_preds = net(prev_images, fmaps, future=int(periods * tbins), alpha=0)
+                loc_preds, cls_preds = net(images, fmaps, future=int(periods * tbins), alpha=0)
                 loc_preds = rnn.batch_to_time(loc_preds, batchsize).data
                 cls_preds = F.softmax(rnn.batch_to_time(cls_preds, batchsize).data, dim=-1)
                 images = images.cpu().data.numpy()
@@ -475,5 +489,5 @@ if __name__ == '__main__':
 
         scheduler.step()
         proba *= 0.9
-        # alpha *= 0.9
+        alpha *= 0.9
         # alpha = max(0.1, alpha)
