@@ -29,13 +29,6 @@ class ConvLSTMCell(nn.Module):
                                   padding=1,
                                   bias=False)
 
-        # PeepHole?
-        self.conv_c2h = conv_func(in_channels=self.hidden_dim,
-                                  out_channels=4 * self.hidden_dim,
-                                  kernel_size=kernel_size,
-                                  padding=1,
-                                  bias=False)
-
         self.reset()
         self.nonlin = nonlin
 
@@ -56,7 +49,7 @@ class ConvLSTMCell(nn.Module):
                 xt = xt.squeeze(0)
 
             if self.prev_h is not None:
-                tmp = self.conv_c2h(self.prev_c) + self.conv_h2h(self.prev_h) + xt
+                tmp = self.conv_h2h(self.prev_h) + xt
             else:
                 tmp = xt
 

@@ -135,3 +135,33 @@ def box_nms(bboxes, scores, threshold=0.5):
             break
         order = order[ids+1]
     return torch.tensor(keep, dtype=torch.long)
+
+
+def assign_priors(gt_boxes, gt_labels, corner_form_priors,
+                  iou_threshold):
+    """Assign ground truth boxes and targets to priors.
+    Args:
+        gt_boxes (num_targets, 4): ground truth boxes.
+        gt_labels (num_targets): labels of targets.
+        priors (num_priors, 4): corner form priors
+    Returns:
+        boxes (num_priors, 4): real values for priors.
+        labels (num_priors): labels for priors.
+    """
+    # size: num_priors x num_targets
+    #ious = box_iou(gt_boxes.unsqueeze(0), corner_form_priors.unsqueeze(1))
+    ious = box_iou(corner_form_priors, gt_boxes)
+    # size: num_priors
+    best_target_per_prior, best_target_per_prior_index = ious.max(1)
+    # size: num_targets
+    best_prior_per_target, best_prior_per_target_index = ious.max(0)
+
+    for target_index, prior_index in enumerate(best_prior_per_target_index):
+        best_target_per_prior_index[prior_index] = target_index
+    # 2.0 is used to make sure every target has a prior assigned
+    best_target_per_prior.index_fill_(0, best_prior_per_target_index, 2)
+    # size: num_priors
+    labels = gt_labels[best_target_per_prior_index]
+    labels[best_target_per_prior < iou_threshold] = 0  # the background id
+    boxes = gt_boxes[best_target_per_prior_index]
+    return boxes, labels

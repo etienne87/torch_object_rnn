@@ -42,9 +42,9 @@ def main():
     # Dataset
     print('==> Preparing dataset..')
     dataset = SquaresVideos(t=time, c=cin, h=height, w=width,
-                            batchsize=args.batchsize, normalize=False, max_classes=classes-1)
+                            batchsize=args.batchsize, normalize=False, mode='none', max_classes=classes-1)
     test_dataset = SquaresVideos(t=time, c=cin, h=height, w=width,
-                                 batchsize=args.batchsize, normalize=False, max_classes=classes - 1)
+                                 batchsize=args.batchsize, normalize=False, mode='none', max_classes=classes - 1)
     dataset.num_frames = args.train_iter
     dataloader = dataset
 
@@ -70,7 +70,7 @@ def main():
         net.load_state_dict(checkpoint['net'])
         start_epoch = checkpoint['epoch']
 
-    box_coder = SSDBoxCoder(net)
+    box_coder = SSDBoxCoder(net, 0.5)
 
     if args.cuda:
         box_coder.cuda()

@@ -1,11 +1,11 @@
 '''Encode object boxes and labels.'''
 import math
 import torch
-from box import box_iou, box_nms, change_box_order
+from box import box_iou, box_nms, change_box_order, assign_priors
 
 
 class SSDBoxCoder:
-    def __init__(self, ssd_model, iou_threshold=0.3):
+    def __init__(self, ssd_model, iou_threshold=0.5, normalized_coordinates=True):
         self.steps = ssd_model.steps
         self.box_sizes = ssd_model.box_sizes
         self.aspect_ratios = ssd_model.aspect_ratios
@@ -13,6 +13,7 @@ class SSDBoxCoder:
         self.height = ssd_model.height
         self.width = ssd_model.width
         self.fm_len = []
+        self.normalized_coords = normalized_coordinates
         self.default_boxes = self._get_default_boxes()
         self.default_boxes_xyxy =  change_box_order(self.default_boxes, 'xywh2xyxy')
         self.iou_threshold = iou_threshold
@@ -67,7 +68,12 @@ class SSDBoxCoder:
                         boxes.append((cx, cy, s * math.sqrt(ar), s / math.sqrt(ar)))
                         boxes.append((cx, cy, s / math.sqrt(ar), s * math.sqrt(ar)))
 
-        return torch.Tensor(boxes)  # xywh
+        boxes = torch.Tensor(boxes)
+        if self.normalized_coords:
+            boxes[:, ::2] /= self.width
+            boxes[:, 1::2] /= self.height
+
+        return boxes
 
     def match(self, boxes):
         """return default boxes that match boxes
@@ -82,11 +88,8 @@ class SSDBoxCoder:
         ious = box_iou(default_boxes, boxes)  # [#anchors, #obj]
         if self.use_cuda:
             index = torch.cuda.LongTensor(len(default_boxes)).fill_(-1)
-            weights = torch.cuda.FloatTensor(len(default_boxes)).fill_(1.0)
         else:
             index = torch.LongTensor(len(default_boxes)).fill_(-1)
-            weights = torch.FloatTensor(len(default_boxes)).fill_(1.0)
-
     
         masked_ious = ious.clone()
         while True:
@@ -109,9 +112,15 @@ class SSDBoxCoder:
         box_preds = torch.cat([xy-wh/2, xy+wh/2], 1)
         return box_preds
         
-
-
     def encode(self, boxes, labels):
+        if self.normalized_coords:
+            boxes[:, ::2] /= self.width
+            boxes[:, 1::2] /= self.height
+
+        loc, cls = self.encode_v2(boxes, labels)
+        return loc, cls
+
+    def encode_v1(self, boxes, labels):
         '''Encode target bounding boxes and class labels.
 
         SSD coding rules:
@@ -137,30 +146,29 @@ class SSDBoxCoder:
             return (i[j], j)
 
         default_boxes = self.default_boxes_xyxy
-
         ious = box_iou(default_boxes, boxes)  # [#anchors, #obj]
 
-        # if self.use_cuda:
-        #     index = torch.cuda.LongTensor(len(default_boxes)).fill_(-1)
-        # else:
-        #     index = torch.LongTensor(len(default_boxes)).fill_(-1)
-        #
-        # masked_ious = ious.clone()
-        # while True:
-        #     i, j = argmax(masked_ious)
-        #     if masked_ious[i,j] < 1e-6:
-        #         break
-        #     index[i] = j
-        #     masked_ious[i,:] = 0
-        #     masked_ious[:,j] = 0 # allow gt to be matched several times
-        #
-        # mask = (index<0) & (ious.max(1)[0]>=self.iou_threshold)
-        # if mask.any():
-        #     index[mask] = ious[mask].max(1)[1]
+        if self.use_cuda:
+            index = torch.cuda.LongTensor(len(default_boxes)).fill_(-1)
+        else:
+            index = torch.LongTensor(len(default_boxes)).fill_(-1)
+
+        masked_ious = ious.clone()
+        while True:
+            i, j = argmax(masked_ious)
+            if masked_ious[i,j] < 1e-6:
+                break
+            index[i] = j
+            masked_ious[i,:] = 0
+            masked_ious[:,j] = 0
+
+        mask = (index<0) & (ious.max(1)[0]>=self.iou_threshold)
+        if mask.any():
+            index[mask] = ious[mask].max(1)[1]
         
         # Simpler Alternative to association algorithm above (works roughly the same)
-        max_ious, index = ious.max(1)
-        index[max_ious < self.iou_threshold] = -1
+        # max_ious, index = ious.max(1)
+        # index[max_ious < self.iou_threshold] = -1
             
 
         boxes = boxes[index.clamp(min=0)]  # negative index not supported
@@ -169,9 +177,21 @@ class SSDBoxCoder:
 
         loc_xy = (boxes[:,:2]-default_boxes[:,:2]) / default_boxes[:,2:] / self.variances[0]
         loc_wh = torch.log(boxes[:,2:]/default_boxes[:,2:]) / self.variances[1]
-        loc_targets = torch.cat([loc_xy,loc_wh], 1)
+        loc_targets = torch.cat([loc_xy, loc_wh], 1)
+
+
         cls_targets = 1 + labels[index.clamp(min=0)]
         cls_targets[index<0] = 0
+        return loc_targets, cls_targets
+
+
+    def encode_v2(self, gt_boxes, labels):
+        boxes, cls_targets = assign_priors(gt_boxes, labels + 1, self.default_boxes_xyxy, self.iou_threshold)
+        boxes = change_box_order(boxes, 'xyxy2xywh')
+        default_boxes = self.default_boxes
+        loc_xy = (boxes[:, :2] - default_boxes[:, :2]) / default_boxes[:, 2:] / self.variances[0]
+        loc_wh = torch.log(boxes[:, 2:] / default_boxes[:, 2:]) / self.variances[1]
+        loc_targets = torch.cat([loc_xy, loc_wh], 1)
         return loc_targets, cls_targets
 
 
@@ -192,6 +212,10 @@ class SSDBoxCoder:
         wh = torch.exp(loc_preds[:,2:] * self.variances[1]) * self.default_boxes[:,2:]
 
         box_preds = torch.cat([xy-wh/2, xy+wh/2], 1)
+
+        if self.normalized_coords:
+            box_preds[:, ::2] *= self.width
+            box_preds[:, 1::2] *= self.height
 
         boxes = []
         labels = []

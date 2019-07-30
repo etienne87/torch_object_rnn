@@ -26,7 +26,7 @@ TOP = 3
 BOTTOM = 4
 LEFT = 5
 RIGHT = 6
-STOP_AT_BEGINNING = True
+STOP_AT_BEGINNING = False
 
 
 def move_box(x1, y1, x2, y2, vx, vy, vs, width, height, min_width, min_height):
