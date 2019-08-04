@@ -1,6 +1,6 @@
 import torch.nn as nn
 from modules import Conv2d, ConvLSTM, ConvGRU, batch_to_time, time_to_batch
-
+from traj_gru import TrajGRU
 
 class ConvRNNFeatureExtractor(nn.Module):
     def __init__(self, cin=1):
@@ -10,10 +10,16 @@ class ConvRNNFeatureExtractor(nn.Module):
         self.conv1 = Conv2d(cin, base, kernel_size=7, stride=2, padding=3, addcoords=False)
         self.conv2 = Conv2d(base, base * 4, kernel_size=7, stride=2, padding=3)
         
-        self.conv3 = ConvLSTM(base * 4, base * 8, kernel_size=7, stride=2, padding=3)
-        self.conv4 = ConvLSTM(base * 8, base * 16, kernel_size=7, stride=1, dilation=1, padding=3)
-        self.conv5 = ConvLSTM(base * 16, base * 16, kernel_size=7, stride=1, dilation=2, padding=3)
-        self.conv6 = ConvLSTM(base * 16, base * 16, kernel_size=7, stride=1, dilation=3, padding=3*2)
+        # self.conv3 = ConvLSTM(base * 4, base * 8, kernel_size=7, stride=2, padding=3)
+        # self.conv4 = ConvLSTM(base * 8, base * 16, kernel_size=7, stride=1, dilation=1, padding=3)
+        # self.conv5 = ConvLSTM(base * 16, base * 16, kernel_size=7, stride=1, dilation=2, padding=3)
+        # self.conv6 = ConvLSTM(base * 16, base * 16, kernel_size=7, stride=1, dilation=3, padding=3*2)
+
+        self.conv3 = TrajGRU(base * 4, base * 8, i2h_stride=(2, 2))
+        self.conv4 = TrajGRU(base * 8, base * 16, i2h_stride=(2, 2))
+        self.conv5 = TrajGRU(base * 16, base * 16, i2h_stride=(2, 2))
+        self.conv6 = TrajGRU(base * 16, base * 16, i2h_stride=(2, 2))
+
 
         self.end_point_channels = [self.conv3.cout,  # 8
                                    self.conv4.cout,  # 16
@@ -53,4 +59,6 @@ class ConvRNNFeatureExtractor(nn.Module):
             if isinstance(module, ConvLSTM) or \
                isinstance(module, ConvGRU):
                 module.timepool.reset()
+            if isinstance(module, TrajGRU):
+                module.reset()
 

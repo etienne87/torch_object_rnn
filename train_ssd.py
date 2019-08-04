@@ -83,8 +83,8 @@ def main():
     for epoch in range(start_epoch, args.epochs):
         trainer.train(epoch, dataloader, args)
         # trainer.val(epoch, test_dataloader, args)
-        trainer.test(epoch, test_dataset, nrows, args)
-        trainer.save_ckpt(epoch, args)
+        #trainer.test(epoch, test_dataset, nrows, args)
+        #trainer.save_ckpt(epoch, args)
         trainer.writer.add_scalar('learning rate', optimizer.param_groups[0]['lr'], epoch)
         scheduler.step()
 

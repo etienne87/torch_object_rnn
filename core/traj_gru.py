@@ -48,7 +48,7 @@ def warp(input, flow):
 
 
 class BaseConvRNN(nn.Module):
-    def __init__(self, num_filter, b_h_w,
+    def __init__(self, num_filter,
                  h2h_kernel=(3, 3), h2h_dilate=(1, 1),
                  i2h_kernel=(3, 3), i2h_stride=(1, 1),
                  i2h_pad=(1, 1), i2h_dilate=(1, 1),
@@ -68,14 +68,6 @@ class BaseConvRNN(nn.Module):
         self._i2h_pad = i2h_pad
         self._i2h_dilate = i2h_dilate
         self._act_type = act_type
-        assert len(b_h_w) == 3
-        i2h_dilate_ksize_h = 1 + (self._i2h_kernel[0] - 1) * self._i2h_dilate[0]
-        i2h_dilate_ksize_w = 1 + (self._i2h_kernel[1] - 1) * self._i2h_dilate[1]
-        self._batch_size, self._height, self._width = b_h_w
-        self._state_height = (self._height + 2 * self._i2h_pad[0] - i2h_dilate_ksize_h)\
-                             // self._i2h_stride[0] + 1
-        self._state_width = (self._width + 2 * self._i2h_pad[1] - i2h_dilate_ksize_w) \
-                             // self._i2h_stride[1] + 1
         self._curr_states = None
         self._counter = 0
         self.states = None
@@ -85,6 +77,8 @@ class BaseConvRNN(nn.Module):
 
     # stateful warping
     def forward(self, inputs):
+        if self._curr_states is not None:
+            self._curr_states = self._curr_states.detach()
         out, self._curr_states = self.forward_stateless(inputs, self._curr_states)
         return out
 
@@ -94,13 +88,11 @@ class BaseConvRNN(nn.Module):
 
 
 class TrajGRU(BaseConvRNN):
-    # b_h_w: input feature map size
-    def __init__(self, input_channel, num_filter, b_h_w, zoneout=0.0, L=5,
+    def __init__(self, input_channel, num_filter, zoneout=0.0, L=5,
                  i2h_kernel=(3, 3), i2h_stride=(1, 1), i2h_pad=(1, 1),
                  h2h_kernel=(5, 5), h2h_dilate=(1, 1),
                  act_type=Activation('leaky', negative_slope=0.2, inplace=True)):
         super(TrajGRU, self).__init__(num_filter=num_filter,
-                                      b_h_w=b_h_w,
                                       h2h_kernel=h2h_kernel,
                                       h2h_dilate=h2h_dilate,
                                       i2h_kernel=i2h_kernel,
@@ -110,6 +102,8 @@ class TrajGRU(BaseConvRNN):
                                       prefix='TrajGRU')
         self._L = L
         self._zoneout = zoneout
+        self.cin = input_channel
+        self.cout = num_filter
 
         # wxz, wxr, wxh
         # reset_gate, update_gate, new_mem
@@ -124,7 +118,7 @@ class TrajGRU(BaseConvRNN):
         self.i2f_conv1 = nn.Conv2d(in_channels=input_channel,
                                 out_channels=32,
                                 kernel_size=(5, 5),
-                                stride=1,
+                                stride=self._i2h_stride,
                                 padding=(2, 2),
                                 dilation=(1, 1))
 
@@ -150,14 +144,13 @@ class TrajGRU(BaseConvRNN):
                                    kernel_size=(1, 1),
                                    stride=1)
 
-
-
     # inputs: B*C*H*W
     def _flow_generator(self, inputs, states):
         if inputs is not None:
             i2f_conv1 = self.i2f_conv1(inputs)
         else:
             i2f_conv1 = None
+
         h2f_conv1 = self.h2f_conv1(states)
         f_conv1 = i2f_conv1 + h2f_conv1 if i2f_conv1 is not None else h2f_conv1
         f_conv1 = self._act_type(f_conv1)
@@ -168,17 +161,17 @@ class TrajGRU(BaseConvRNN):
 
     # inputs: S*B*C*H*W
     def forward_stateless(self, inputs=None, states=None):
-        if states is None:
-            states = torch.zeros((inputs.size(1), self._num_filter, self._state_height,
-                                  self._state_width), dtype=torch.float).to(inputs.device)
         if inputs is not None:
             S, B, C, H, W = inputs.size()
             i2h = self.i2h(torch.reshape(inputs, (-1, C, H, W)))
             i2h = torch.reshape(i2h, (S, B, i2h.size(1), i2h.size(2), i2h.size(3)))
             i2h_slice = torch.split(i2h, self._num_filter, dim=2)
-
         else:
             i2h_slice = None
+
+        if states is None:
+            _, B, C, H, W = i2h_slice[0].shape
+            states = torch.zeros((B, self._num_filter, H, W), dtype=torch.float32, device=inputs.device)
 
         seq_len = inputs.size(0)
         prev_h = states
@@ -212,6 +205,22 @@ class TrajGRU(BaseConvRNN):
         # return torch.cat(outputs), next_h
         return torch.stack(outputs), next_h
 
+    #def forward_one_timestep(self, input, ):
+
+
+class FeedbackRNN(nn.Module):
+    def __init__(self, rnns, feedback_op):
+        super(FeedbackRNN, self).__init__()
+        self.rnns = rnns
+        self.feedback_conv1 = feedback_op
+
+    def forward_stateless(self, inputs, states):
+        assert len(states) == len(self.rnns)
+
+
+
+
+
 
 if __name__ == '__main__':
     tbins, batchsize, channels, height, width = 4, 2, 32, 64, 64
@@ -219,7 +228,7 @@ if __name__ == '__main__':
 
     x = torch.zeros((tbins, batchsize, channels, height, width), dtype=torch.float32)
 
-    rnn = TrajGRU(channels, out_channels, (batchsize, height, width), zoneout=0.1)
+    rnn = TrajGRU(channels, out_channels, i2h_stride=(2, 2), zoneout=0.1)
 
     y = rnn(x)
 
