@@ -205,7 +205,33 @@ class TrajGRU(BaseConvRNN):
         # return torch.cat(outputs), next_h
         return torch.stack(outputs), next_h
 
-    #def forward_one_timestep(self, input, ):
+    def forward_one_timestep(self, input, prev_h):
+        i2h_slice = self.i2h(input)
+
+        if input is not None:
+            flows = self._flow_generator(input, prev_h)
+        else:
+            flows = self._flow_generator(None, prev_h)
+        warped_data = []
+        for j in range(len(flows)):
+            flow = flows[j]
+            warped_data.append(warp(prev_h, -flow))
+        warped_data = torch.cat(warped_data, dim=1)
+        h2h = self.ret(warped_data)
+        h2h_slice = torch.split(h2h, self._num_filter, dim=1)
+        if i2h_slice is not None:
+            reset_gate = torch.sigmoid(i2h_slice[0][i, ...] + h2h_slice[0])
+            update_gate = torch.sigmoid(i2h_slice[1][i, ...] + h2h_slice[1])
+            new_mem = self._act_type(i2h_slice[2][i, ...] + reset_gate * h2h_slice[2])
+        else:
+            reset_gate = torch.sigmoid(h2h_slice[0])
+            update_gate = torch.sigmoid(h2h_slice[1])
+            new_mem = self._act_type(reset_gate * h2h_slice[2])
+        next_h = update_gate * prev_h + (1 - update_gate) * new_mem
+        if self._zoneout > 0.0:
+            next_h = F.dropout2d(prev_h, p=self._zoneout)
+
+        return next_h, prev_h
 
 
 class FeedbackRNN(nn.Module):

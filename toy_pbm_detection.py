@@ -167,7 +167,7 @@ class Animation:
      Responsible for endless Animation
     """
 
-    def __init__(self, t=10, h=300, w=300, c=1, max_stop=15, mode='none', max_classes=1, max_objects=1, render=True):
+    def __init__(self, t=10, h=300, w=300, c=1, max_stop=15, mode='none', max_classes=1, max_objects=3, render=True):
         self.height = h
         self.width = w
         self.channels = c

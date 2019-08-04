@@ -20,6 +20,7 @@ class SSDTrainer(object):
         self.optimizer = optimizer
         self.all_timesteps = all_timesteps
         self.make_image = utils.general_frame_display
+        self.logdir = logdir
         self.writer = SummaryWriter(logdir)
 
     def __del__(self):
@@ -141,7 +142,7 @@ class SSDTrainer(object):
                     # assert img.shape == grid[0, 0].shape
                     boxes, labels, scores = self.box_coder.decode(loc_preds[t, i].data,
                                                                   cls_preds[t, i].data,
-                                                                  nms_thresh=0.4)
+                                                                  nms_thresh=0.8)
                     if boxes is not None:
                         bboxes = utils.boxarray_to_boxes(boxes, labels, dataset.labelmap)
                         img = utils.draw_bboxes(img, bboxes)
@@ -152,11 +153,16 @@ class SSDTrainer(object):
         utils.add_video(self.writer, 'test', grid, global_step=epoch, fps=30)
         self.net.extractor.return_all = False
 
+        if args.save_video:
+            video_name =  self.logdir + '/videos/' + 'video#' + str(epoch) + '.avi'
+            utils.prepare_ckpt_dir(video_name)
+            utils.write_video_opencv(video_name, grid)
+
     def save_ckpt(self, epoch, args, name='checkpoint#'):
         state = {
             'net': self.net.state_dict(),
             'epoch': epoch,
         }
-        ckpt_file = os.path.dirname(args.checkpoint) + '/' + name + str(epoch) + '.pth'
+        ckpt_file = self.logdir + '/checkpoints/' + name + str(epoch) + '.pth'
         utils.prepare_ckpt_dir(ckpt_file)
         torch.save(state, ckpt_file)

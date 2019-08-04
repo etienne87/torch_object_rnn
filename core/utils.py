@@ -152,3 +152,17 @@ def make_single_channel_display(img, low=None, high=None):
         img = ((img+1)/2*255).astype(np.uint8)
     img = (img.astype(np.uint8))[..., None].repeat(3, 2)
     return img
+
+
+def write_video_opencv(video_name, video_tensor):
+    frames, height, width, c = video_tensor.shape
+
+    fourcc = cv2.VideoWriter_fourcc(*'MJPG')
+    out_video = cv2.VideoWriter(video_name, fourcc, 30, (width, height))
+
+    print(video_name)
+
+    for i in range(frames):
+        out_video.write(video_tensor[i])
+
+    out_video.release()

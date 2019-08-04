@@ -1,8 +1,8 @@
 from __future__ import print_function
 import argparse
 import os
+import glob
 import torch
-import torch.nn.functional as F
 import torch.optim as optim
 import torch.backends.cudnn as cudnn
 
@@ -24,9 +24,9 @@ def parse_args():
     parser.add_argument('--train_iter', type=int, default=100, help='#iter / train epoch')
     parser.add_argument('--test_iter', type=int, default=10, help='#iter / test epoch')
     parser.add_argument('--epochs', type=int, default=1000, help='num epochs to train')
-    parser.add_argument('--checkpoint', default='./checkpoints/', type=str, help='checkpoint path')
     parser.add_argument('--cuda', action='store_true', help='use cuda')
     parser.add_argument('--log_every', type=int, default=10, help='log every')
+    parser.add_argument('--save_video', action='store_true')
     return parser.parse_args()
 
 
@@ -66,7 +66,11 @@ def main():
     start_epoch = 0  # start from epoch 0 or last epoch
     if args.resume:
         print('==> Resuming from checkpoint..')
-        checkpoint = torch.load(args.checkpoint)
+        checkpoints = glob.glob(args.logdir + '/checkpoints/' + '*.pth')
+        checkpoints = sorted(checkpoints, key=lambda x: int(x.split('checkpoint#')[1].split('.pth')[0]))
+        last_checkpoint = checkpoints[-1]
+
+        checkpoint = torch.load(last_checkpoint)
         net.load_state_dict(checkpoint['net'])
         start_epoch = checkpoint['epoch']
 
@@ -81,12 +85,12 @@ def main():
     trainer = SSDTrainer(args.logdir, net, box_coder, criterion, optimizer, all_timesteps=True)
 
     for epoch in range(start_epoch, args.epochs):
-        trainer.train(epoch, dataloader, args)
+        #trainer.train(epoch, dataloader, args)
         # trainer.val(epoch, test_dataloader, args)
         trainer.test(epoch, test_dataset, nrows, args)
-        trainer.save_ckpt(epoch, args)
-        trainer.writer.add_scalar('learning rate', optimizer.param_groups[0]['lr'], epoch)
-        scheduler.step()
+        # trainer.save_ckpt(epoch, args)
+        # trainer.writer.add_scalar('learning rate', optimizer.param_groups[0]['lr'], epoch)
+        # scheduler.step()
 
 if __name__ == '__main__':
     main()
