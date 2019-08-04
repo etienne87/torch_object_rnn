@@ -85,12 +85,12 @@ def main():
     trainer = SSDTrainer(args.logdir, net, box_coder, criterion, optimizer, all_timesteps=True)
 
     for epoch in range(start_epoch, args.epochs):
-        #trainer.train(epoch, dataloader, args)
+        trainer.train(epoch, dataloader, args)
         # trainer.val(epoch, test_dataloader, args)
         trainer.test(epoch, test_dataset, nrows, args)
-        # trainer.save_ckpt(epoch, args)
-        # trainer.writer.add_scalar('learning rate', optimizer.param_groups[0]['lr'], epoch)
-        # scheduler.step()
+        trainer.save_ckpt(epoch, args)
+        trainer.writer.add_scalar('learning rate', optimizer.param_groups[0]['lr'], epoch)
+        scheduler.step()
 
 if __name__ == '__main__':
     main()
