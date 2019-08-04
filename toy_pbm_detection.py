@@ -244,7 +244,7 @@ class SquaresVideos:
     """
 
     def __init__(self, batchsize=32, t=10, h=300, w=300, c=3,
-                 normalize=False, max_stops=30, max_classes=3, mode='diff', render=True):
+                 normalize=False, max_stops=30, max_objects=1, max_classes=3, mode='diff', render=True):
         self.batchsize = batchsize
         self.num_frames = 100000
         self.channels = c
@@ -256,7 +256,10 @@ class SquaresVideos:
         self.max_stops = max_stops
         self.mode = mode
         self.render = render
-        self.animations = [Animation(t, h, w, c, self.max_stops, mode, max_classes=max_classes, render=self.render) for i in range(self.batchsize)]
+        self.animations = [Animation(t, h, w, c, self.max_stops, mode,
+                                     max_objects=max_objects,
+                                     max_classes=max_classes,
+                                     render=self.render) for i in range(self.batchsize)]
 
     def reset(self):
         for anim in self.animations:
