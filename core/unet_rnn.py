@@ -129,11 +129,88 @@ class UNet(nn.Module):
         x = self.outc(x)
         return x
 
+
+class UNetLSTM(nn.Module):
+    def __init__(self, in_channels, hidden_dim):
+        super(UNetLSTM, self).__init__()
+        self.hidden_dim = hidden_dim
+        self.x2h = UNet(in_channels, 4 * self.hidden_dim, 16, 3)
+        self.h2h = UNet(self.hidden_dim, 4 * self.hidden_dim, 16, 3)
+        self.act = torch.tanh
+        self.prev_hidden = None
+        self.reset()
+        self.alpha = 1.0
+
+    def detach_hidden(self):
+        if isinstance(self.prev_hidden, list):
+            for i in range(len(self.prev_hidden)):
+                if self.prev_hidden[i] is not None:
+                    self.prev_hidden[i] = self.prev_hidden[i].detach()
+        elif self.prev_hidden is not None:
+            self.prev_hidden = self.prev_hidden.detach()
+
+    def reset(self, mask=None):
+        if mask is None or self.prev_hidden is None:
+            self.prev_hidden = None
+        else:
+            if isinstance(self.prev_hidden, list):
+                for item in self.prev_hidden:
+                    if item is not None:
+                        item *= mask
+            elif self.prev_hidden is not None:
+                self.prev_hidden *= mask
+
+    def forward(self, x):
+        self.detach_hidden()
+        xseq = x.unbind(0)
+        result = []
+        ht = None
+        xt = None
+
+        # First treat sequence
+        for t, xt in enumerate(xseq):
+            ht = self.forward_lstm(xt)
+            result.append(ht[None])
+
+        result = torch.cat(result, dim=0)
+        return result
+
+    def forward_lstm(self, xt):
+        if self.prev_hidden is None:
+            prev_h, prev_c = None, None
+        else:
+            prev_h, prev_c = self.prev_hidden
+
+        if self.prev_hidden is None:
+            tmp = self.x2h(xt)
+        else:
+            tmp = self.x2h(xt) + self.h2h(prev_h)
+
+        cc_i, cc_f, cc_o, cc_g = torch.split(tmp, self.hidden_dim, dim=1)  # tmp.chunk(4, 1) #
+        f = torch.sigmoid(cc_f)
+        i = torch.sigmoid(cc_i)
+        o = torch.sigmoid(cc_o)
+        g = self.act(cc_g)
+
+        if self.prev_hidden:
+            c = f * prev_c + i * g
+        else:
+            c = i * g
+
+        h = o * self.act(c)
+        self.prev_hidden = [h, c]
+        return h
+
+
 if __name__ == '__main__':
-    unet = UNet(3, 2, 64, 4)
-
-    x = torch.rand(1, 3, 256, 256)
-
+    unet = UNet(3, 2, 16, 2)
+    x = torch.rand(1, 3, 64, 64)
     y = unet(x)
+    print(y.shape)
 
+    unet_rnn = UNetLSTM(3, 16)
+
+    seq = torch.rand(3, 2, 3, 64, 64)
+
+    y = unet_rnn(seq)
     print(y.shape)
