@@ -175,6 +175,7 @@ class Animation:
         self.t = t
         self.max_stop = max_stop
         self.max_classes = max_classes
+        self.max_objects = max_objects
         self.num_objects = np.random.randint(1, max_objects + 1)
         self.objects = []
         self.render = render
@@ -187,6 +188,7 @@ class Animation:
 
     def reset(self):
         self.objects = []
+        self.num_objects = np.random.randint(1, self.max_objects + 1)
         for i in range(self.num_objects):
             self.objects += [MovingSquare(self.t, self.height, self.width, self.channels, self.max_stop,
                                           max_classes=self.max_classes)]
@@ -256,14 +258,15 @@ class SquaresVideos:
         self.max_stops = max_stops
         self.mode = mode
         self.render = render
-        self.animations = [Animation(t, h, w, c, self.max_stops, mode,
-                                     max_objects=max_objects,
-                                     max_classes=max_classes,
-                                     render=self.render) for i in range(self.batchsize)]
+        self.max_objects = max_objects
+        self.max_classes = max_classes
+        self.reset()
 
     def reset(self):
-        for anim in self.animations:
-            anim.reset()
+        self.animations = [Animation(self.time, self.height, self.width, self.channels, self.max_stops, self.mode,
+                                     max_objects=self.max_objects,
+                                     max_classes=self.max_classes,
+                                     render=self.render) for i in range(self.batchsize)]
 
     def reset_size(self, height, width):
         self.height, self.width = height, width

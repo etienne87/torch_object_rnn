@@ -88,7 +88,7 @@ class BaseConvRNN(nn.Module):
 
 
 class TrajGRU(BaseConvRNN):
-    def __init__(self, input_channel, num_filter, zoneout=0.0, L=5,
+    def __init__(self, input_channel, num_filter, zoneout=0.1, L=5,
                  i2h_kernel=(3, 3), i2h_stride=(1, 1), i2h_pad=(1, 1),
                  h2h_kernel=(5, 5), h2h_dilate=(1, 1),
                  act_type=Activation('leaky', negative_slope=0.2, inplace=True)):
@@ -197,16 +197,17 @@ class TrajGRU(BaseConvRNN):
                 update_gate = torch.sigmoid(h2h_slice[1])
                 new_mem = self._act_type(reset_gate * h2h_slice[2])
             next_h = update_gate * prev_h + (1 - update_gate) * new_mem
-            if self._zoneout > 0.0:
-                next_h = F.dropout2d(prev_h, p=self._zoneout)
+            if self._zoneout > 0.0 and self.training:
+                mask = F.dropout2d(torch.ones_like(prev_h), p=self._zoneout)
+                next_h = mask * next_h + (1 - mask) * prev_h
             outputs.append(next_h)
             prev_h = next_h
 
-        # return torch.cat(outputs), next_h
         return torch.stack(outputs), next_h
 
     def forward_one_timestep(self, input, prev_h):
         i2h_slice = self.i2h(input)
+        i2h_slice = torch.split(i2h_slice, self._num_filter, dim=1)
 
         if input is not None:
             flows = self._flow_generator(input, prev_h)
@@ -220,17 +221,18 @@ class TrajGRU(BaseConvRNN):
         h2h = self.ret(warped_data)
         h2h_slice = torch.split(h2h, self._num_filter, dim=1)
         if i2h_slice is not None:
-            reset_gate = torch.sigmoid(i2h_slice[0][i, ...] + h2h_slice[0])
-            update_gate = torch.sigmoid(i2h_slice[1][i, ...] + h2h_slice[1])
-            new_mem = self._act_type(i2h_slice[2][i, ...] + reset_gate * h2h_slice[2])
+            reset_gate = torch.sigmoid(i2h_slice[0] + h2h_slice[0])
+            update_gate = torch.sigmoid(i2h_slice[1] + h2h_slice[1])
+            new_mem = self._act_type(i2h_slice[2] + reset_gate * h2h_slice[2])
         else:
             reset_gate = torch.sigmoid(h2h_slice[0])
             update_gate = torch.sigmoid(h2h_slice[1])
             new_mem = self._act_type(reset_gate * h2h_slice[2])
         next_h = update_gate * prev_h + (1 - update_gate) * new_mem
         if self._zoneout > 0.0:
-            next_h = F.dropout2d(prev_h, p=self._zoneout)
-
+            mask = F.dropout2d(torch.ones_like(prev_h), p=self._zoneout)
+            next_h = mask * next_h + (1 - mask) * prev_h
+        prev_h = next_h
         return next_h, prev_h
 
 
@@ -240,10 +242,25 @@ class FeedbackRNN(nn.Module):
         self.rnns = rnns
         self.feedback_conv1 = feedback_op
 
-    def forward_stateless(self, inputs, states):
+    def reset(self):
+        for rnn in self.rnns:
+            rnn.reset()
+
+    def forward(self, inputs):
         assert len(states) == len(self.rnns)
 
+        seq_len = inputs.size(0)
+        prev_h = states
+        outputs = []
+        for i in range(seq_len):
+            x = inputs[i]
+            B, C, H, W = x.shape
 
+            for rnn in rnns:
+                if rnn._curr_states is None:
+                    rnn._curr_states = torch.zeros((B, rnn._num_filter, H, W), dtype=torch.float32, device=x.device)
+
+                x, rnn._curr_states = rnn.forward_one_timestep(x, rnn._curr_states)
 
 
 

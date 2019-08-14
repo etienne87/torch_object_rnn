@@ -2,6 +2,18 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+def time_to_batch(x):
+    t, n, c, h, w = x.size()
+    x = x.view(n * t, c, h, w)
+    return x, n
+
+
+def batch_to_time(x, n=32):
+    nt, c, h, w = x.size()
+    time = int(nt / n)
+    x = x.view(time, n, c, h, w)
+    return x
+
 
 class double_conv(nn.Module):
     '''(conv => BN => ReLU) * 2'''
@@ -113,6 +125,9 @@ class UNet(nn.Module):
             self.ups.append(up(in_ch, out_ch) )
 
         self.outc = outconv(base, out_channels)
+
+        self.downs = nn.ModuleList(self.downs)
+        self.ups = nn.ModuleList(self.ups)
 
 
     def forward(self, x):

@@ -182,6 +182,7 @@ class SSDBoxCoder:
 
         cls_targets = 1 + labels[index.clamp(min=0)]
         cls_targets[index<0] = 0
+        loc_targets[index<0] = 0
         return loc_targets, cls_targets
 
 

@@ -55,15 +55,21 @@ def prepare_fmap_input(box_coder, loc_targets, cls_targets, num_classes, batchsi
     loc = torch.cat((loc_targets, cls_targets), dim=2)
     out = torch.split(loc, box_coder.fm_len, dim=1)
     res = []
+    height, width = box_coder.fm_sizes[0]
+
     for fm_size, tensor in zip(box_coder.fm_sizes, out):
         fm_h, fm_w = fm_size
         n, l, c = tensor.size()
         assert l == fm_h * fm_w * n_anchors
         ans = tensor.view(n, fm_h, fm_w, n_anchors * c)
         ans = ans.permute([0, 3, 1, 2])
+        ans = F.interpolate(ans, size=(height, width), mode='bilinear', align_corners=True)
         ans = rnn.batch_to_time(ans, batchsize)
         res.append(ans)
+
+    res = torch.cat(res, dim=2)
     return res
+
 
 def merge_prev_next_fmaps(prev, next):
     return torch.cat((prev, next), dim=1)
@@ -122,130 +128,155 @@ def get_box_params(sources, h, w):
     return fm_sizes, steps, box_sizes
 
 
-class BoxTracker(nn.Module):
-    """takes hidden from above and fuse gt to hidden state
+# class BoxTracker(nn.Module):
+#     """takes hidden from above and fuse gt to hidden state
+#
+#     """
+#
+#     def __init__(self, cin, cout, nanchors, num_classes=2, stride=2, predict_pairs=False):
+#         super(BoxTracker, self).__init__()
+#         self.nanchors = nanchors
+#         self.num_classes = num_classes
+#         self.gtc = nanchors * (4 + num_classes)
+#         self.predict_pairs = predict_pairs
+#         if self.predict_pairs:
+#             self.gtc *= 2
+#
+#         self.cout = cout
+#         self.x2h = rnn.SequenceWise(conv_bn(cin, 4 * cout, stride=stride))
+#         self.h2h = nn.Conv2d(cout, 4 * cout, kernel_size=3, stride=1, padding=1)
+#         self.gt2h = nn.Conv2d(self.gtc + 1, 4 * cout, kernel_size=3, stride=1, padding=1)
+#         self.h2gt = nn.Conv2d(self.cout, self.gtc, kernel_size=3, stride=1, padding=1)
+#         self.reset()
+#
+#     def preprocess_output(self, ht, spatial=False):
+#         """
+#         C: Nanchors x (4+Classes)
+#         ht: (N, C, H, W) -> (N, Nanchors, (4+Classes), H, W)
+#
+#         -> split to:
+#         1. (N, Nanchors, 4, H, W)
+#         2. (N, Nanchors, Classes, H, W)
+#
+#
+#         """
+#         n, chn, h, w = ht.size()
+#         ht = ht.detach()
+#         tmp = ht.view(n, self.nanchors, 4 + self.num_classes, h, w)
+#         loc = tmp[:, :, :4, :, :]
+#         cls = F.softmax(tmp[:, :, 4:, :, :], dim=2)
+#         tmp = torch.cat((loc, cls), dim=2).view(n, chn, h, w)
+#         return tmp
+#
+#     @staticmethod
+#     def lstm_update(prev_c, tmp):
+#         cc_i, cc_f, cc_o, cc_g = tmp.chunk(4, 1)
+#         i = torch.sigmoid(cc_i)
+#         f = torch.sigmoid(cc_f)
+#         o = torch.sigmoid(cc_o)
+#         g = torch.tanh(cc_g)
+#         c = f * prev_c + i * g
+#         h = o * torch.tanh(c)
+#         return h, c
+#
+#     def forward(self, x, prev_gt, alpha=1, future=0):
+#         x = self.x2h(x)
+#         xseq = x.unbind(0)
+#         gtseq = prev_gt.unbind(0)
+#
+#         ht = self.ht
+#         xt = None
+#
+#         # init prev_h
+#         if self.prev_h is None:
+#             n, c, h, w = xseq[0].shape
+#
+#             self.prev_h = torch.zeros((n, self.cout, h, w), dtype=torch.float, device=x.device)
+#             self.prev_c = torch.zeros((n, self.cout, h, w), dtype=torch.float, device=x.device)
+#         else:
+#             self.prev_h = self.prev_h.detach()
+#             self.prev_c = self.prev_c.detach()
+#
+#         memory = []
+#         result = []
+#         # First treat sequence
+#         for t, (xt, gt) in enumerate(zip(xseq, gtseq)):
+#             #v = random.uniform(0, 1)
+#             # if ht is not None and v > alpha:
+#             #     gt = self.preprocess_output(ht.detach())
+#
+#
+#             if self.time < 2 and alpha>0:
+#                 n, c, h, w = xt.shape
+#                 gt_present = torch.ones((n, 1, h, w), dtype=torch.float, device=x.device)
+#                 gt = torch.cat((gt_present, gt), dim=1)
+#             else:
+#                 n, c, h, w = xt.shape
+#                 gt_present = torch.zeros((n, 1, h, w), dtype=torch.float, device=x.device)
+#                 # if ht is not None:
+#                 #     gt = self.preprocess_output(ht.detach())
+#                 gt = torch.cat((gt_present, gt * 0), dim=1)
+#
+#             tmp = self.gt2h(gt) + self.h2h(self.prev_h) + xt
+#
+#             h, c = BoxTracker.lstm_update(self.prev_c, tmp)
+#             self.prev_h = h
+#             self.prev_c = c
+#
+#             # actual prediction of boxes
+#             ht = self.h2gt(h)
+#             result.append(ht[None])
+#             memory.append(h[None])
+#             self.time += 1
+#
+#         # For auto-regressive use-cases
+#         if future:
+#             for _ in range(future):
+#                 gt = self.preprocess_output(ht.detach())
+#
+#                 tmp = self.gt2h(gt) + self.h2h(self.prev_h)  # no xt
+#                 h, c = BoxTracker.lstm_update(self.prev_c, tmp)
+#                 self.prev_h = h
+#                 self.prev_c = c
+#
+#                 # actual prediction of boxes
+#                 ht = self.h2gt(h)
+#                 result.append(ht[None])
+#                 memory.append(h[None])
+#
+#         result = torch.cat(result, dim=0)
+#         memory = torch.cat(memory, dim=0)
+#         return memory, result
+#
+#     def reset(self):
+#         self.prev_h, self.prev_c = None, None
+#         self.ht = None  # actual output
+#         self.time = 0
 
-    """
 
-    def __init__(self, cin, cout, nanchors, num_classes=2, stride=2, predict_pairs=False):
-        super(BoxTracker, self).__init__()
-        self.nanchors = nanchors
-        self.num_classes = num_classes
-        self.gtc = nanchors * (4 + num_classes)
-        self.predict_pairs = predict_pairs
-        if self.predict_pairs:
-            self.gtc *= 2
+class AR_UNET_RNN(nn.Module):
+    def __init__(self):
+        self.unet_rnn = UNET_RNN()
 
-        self.cout = cout
-        self.x2h = rnn.SequenceWise(conv_bn(cin, 4 * cout, stride=stride))
-        self.h2h = nn.Conv2d(cout, 4 * cout, kernel_size=3, stride=1, padding=1)
-        self.gt2h = nn.Conv2d(self.gtc + 1, 4 * cout, kernel_size=3, stride=1, padding=1)
-        self.h2gt = nn.Conv2d(self.cout, self.gtc, kernel_size=3, stride=1, padding=1)
-        self.reset()
+    def forward(self, gt, x, future=0):
+        input = torch.cat((gt, x), dim=2)
+        sequence = input.unbind(0)
 
-    def preprocess_output(self, ht, spatial=False):
-        """
-        C: Nanchors x (4+Classes)
-        ht: (N, C, H, W) -> (N, Nanchors, (4+Classes), H, W)
+        outputs = []
+        for t, xt in enumerate(sequence):
 
-        -> split to:
-        1. (N, Nanchors, 4, H, W)
-        2. (N, Nanchors, Classes, H, W)
+            #if output is not None and random blablah
+            #xt = output
+            output = self.unet_rnn(xt)
+            outputs.append(output)
 
+        for t in range(future):
+            output = self.unet_rnn(output)
 
-        """
-        n, chn, h, w = ht.size()
-        ht = ht.detach()
-        tmp = ht.view(n, self.nanchors, 4 + self.num_classes, h, w)
-        loc = tmp[:, :, :4, :, :]
-        cls = F.softmax(tmp[:, :, 4:, :, :], dim=2)
-        tmp = torch.cat((loc, cls), dim=2).view(n, chn, h, w)
-        return tmp
-
-    @staticmethod
-    def lstm_update(prev_c, tmp):
-        cc_i, cc_f, cc_o, cc_g = tmp.chunk(4, 1)
-        i = torch.sigmoid(cc_i)
-        f = torch.sigmoid(cc_f)
-        o = torch.sigmoid(cc_o)
-        g = torch.tanh(cc_g)
-        c = f * prev_c + i * g
-        h = o * torch.tanh(c)
-        return h, c
-
-    def forward(self, x, prev_gt, alpha=1, future=0):
-        x = self.x2h(x)
-        xseq = x.unbind(0)
-        gtseq = prev_gt.unbind(0)
-
-        ht = self.ht
-        xt = None
-
-        # init prev_h
-        if self.prev_h is None:
-            n, c, h, w = xseq[0].shape
-
-            self.prev_h = torch.zeros((n, self.cout, h, w), dtype=torch.float, device=x.device)
-            self.prev_c = torch.zeros((n, self.cout, h, w), dtype=torch.float, device=x.device)
-        else:
-            self.prev_h = self.prev_h.detach()
-            self.prev_c = self.prev_c.detach()
-
-        memory = []
-        result = []
-        # First treat sequence
-        for t, (xt, gt) in enumerate(zip(xseq, gtseq)):
-            #v = random.uniform(0, 1)
-            # if ht is not None and v > alpha:
-            #     gt = self.preprocess_output(ht.detach())
-
-
-            if self.time < 2 and alpha>0:
-                n, c, h, w = xt.shape
-                gt_present = torch.ones((n, 1, h, w), dtype=torch.float, device=x.device)
-                gt = torch.cat((gt_present, gt), dim=1)
-            else:
-                n, c, h, w = xt.shape
-                gt_present = torch.zeros((n, 1, h, w), dtype=torch.float, device=x.device)
-                # if ht is not None:
-                #     gt = self.preprocess_output(ht.detach())
-                gt = torch.cat((gt_present, gt * 0), dim=1)
-
-            tmp = self.gt2h(gt) + self.h2h(self.prev_h) + xt
-
-            h, c = BoxTracker.lstm_update(self.prev_c, tmp)
-            self.prev_h = h
-            self.prev_c = c
-
-            # actual prediction of boxes
-            ht = self.h2gt(h)
-            result.append(ht[None])
-            memory.append(h[None])
-            self.time += 1
-
-        # For auto-regressive use-cases
-        if future:
-            for _ in range(future):
-                gt = self.preprocess_output(ht.detach())
-
-                tmp = self.gt2h(gt) + self.h2h(self.prev_h)  # no xt
-                h, c = BoxTracker.lstm_update(self.prev_c, tmp)
-                self.prev_h = h
-                self.prev_c = c
-
-                # actual prediction of boxes
-                ht = self.h2gt(h)
-                result.append(ht[None])
-                memory.append(h[None])
-
-        result = torch.cat(result, dim=0)
-        memory = torch.cat(memory, dim=0)
-        return memory, result
+        return outputs
 
     def reset(self):
-        self.prev_h, self.prev_c = None, None
-        self.ht = None  # actual output
-        self.time = 0
+        self.unet_rnn.reset()
 
 
 class ARSSD(nn.Module):
@@ -272,11 +303,7 @@ class ARSSD(nn.Module):
         self.aspect_ratios = []
         self.num_anchors = 2 * len(self.aspect_ratios) + 2
 
-        self.box_trackers = nn.ModuleList([
-            BoxTracker(base<<1, base<<2, self.num_anchors, num_classes, stride=2, predict_pairs=predict_pairs),
-            BoxTracker(base<<2, base<<3, self.num_anchors, num_classes, stride=2, predict_pairs=predict_pairs),
-            BoxTracker(base<<3, base<<3, self.num_anchors, num_classes, stride=2, predict_pairs=predict_pairs)
-        ])
+        self.ar_rnn = AR_UNET_RNN()
 
     def forward(self, images, gts, alpha=1.0, future=0):
         """
@@ -328,7 +355,7 @@ if __name__ == '__main__':
         net.cuda()
         box_coder.cuda()
 
-    logdir = '/home/eperot/boxexp/never_feed_gt/'
+    logdir = 'logdir/never_feed_gt/'
     writer = SummaryWriter(logdir)
 
     optimizer = optim.Adam(net.parameters(), lr=0.001, betas=(0.9, 0.99), eps=1e-8, weight_decay=1e-6)
@@ -361,6 +388,7 @@ if __name__ == '__main__':
             loc_targets, cls_targets = encode_boxes(targets, box_coder, cuda)
             prev_loc_targets, prev_cls_targets = encode_boxes(prev_targets, box_coder, cuda)
             fmaps = prepare_fmap_input(box_coder, prev_loc_targets, prev_cls_targets, nclasses, batchsize)
+
 
             loc_preds, cls_preds = net(images, fmaps)
 
