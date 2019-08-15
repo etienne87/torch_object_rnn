@@ -13,6 +13,7 @@ from core.focal_loss import FocalLoss
 from core.trainer import SSDTrainer
 from core.networks import ConvRNNFeatureExtractor
 from toy_pbm_detection import SquaresVideos
+from moving_mnist_detection import MovingMnistDataset
 
 def parse_args():
     parser = argparse.ArgumentParser(description='PyTorch SSD Training')
@@ -35,18 +36,23 @@ def main():
 
     os.environ['OMP_NUM_THREADS'] = '1'
 
-    classes, cin, time, height, width = 4, 3, 10, 128, 128
+    classes, cin, time, height, width = 11, 3, 10, 128, 128
 
     nrows = 4
 
     # Dataset
     print('==> Preparing dataset..')
-    dataset = SquaresVideos(t=time, c=cin, h=height, w=width,
-                            batchsize=args.batchsize, normalize=False, mode='none', max_classes=classes-1)
-    test_dataset = SquaresVideos(t=time, c=cin, h=height, w=width,
-                                 batchsize=args.batchsize, normalize=False, mode='none', max_classes=classes - 1)
-    dataset.num_frames = args.train_iter
-    dataloader = dataset
+    # dataset = SquaresVideos(t=time, c=cin, h=height, w=width,
+    #                         batchsize=args.batchsize, normalize=False, mode='none', max_classes=classes-1)
+    # test_dataset = SquaresVideos(t=time, c=cin, h=height, w=width,
+    #                              batchsize=args.batchsize, normalize=False, mode='none',
+    #                              max_classes=classes - 1, max_objects=4)
+
+    train_dataset = MovingMnistDataset(args.batchsize, time, height, width, cin, train=True)
+    test_dataset = MovingMnistDataset(args.batchsize, time, height, width, cin, train=False)
+
+    train_dataset.num_frames = args.train_iter
+    dataloader = train_dataset
 
     criterion = SSDLoss(num_classes=classes)
     # criterion = FocalLoss(num_classes=classes, softmax=False)

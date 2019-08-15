@@ -63,7 +63,7 @@ def move_box(x1, y1, x2, y2, vx, vy, vs, width, height, min_width, min_height):
     return box, flags
 
 
-class MovingSquare:
+class MovingSquare(object):
     """
      Responsible for endless MovingSquare
     """
@@ -162,12 +162,13 @@ class MovingSquare:
         return (x1, y1, x2, y2)
 
 
-class Animation:
+class Animation(object):
     """
      Responsible for endless Animation
     """
 
     def __init__(self, t=10, h=300, w=300, c=1, max_stop=15, mode='none', max_classes=1, max_objects=3, render=True):
+        #super(object, self).__init__()
         self.height = h
         self.width = w
         self.channels = c
@@ -239,7 +240,7 @@ class Animation:
         return output, boxes
 
 
-class SquaresVideos:
+class SquaresVideos(object):
     """
     Toy Detection DataBase for video detection.
     Move a Patch

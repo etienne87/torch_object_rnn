@@ -33,6 +33,8 @@ class SSDTrainer(object):
         train_loss = 0
         self.net.extractor.return_all = self.all_timesteps
 
+        dataset.max_objects = max(1, min(4, epoch))
+        print('Dataset Max objects: ', dataset.max_objects)
         dataset.reset()
         proba_reset = 1 * (0.9)**epoch
 

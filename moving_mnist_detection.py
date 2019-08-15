@@ -51,12 +51,13 @@ class MovingMnistAnimation(toy.Animation):
         return output, boxes
 
 
-class MovingMnistDatset(toy.SquaresVideos):
+class MovingMnistDataset(toy.SquaresVideos):
     def __init__(self, batchsize=32, t=10, h=300, w=300, c=3,
-                 normalize=False, max_stops=30, max_objects=3, max_classes=3, mode='none', render=True):
-        super(MovingMnistDatset, self).__init__(batchsize, t, h, w, c,
+                 normalize=False, max_stops=30, max_objects=3,
+                 max_classes=3, train=True):
+        super(MovingMnistDataset, self).__init__(batchsize, t, h, w, c,
                                                 normalize, max_stops, max_objects,
-                                                max_classes, mode, render)
+                                                max_classes, 'none', True)
         self.labelmap = [str(i) for i in range(10)]
 
     def reset(self):
@@ -90,9 +91,9 @@ if __name__ == '__main__':
     #     cv2.imshow('img', img)
     #     cv2.waitKey(0)
 
-    dataloader = MovingMnistDatset(t=10, c=3, h=256, w=256, batchsize=3)
-    start = 0
+    dataloader = MovingMnistDataset(t=10, c=3, h=256, w=256, batchsize=32)
 
+    start = 0
     for i, (x, y) in enumerate(dataloader):
 
         for j in range(1):
