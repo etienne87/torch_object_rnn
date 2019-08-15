@@ -9,3 +9,7 @@ main differences:
 - adaptive anchor-boxes creation
 - a simple simulator of moving boxes to train your rnn detector (test this code right away)
 - use of tensorboardX (install tf-nightly, tb-nightly, launch tensorboard --logdir runs)
+- a custom "moving mnist"
+
+
+![](moving_mnist_detection.gif)
