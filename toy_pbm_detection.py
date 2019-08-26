@@ -70,10 +70,11 @@ class MovingSquare(object):
 
     def __init__(self, t=10, h=300, w=300, c=1, max_stop=15, max_classes=3):
         self.time, self.height, self.width = t, h, w
+        self.aspect_ratio = min(3, max(1./3, np.random.randn()/3 + 1.0))
         self.minheight, self.minwidth = 30, 30
         self.stop_num = 0
         self.max_stop = max_stop
-        self.class_id = np.random.randint(max_classes)
+        self.class_id = 2 #np.random.randint(max_classes)
         self.color = (0.5 + np.random.rand(c)/2).tolist()
         self.iter = 0
         self.reset()
@@ -154,10 +155,20 @@ class MovingSquare(object):
         # if np.random.rand() < 0.01:
         #     self.reset_speed()
 
+        xc = (self.x1 + self.x2)/2
+        yc = (self.y1 + self.y2)/2
+        w = (self.x2-self.x1)
+        h = w * self.aspect_ratio
+        self.x1 = int(xc - w/2)
+        self.x2 = int(xc + w/2)
+        self.y1 = int(yc - h/2)
+        self.y2 = int(yc + h/2)
+
         x1, y1, x2, y2 = clamp_xyxy(self.x1, self.y1, self.x2, self.y2, self.width, self.height)
         #x1, y1, x2, y2 = self.x1, self.y1, self.x2, self.y2
 
         self.iter += 1
+
 
         return (x1, y1, x2, y2)
 
@@ -219,13 +230,12 @@ class Animation(object):
                 triangle_cnt = np.array([pt1, pt2, pt3])
                 cv2.drawContours(self.img, [triangle_cnt], 0, object.color, -1)
             else:
-                ptc = (x1+x2)/2, (y1+y2)/2
-                radius = int((x2-x1)/2)
-                cv2.circle(self.img, ptc, radius, object.color, -1)
+                ptc = (x1 + x2) / 2, (y1 + y2) / 2
+                shape = (x2-x1)/2, (y2-y1)/2
+                cv2.ellipse(self.img, ptc, shape, 0, 0, 360, object.color, -1)
 
         if not self.render:
             return None, boxes
-
 
 
         if self.mode == 'diff':
