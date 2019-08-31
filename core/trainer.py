@@ -1,25 +1,23 @@
+from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
-import os
+
 import time
 import torch
-import torch.nn.functional as F
 import numpy as np
 from tensorboardX import SummaryWriter
-import utils
+from .utils import vis, tbx
 
 
-class SSDTrainer(object):
+class DetTrainer(object):
     """
     class wrapping training/ validation/ testing
     """
 
-    def __init__(self, logdir, net, box_coder, criterion, optimizer, all_timesteps=False):
+    def __init__(self, logdir, net, optimizer):
         self.net = net
-        self.box_coder = box_coder
-        self.criterion = criterion
         self.optimizer = optimizer
-        self.all_timesteps = all_timesteps
-        self.make_image = utils.general_frame_display
+        self.make_image = vis.general_frame_display
         self.logdir = logdir
         self.writer = SummaryWriter(logdir)
 
@@ -31,10 +29,6 @@ class SSDTrainer(object):
         self.net.train()
         self.net.reset()
         train_loss = 0
-        self.net.extractor.return_all = self.all_timesteps
-
-        dataset.max_objects = max(1, min(4, epoch))
-        print('Dataset Max objects: ', dataset.max_objects)
         dataset.reset()
         proba_reset = 1 * (0.9)**epoch
 
@@ -53,11 +47,7 @@ class SSDTrainer(object):
 
             start = time.time()
             self.optimizer.zero_grad()
-            loc_preds, cls_preds = self.net(inputs)
-            loc_targets, cls_targets = utils.encode_boxes(targets, self.box_coder, args.cuda)
-
-            loc_loss, cls_loss = self.criterion(loc_preds, loc_targets, cls_preds, cls_targets)
-            loss = loc_loss + cls_loss
+            loss = self.net.compute_loss(inputs, targets)
             loss.backward()
             self.optimizer.step()
 
@@ -76,7 +66,8 @@ class SSDTrainer(object):
 
             start = time.time()
 
-    def val(self, epoch, dataset, args):
+    #TODO: Add some Metrics...
+    def validate(self, epoch, dataset, args):
         print('\nEpoch: %d (val)' % epoch)
         self.net.eval()
         self.net.reset()
@@ -92,10 +83,7 @@ class SSDTrainer(object):
                 inputs = inputs.cuda()
 
             start = time.time()
-            loc_preds, cls_preds = self.net(inputs)
-            loc_targets, cls_targets = utils.encode_boxes(targets, self.box_coder, args.cuda)
-            loc_loss, cls_loss = self.criterion(loc_preds, loc_targets, cls_preds, cls_targets)
-            loss = loc_loss + cls_loss
+            loss = self.net.compute_loss(inputs, targets)
             val_loss += loss.item()
             runtime_stats['network'] += time.time() - start
 
@@ -122,7 +110,7 @@ class SSDTrainer(object):
         batchsize = dataset.batchsize
         time = dataset.time
 
-        ncols = batchsize / nrows
+        ncols = batchsize // nrows
         grid = np.zeros((periods * time, nrows, ncols, dataset.height, dataset.width, 3), dtype=np.uint8)
 
         for period in range(periods):
@@ -134,31 +122,19 @@ class SSDTrainer(object):
             loc_preds, cls_preds = self.net(inputs)
 
             images = inputs.cpu().data.numpy()
-            loc_preds = utils.dig_out_time(loc_preds, dataset.batchsize)
-            cls_preds = utils.dig_out_time(cls_preds, dataset.batchsize)
-            for t in range(loc_preds.size(0)):
-                for i in range(loc_preds.size(1)):
-                    y = i / ncols
-                    x = i % ncols
-                    img = self.make_image(images[t, i])
-                    # assert img.shape == grid[0, 0].shape
-                    boxes, labels, scores = self.box_coder.decode(loc_preds[t, i].data,
-                                                                  cls_preds[t, i].data,
-                                                                  nms_thresh=0.8)
-                    if boxes is not None:
-                        bboxes = utils.boxarray_to_boxes(boxes, labels, dataset.labelmap)
-                        img = utils.draw_bboxes(img, bboxes)
+            targets = self.net.box_coder.decode_txn_boxes(loc_preds, cls_preds, dataset.batchsize)
 
-                    grid[t + period * time, y, x] = img
+            vis.draw_txn_boxes_on_images(images, targets, grid, self.make_image,
+                                         period, time, ncols, dataset.labelmap)
 
         grid = grid.swapaxes(2, 3).reshape(periods * time, nrows * dataset.height, ncols * dataset.width, 3)
-        utils.add_video(self.writer, 'test', grid, global_step=epoch, fps=30)
+        tbx.add_video(self.writer, 'test', grid, global_step=epoch, fps=30)
         self.net.extractor.return_all = False
 
         if args.save_video:
             video_name =  self.logdir + '/videos/' + 'video#' + str(epoch) + '.avi'
-            utils.prepare_ckpt_dir(video_name)
-            utils.write_video_opencv(video_name, grid)
+            tbx.prepare_ckpt_dir(video_name)
+            vis.write_video_opencv(video_name, grid)
 
     def save_ckpt(self, epoch, args, name='checkpoint#'):
         state = {
@@ -166,5 +142,5 @@ class SSDTrainer(object):
             'epoch': epoch,
         }
         ckpt_file = self.logdir + '/checkpoints/' + name + str(epoch) + '.pth'
-        utils.prepare_ckpt_dir(ckpt_file)
+        tbx.prepare_ckpt_dir(ckpt_file)
         torch.save(state, ckpt_file)

@@ -1,19 +1,12 @@
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import torch.nn as nn
 from torch.nn import functional as F
 import torch
-import math
+from .utils.opts import time_to_batch, batch_to_time
 
-def time_to_batch(x):
-    t, n, c, h, w = x.size()
-    x = x.view(n * t, c, h, w)
-    return x, n
-
-
-def batch_to_time(x, n=32):
-    nt, c, h, w = x.size()
-    time = int(nt / n)
-    x = x.view(time, n, c, h, w)
-    return x
 
 class ConvLSTMCell(nn.Module):
     r"""ConvLSTMCell module, applies sequential part of LSTM.
@@ -200,42 +193,15 @@ class ConvGRU(nn.Module):
         return h
 
 
-class CoordConv(nn.Module):
-    """
-    coord conv implementation https://eng.uber.com/coordconv
-    """
-
-    def __init__(self, in_size, out_channels, img_rows, img_cols, kernel=1,
-                 **kwargs):
-        super(CoordConv, self).__init__()
-        grid_h = (torch.arange(img_rows)[:, None] * torch.ones(img_rows, img_cols) - 0.5 * img_rows) * 2 / img_rows
-        grid_w = (torch.arange(img_cols)[None, :] * torch.ones(img_rows, img_cols) - img_cols * 0.5) * 2 / img_cols
-        self.grid = nn.Parameter(torch.cat((grid_h[None, :, :],
-                                            grid_w[None, :, :]), 0), False)
-        self.conv = nn.Conv2d(in_size + 2, out_channels, kernel, **kwargs)
-
-    def forward(self, inp):
-        x = torch.cat(
-            (inp, self.grid[None, ...].repeat(inp.shape[0], 1, 1, 1)), 1)
-        return self.conv(x)
-
-
 class Conv2d(nn.Module):
 
-    def __init__(self, cin, cout, kernel_size, stride, padding, dilation=1, addcoords=False):
+    def __init__(self, cin, cout, kernel_size, stride, padding, dilation=1):
         super(Conv2d, self).__init__()
         self.cin = cin
         self.cout = cout
-
-        if addcoords:
-            self.cin += 2
-            self.conv1 = CoordConv(cin, cout, kernel_size=kernel_size, stride=stride, dilation=dilation,
-                                   padding=padding,
-                                   bias=True)
-        else:
-            self.conv1 = nn.Conv2d(cin, cout, kernel_size=kernel_size, stride=stride, dilation=dilation,
-                                   padding=padding,
-                                   bias=True)
+        self.conv1 = nn.Conv2d(cin, cout, kernel_size=kernel_size, stride=stride, dilation=dilation,
+                               padding=padding,
+                               bias=True)
 
         self.bn1 = nn.BatchNorm2d(cout)
 
@@ -244,78 +210,6 @@ class Conv2d(nn.Module):
         x = self.bn1(x)
         x = F.relu(x)
         return x
-
-
-class SeparableConv2D(nn.Module):
-    """Convolve spatially channels independently & then pointwise together"""
-
-    def __init__(self, cin, cout, kernel, depth_multiplier=1, stride=1,
-                 padding=1):
-        super(SeparableConv2D, self).__init__()
-
-        self.dw = nn.Conv2d(cin, cin * depth_multiplier, kernel, padding=padding,
-                            stride=stride, groups=cin)
-
-        self.bn1 = nn.GroupNorm(cin, cin * depth_multiplier)
-        self.pw = nn.Conv2d(cin * depth_multiplier, cout, 1,
-                            stride=1)
-        self.bn2 = nn.BatchNorm2d(cout)
-
-        self.output_channels = cout
-
-    def forward(self, x):
-        x1 = self.dw(x)
-
-        x1 = self.bn1(x1)
-        out = F.relu(self.pw(x1))
-        out = self.bn2(out)
-        return out
-
-
-class SepConvLSTM(nn.Module):
-    """
-    convlstm with a depthwise separable convolution first
-    """
-
-    def __init__(self, cin, cout, kernel_size, padding, stride=1):
-        super(SepConvLSTM, self).__init__()
-
-        self.conv1 = SeparableConv2D(cin, 4 * cout, kernel_size, depth_multiplier=2, stride=stride, padding=padding)
-        self.bn1 = nn.BatchNorm2d(cin)
-
-        self.timepool = ConvLSTMCell(cout, 3, True)
-
-    def forward(self, x):
-        x, n = time_to_batch(x)
-        bnx = self.bn1(x)
-        y = self.conv1(bnx)
-        y = batch_to_time(y, n)
-        h = self.timepool(y)
-        return h
-
-    def reset(self):
-        """
-        reset memory of the lstm cells
-        """
-        self.timepool.reset()
-
-
-
-class ResNetBlock_concat(nn.Module):
-    """Residual Block using concatenate"""
-
-    def __init__(self, cin, cout=-1):
-        super(ResNetBlock_concat, self).__init__()
-
-        self.conv1 = nn.Conv2d(cin, cout, 3, padding=1, stride=1)
-        self.bn1 = nn.BatchNorm2d(cout)
-        self.conv2 = nn.Conv2d(cout, cout, 3, padding=1, stride=1)
-        self.bn2 = nn.BatchNorm2d(cout)
-
-    def forward(self, x):
-        conv1 = F.relu(self.bn1(self.conv1(x)))
-        conv2 = F.relu(self.bn2(self.conv2(conv1)))
-        return torch.cat((conv2, x), 1)
 
 
 class ResNetBlock(nn.Module):
@@ -349,91 +243,131 @@ class UpSampleConv(nn.Module):
         return self.non_linearity(self.bn1(conv1))
 
 
-class HOGLayer(nn.Module):
-    def __init__(self, nbins=10, pool=8, max_angle=math.pi, stride=1, padding=1, dilation=1,
-                 mean_in=False, max_out=False):
-        super(HOGLayer, self).__init__()
-        self.nbins = nbins
-        self.stride = stride
-        self.padding = padding
-        self.dilation = dilation
-        self.pool = pool
-        self.max_angle = max_angle
-        self.max_out = max_out
-        self.mean_in = mean_in
+class double_conv(nn.Module):
+    '''(conv => BN => ReLU) * 2'''
 
-        mat = torch.FloatTensor([[1, 0, -1],
-                                 [2, 0, -2],
-                                 [1, 0, -1]])
-        mat = torch.cat((mat[None], mat.t()[None]), dim=0)
-        self.register_buffer("weight", mat[:,None,:,:])
-        self.pooler = nn.AvgPool2d(pool, stride=pool, padding=0, ceil_mode=False, count_include_pad=True)
+    def __init__(self, in_ch, out_ch):
+        super(double_conv, self).__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(in_ch, out_ch, 3, padding=1),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_ch, out_ch, 3, padding=1),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True)
+        )
 
     def forward(self, x):
-        if self.mean_in:
-            return self.forward_v1(x)
+        x = self.conv(x)
+        return x
+
+
+class inconv(nn.Module):
+    def __init__(self, in_ch, out_ch):
+        super(inconv, self).__init__()
+        self.conv = double_conv(in_ch, out_ch)
+
+    def forward(self, x):
+        x = self.conv(x)
+        return x
+
+
+class down(nn.Module):
+    def __init__(self, in_ch, out_ch):
+        super(down, self).__init__()
+        self.mpconv = nn.Sequential(
+            nn.MaxPool2d(2),
+            double_conv(in_ch, out_ch)
+        )
+
+    def forward(self, x):
+        x = self.mpconv(x)
+        return x
+
+
+class up(nn.Module):
+    def __init__(self, in_ch, out_ch, bilinear=True):
+        super(up, self).__init__()
+
+        #  would be a nice idea if the upsampling could be learned too,
+        #  but my machine do not have enough memory to handle all those weights
+
+        if not bilinear:
+            self.up = nn.ConvTranspose2d(in_ch // 2, in_ch // 2, 2, stride=2)
+
+        self.conv = double_conv(in_ch, out_ch)
+
+    def forward(self, x1, x2):
+        if hasattr(self, 'up'):
+            x1 = self.up(x1)
         else:
-            return self.forward_v2(x)
+            x1 = F.interpolate(x1, scale_factor=2, mode='bilinear', align_corners=True)
 
-    def forward_v1(self, x):
-        if x.size(1) > 1:
-            x = x.mean(dim=1)[:,None,:,:]
+        # input is CHW
+        diffY = x2.size()[2] - x1.size()[2]
+        diffX = x2.size()[3] - x1.size()[3]
 
-        gxy = F.conv2d(x, self.weight, None, self.stride,
-                       self.padding, self.dilation, 1)
-        # 2. Mag/ Phase
-        mag = gxy.norm(dim=1)
-        norm = mag[:, None, :, :]
-        phase = torch.atan2(gxy[:, 0, :, :], gxy[:, 1, :, :])
+        x1 = F.pad(x1, (diffX // 2, diffX - diffX // 2,
+                        diffY // 2, diffY - diffY // 2))
 
-        # 3. Binning Mag with linear interpolation
-        phase_int = phase / self.max_angle * self.nbins
-        phase_int = phase_int[:, None, :, :]
+        # for padding issues, see
+        # https://github.com/HaiyongJiang/U-Net-Pytorch-Unstructured-Buggy/commit/0e854509c2cea854e247a9c615f175f76fbb2e3a
+        # https://github.com/xiaopeng-liao/Pytorch-UNet/commit/8ebac70e633bac59fc22bb5195e513d5832fb3bd
 
-        n, c, h, w = gxy.shape
-        out = torch.zeros((n, self.nbins, h, w), dtype=torch.float, device=gxy.device)
-        out.scatter_(1, phase_int.floor().long() % self.nbins, norm)
-        out.scatter_add_(1, phase_int.ceil().long() % self.nbins, 1 - norm)
-
-        return self.pooler(out)
-
-    def forward_v2(self, x):
-        batch_size, in_channels, height, width = x.shape
-        weight = self.weight.repeat(in_channels, 1, 1, 1)
-        gxy = F.conv2d(x, weight, None, self.stride,
-                        self.padding, self.dilation, groups=in_channels)
-
-        gxy = gxy.view(batch_size, in_channels, 2, height, width)
-
-        if self.max_out:
-            gxy = gxy.max(dim=1)[0][:,None,:,:,:]
-
-        #2. Mag/ Phase
-        mags = gxy.norm(dim=2)
-        norms = mags[:,:,None,:,:]
-        phases = torch.atan2(gxy[:,:,0,:,:], gxy[:,:,1,:,:])
-
-        #3. Binning Mag with linear interpolation
-        phases_int = phases / self.max_angle * self.nbins
-        phases_int = phases_int[:,:,None,:,:]
-
-        out = torch.zeros((batch_size, in_channels, self.nbins, height, width),
-                          dtype=torch.float, device=gxy.device)
-        out.scatter_(2, phases_int.floor().long()%self.nbins, norms)
-        out.scatter_add_(2, phases_int.ceil().long()%self.nbins, 1 - norms)
-
-        out = out.view(batch_size, in_channels * self.nbins, height, width)
-        out = torch.cat((self.pooler(out), self.pooler(x)), dim=1)
-
-        return out
-
-if __name__ == '__main__':
-    n, c, h, w = 3, 16, 64, 64
-    x = torch.rand(n, c, h, w)
+        x = torch.cat([x2, x1], dim=1)
+        x = self.conv(x)
+        return x
 
 
-    spnet = SpatialGRU(16, 32, 3, 1, 1)
+class outconv(nn.Module):
+    def __init__(self, in_ch, out_ch):
+        super(outconv, self).__init__()
+        self.conv = nn.Conv2d(in_ch, out_ch, 1)
 
-    y = spnet(x)
+    def forward(self, x):
+        x = self.conv(x)
+        return x
 
-    print(y.shape)
+
+class UNet(nn.Module):
+    def __init__(self, in_channels, out_channels, base, n_layers):
+        super(UNet, self).__init__()
+        self.inc = inconv(in_channels, base)
+
+        self.downs = []
+        self.ups = []
+
+        self.channels = [base]
+
+        for i in range(n_layers):
+            channels = min(base * 2 ** (n_layers-1), self.channels[-1] * 2)
+            self.channels.append(channels)
+            self.downs.append( down(self.channels[-2], self.channels[-1]) )
+
+        self.channels.pop()
+
+        for i in range(n_layers):
+            channels = self.channels.pop()
+            in_ch = channels * 2
+            out_ch = max(base, channels /2)
+            self.ups.append(up(in_ch, out_ch) )
+
+        self.outc = outconv(base, out_channels)
+
+        self.downs = nn.ModuleList(self.downs)
+        self.ups = nn.ModuleList(self.ups)
+
+
+    def forward(self, x):
+        self.encoded = [self.inc(x)]
+
+        for down_layer in self.downs:
+            self.encoded.append(down_layer(self.encoded[-1]))
+
+        x = self.encoded.pop()
+
+        for up_layer in self.ups:
+            x = up_layer(x, self.encoded.pop())
+
+        x = self.outc(x)
+        return x

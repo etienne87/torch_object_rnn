@@ -1,19 +1,19 @@
+from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
+
 import argparse
 import os
-import glob
 import torch
 import torch.optim as optim
 import torch.backends.cudnn as cudnn
 
 from core.ssd import SSD
-from core.box_coder import SSDBoxCoder
-from core.ssd_loss import SSDLoss
-from core.focal_loss import FocalLoss
-from core.trainer import SSDTrainer
-from core.networks import ConvRNNFeatureExtractor
-from toy_pbm_detection import SquaresVideos
-from moving_mnist_detection import MovingMnistDataset
+from core.trainer import DetTrainer
+from core.utils import opts
+
+from data.moving_mnist_detection import MovingMnistDataset
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description='PyTorch SSD Training')
@@ -37,16 +37,10 @@ def main():
     os.environ['OMP_NUM_THREADS'] = '1'
 
     classes, cin, time, height, width = 11, 3, 10, 128, 128
-
     nrows = 4
 
     # Dataset
     print('==> Preparing dataset..')
-    # dataset = SquaresVideos(t=time, c=cin, h=height, w=width,
-    #                         batchsize=args.batchsize, normalize=False, mode='none', max_classes=classes-1)
-    # test_dataset = SquaresVideos(t=time, c=cin, h=height, w=width,
-    #                              batchsize=args.batchsize, normalize=False, mode='none',
-    #                              max_classes=classes - 1, max_objects=4)
 
     train_dataset = MovingMnistDataset(args.batchsize, time, height, width, cin, train=True)
     test_dataset = MovingMnistDataset(args.batchsize, time, height, width, cin, train=False)
@@ -54,45 +48,31 @@ def main():
     train_dataset.num_frames = args.train_iter
     dataloader = train_dataset
 
-    criterion = SSDLoss(num_classes=classes)
-    # criterion = FocalLoss(num_classes=classes, softmax=False)
-
 
     # Model
     print('==> Building model..')
-    net = SSD(feature_extractor=ConvRNNFeatureExtractor,
-              num_classes=classes, cin=cin, height=height, width=width, act="softmax")
+    net = SSD(num_classes=classes, cin=cin, height=height, width=width, act="softmax")
 
     if args.cuda:
         net.cuda()
-        criterion.cuda()
+        net.box_coder.cuda()
+        net.criterion.cuda()
         cudnn.benchmark = True
 
-    best_loss = float('inf')  # best test loss
+
     start_epoch = 0  # start from epoch 0 or last epoch
     if args.resume:
         print('==> Resuming from checkpoint..')
-        checkpoints = glob.glob(args.logdir + '/checkpoints/' + '*.pth')
-        checkpoints = sorted(checkpoints, key=lambda x: int(x.split('checkpoint#')[1].split('.pth')[0]))
-        last_checkpoint = checkpoints[-1]
-
-        checkpoint = torch.load(last_checkpoint)
-        net.load_state_dict(checkpoint['net'])
-        start_epoch = checkpoint['epoch']
-
-    box_coder = SSDBoxCoder(net, 0.5)
-
-    if args.cuda:
-        box_coder.cuda()
+        start_epoch = opts.load_last_checkpoint(net, args.logdir)
 
 
     optimizer = optim.Adam(net.parameters(), lr=args.lr, betas=(0.9, 0.999), eps=1e-8, weight_decay=0)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.99)
-    trainer = SSDTrainer(args.logdir, net, box_coder, criterion, optimizer, all_timesteps=True)
+    trainer = DetTrainer(args.logdir, net, optimizer)
 
     for epoch in range(start_epoch, args.epochs):
         trainer.train(epoch, dataloader, args)
-        # trainer.val(epoch, test_dataloader, args)
+        # trainer.validate(epoch, test_dataset, args)
         trainer.test(epoch, test_dataset, nrows, args)
         trainer.save_ckpt(epoch, args)
         trainer.writer.add_scalar('learning rate', optimizer.param_groups[0]['lr'], epoch)

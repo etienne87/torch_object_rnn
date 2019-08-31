@@ -1,10 +1,62 @@
-'''SSD model with custom feature extractor.'''
+from __future__ import absolute_import
 from __future__ import division
+from __future__ import print_function
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
+
+from core.ssd_box_coder import SSDBoxCoder
+from core.ssd_loss import SSDLoss, FocalLoss
+from core.modules import Conv2d, ConvLSTM, ConvGRU, batch_to_time, time_to_batch
 import math
+
+
+class ConvRNNFeatureExtractor(nn.Module):
+    def __init__(self, cin=1):
+        super(ConvRNNFeatureExtractor, self).__init__()
+        self.cin = cin
+        base = 8
+        self.conv1 = Conv2d(cin, base, kernel_size=7, stride=2, padding=3)
+        self.conv2 = Conv2d(base, base * 4, kernel_size=7, stride=2, padding=3)
+
+        self.conv3 = ConvLSTM(base * 4, base * 8, kernel_size=7, stride=2, padding=3)
+        self.conv4 = ConvLSTM(base * 8, base * 16, kernel_size=7, stride=1, dilation=1, padding=3)
+        self.conv5 = ConvLSTM(base * 16, base * 16, kernel_size=7, stride=1, dilation=2, padding=3)
+        self.conv6 = ConvLSTM(base * 16, base * 16, kernel_size=7, stride=1, dilation=3, padding=3 * 2)
+
+        self.end_point_channels = [self.conv3.cout,  # 8
+                                   self.conv4.cout,  # 16
+                                   self.conv5.cout,  # 32
+                                   self.conv6.cout]  # 64
+
+    def forward(self, x):
+        sources = list()
+
+        x0, n = time_to_batch(x)
+        x1 = self.conv1(x0)
+        x2 = self.conv2(x1)
+        x2 = batch_to_time(x2, n)
+
+        x3 = self.conv3(x2)
+        x4 = self.conv4(x3)
+        x5 = self.conv5(x4)
+        x6 = self.conv6(x5)
+
+        x3, n = time_to_batch(x3)
+        x4, n = time_to_batch(x4)
+        x5, n = time_to_batch(x5)
+        x6, n = time_to_batch(x6)
+
+        sources += [x3, x4, x5, x6]
+        return sources
+
+    def reset(self):
+        for name, module in self._modules.iteritems():
+            if isinstance(module, ConvLSTM) or \
+                    isinstance(module, ConvGRU):
+                module.timepool.reset()
 
 
 def get_box_params(sources, h, w):
@@ -33,6 +85,7 @@ def get_box_params(sources, h, w):
 
     return fm_sizes, steps, box_sizes
 
+
 def init_prior_probability(shape, prior_probability=0.01):
     return torch.ones(shape) * -math.log((1 - prior_probability) / prior_probability)
 
@@ -50,7 +103,8 @@ def decode_boxes(box_map, num_classes, num_anchors):
 
 
 class SSD(nn.Module):
-    def __init__(self, feature_extractor, num_classes=2, cin=2, height=300, width=300, act='softmax'):
+    def __init__(self, feature_extractor=ConvRNNFeatureExtractor,
+                 num_classes=2, cin=2, height=300, width=300, act='softmax'):
         super(SSD, self).__init__()
         self.num_classes = num_classes
         self.height, self.width = height, width
@@ -65,19 +119,14 @@ class SSD(nn.Module):
         self.in_channels = self.extractor.end_point_channels
         self.num_anchors = [2 * len(self.aspect_ratios) + 2 for i in range(len(self.in_channels))]
 
-        # self.loc_layers = nn.ModuleList()
-        # self.cls_layers = nn.ModuleList()
-        # for i in range(len(self.in_channels)):
-        #     self.loc_layers += [nn.Conv2d(self.in_channels[i], self.num_anchors[i]*4, kernel_size=3, padding=1)]
-        #     self.cls_layers += [
-        #         nn.Conv2d(self.in_channels[i], self.num_anchors[i] * self.num_classes, kernel_size=3, padding=1)]
-
         self.pred_layers = nn.ModuleList()
         for i in range(len(self.in_channels)):
             self.pred_layers += [nn.Conv2d(self.in_channels[i], self.num_anchors[i]*(4+self.num_classes),
                                            kernel_size=3, padding=1, stride=1)]
 
         self.act = act
+        self.box_coder = SSDBoxCoder(self, 0.5)
+        self.criterion = SSDLoss(num_classes=num_classes)
 
     def get_ssd_params(self):
         x = Variable(torch.randn(1, 1, self.cin, self.height, self.width))
@@ -92,19 +141,10 @@ class SSD(nn.Module):
         cls_preds = []
         xs = self.extractor(x)
         for i, x in enumerate(xs):
-            # loc_pred = self.loc_layers[i](x)
-            # loc_pred = loc_pred.permute(0, 2, 3, 1).contiguous()
-            # loc_preds.append(loc_pred.view(loc_pred.size(0), -1, 4))
-            #
-            # cls_pred = self.cls_layers[i](x)
-            # cls_pred = cls_pred.permute(0, 2, 3, 1).contiguous()
-            # cls_preds.append(cls_pred.view(cls_pred.size(0), -1, self.num_classes))
-
             pred = self.pred_layers[i](x)
             loc_pred, cls_pred = decode_boxes(pred, self.num_classes, self.num_anchors[i])
             loc_preds.append(loc_pred.view(loc_pred.size(0), -1, 4))
             cls_preds.append(cls_pred.view(cls_pred.size(0), -1, self.num_classes))
-
 
         loc_preds = torch.cat(loc_preds, 1)
         cls_preds = torch.cat(cls_preds, 1)
@@ -116,4 +156,11 @@ class SSD(nn.Module):
                 cls_preds = torch.sigmoid(cls_preds)
 
         return loc_preds, cls_preds
+
+    def compute_loss(self, x, targets):
+        loc_preds, cls_preds = self(x)
+        loc_targets, cls_targets = self.box_coder.encode_txn_boxes(targets)
+        loc_loss, cls_loss = self.criterion(loc_preds, loc_targets, cls_preds, cls_targets)
+        loss = loc_loss + cls_loss
+        return loss
 

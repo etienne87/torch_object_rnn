@@ -70,11 +70,11 @@ class MovingSquare(object):
 
     def __init__(self, t=10, h=300, w=300, c=1, max_stop=15, max_classes=3):
         self.time, self.height, self.width = t, h, w
-        self.aspect_ratio = min(3, max(1./3, np.random.randn()/3 + 1.0))
+        self.aspect_ratio = 1.0 #min(3, max(1./3, np.random.randn()/3 + 1.0))
         self.minheight, self.minwidth = 30, 30
         self.stop_num = 0
         self.max_stop = max_stop
-        self.class_id = 2 #np.random.randint(max_classes)
+        self.class_id = np.random.randint(max_classes)
         self.color = (0.5 + np.random.rand(c)/2).tolist()
         self.iter = 0
         self.reset()
