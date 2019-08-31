@@ -7,8 +7,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 
-from core.ssd_box_coder import SSDBoxCoder
-from core.ssd_loss import SSDLoss, FocalLoss
+from core.ssd.box_coder import SSDBoxCoder
+from core.ssd.loss import SSDLoss, FocalLoss
 from core.modules import Conv2d, ConvLSTM, ConvGRU, batch_to_time, time_to_batch
 import math
 

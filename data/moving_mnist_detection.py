@@ -1,6 +1,6 @@
 import numpy as np
 from torchvision import datasets, transforms
-import toy_pbm_detection as toy
+import moving_box_detection as toy
 import cv2
 
 TRAIN_DATASET = datasets.MNIST('../data', train=True, download=True,

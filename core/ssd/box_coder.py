@@ -1,8 +1,11 @@
-'''Encode object boxes and labels.'''
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import math
 import torch
-from box import box_nms, change_box_order, assign_priors
-from .utils import opts
+from core.utils.box import box_nms, change_box_order, assign_priors
+from core.utils import opts
 
 class SSDBoxCoder:
     def __init__(self, ssd_model, iou_threshold=0.5):

@@ -8,7 +8,7 @@ import torch
 import torch.optim as optim
 import torch.backends.cudnn as cudnn
 
-from core.ssd import SSD
+from core.ssd.model import SSD
 from core.trainer import DetTrainer
 from core.utils import opts
 
