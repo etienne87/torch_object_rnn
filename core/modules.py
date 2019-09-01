@@ -5,7 +5,79 @@ from __future__ import print_function
 import torch.nn as nn
 from torch.nn import functional as F
 import torch
-from .utils.opts import time_to_batch, batch_to_time
+from utils.opts import time_to_batch, batch_to_time
+
+
+
+class Conv2d(nn.Module):
+
+    def __init__(self, cin, cout, kernel_size, stride, padding, dilation=1, act=nn.ReLU(inplace=True)):
+        super(Conv2d, self).__init__()
+        self.cin = cin
+        self.cout = cout
+        self.conv1 = nn.Conv2d(cin, cout, kernel_size=kernel_size, stride=stride, dilation=dilation,
+                               padding=padding,
+                               bias=True)
+
+        self.bn1 = nn.BatchNorm2d(cout)
+        self.act = act
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.act(x)
+        return x
+
+
+class ResNetBlock(nn.Module):
+    """Transition block"""
+
+    def __init__(self, cin):
+        super(ResNetBlock, self).__init__()
+        self.conv1 = Conv2d(cin, cin, 3, padding=1, stride=1)
+        self.conv2 = Conv2d(cin, cin, 3, padding=1, stride=1)
+
+    def forward(self, x):
+        conv1 = self.conv1(x)
+        return self.conv2(conv1) + x
+
+
+def double_conv(in_ch, out_ch):
+    return nn.Sequential(
+            Conv2d(in_ch, out_ch, 3, padding=1, stride=1),
+            Conv2d(out_ch, out_ch, 3, padding=1, stride=1)
+    )
+
+
+def down_ff(in_ch, out_ch):
+    return nn.Sequential(
+        nn.MaxPool2d(2),
+        double_conv(in_ch, out_ch)
+    )
+
+
+class SequenceWise(nn.Module):
+    def __init__(self, module):
+        """
+        Collapses input of dim T*N*H to (T*N)*H, and applies to a module.
+        Allows handling of variable sequence lengths and minibatch sizes.
+        :param module: Module to apply input to.
+        """
+        super(SequenceWise, self).__init__()
+        self.module = module
+
+    def forward(self, x):
+        t, n = x.size(0), x.size(1)
+        x = time_to_batch(x)[0]
+        x = self.module(x)
+        x = batch_to_time(x, n)
+        return x
+
+    def __repr__(self):
+        tmpstr = self.__class__.__name__ + ' (\n'
+        tmpstr += self.module.__repr__()
+        tmpstr += ')'
+        return tmpstr
 
 
 class ConvLSTMCell(nn.Module):
@@ -85,19 +157,18 @@ class ConvLSTM(nn.Module):
 
         self.cin = nInputPlane
         self.cout = nOutputPlane
-        self.conv1 = nn.Conv2d(nInputPlane, 4 * nOutputPlane, kernel_size=kernel_size, stride=stride, dilation=dilation,
-                               padding=padding,
-                               bias=True)
 
-        self.bn1 = nn.BatchNorm2d(nInputPlane)
+        self.conv_x2h = SequenceWise(Conv2d(nInputPlane, 4 * nOutputPlane,
+                                            kernel_size=kernel_size,
+                                            stride=stride,
+                                            dilation=dilation,
+                                           padding=padding,
+                                           act=nn.Identity()))
 
         self.timepool = ConvLSTMCell(nOutputPlane, 3)
 
     def forward(self, x):
-        x, n = time_to_batch(x)
-        bnx = self.bn1(x)
-        y = self.conv1(bnx)
-        y = batch_to_time(y, n)
+        y = self.conv_x2h(x)
         h = self.timepool(y)
         return h
 
@@ -129,12 +200,14 @@ class ConvGRUCell(nn.Module):
     def forward(self, xi):
         xiseq = xi.split(1, 0) #t,n,c,h,w
 
+
         if self.prev_h is not None:
             self.prev_h = self.prev_h.detach()
 
         result = []
         for t, xt in enumerate(xiseq):
             xt = xt.squeeze(0)
+
 
             #split x & h in 3
             x_zr, x_h = xt[:, :2*self.hidden_dim], xt[:,2*self.hidden_dim:]
@@ -168,171 +241,60 @@ class ConvGRUCell(nn.Module):
     def reset(self):
         self.prev_h = None
 
+
 class ConvGRU(nn.Module):
     r"""ConvGRU module.
     """
-    def __init__(self, nInputPlane, nOutputPlane, kernel_size, stride, padding, dilation=1):
+    def __init__(self, nInputPlane, nOutputPlane, kernel_size=5, stride=1, padding=2, dilation=1):
         super(ConvGRU, self).__init__()
 
         self.cin = nInputPlane
         self.cout = nOutputPlane
-        self.conv1 = nn.Conv2d(nInputPlane, 3 * nOutputPlane, kernel_size=kernel_size, stride=stride, dilation=dilation,
-                               padding=padding,
-                               bias=True)
-
-        self.bn1 = nn.BatchNorm2d(nInputPlane)
+        self.conv_x2h = SequenceWise(Conv2d(nInputPlane, 3 * nOutputPlane,
+                                            kernel_size=kernel_size,
+                                            stride=stride,
+                                            dilation=dilation,
+                                            padding=padding,
+                                            act=nn.Identity()))
 
         self.timepool = ConvGRUCell(nOutputPlane, 3, True)
 
     def forward(self, x):
-        x, n = time_to_batch(x)
-        bnx = self.bn1(x)
-        y = self.conv1(bnx)
-        y = batch_to_time(y, n)
+        y = self.conv_x2h(x)
         h = self.timepool(y)
         return h
 
 
-class Conv2d(nn.Module):
-
-    def __init__(self, cin, cout, kernel_size, stride, padding, dilation=1):
-        super(Conv2d, self).__init__()
-        self.cin = cin
-        self.cout = cout
-        self.conv1 = nn.Conv2d(cin, cout, kernel_size=kernel_size, stride=stride, dilation=dilation,
-                               padding=padding,
-                               bias=True)
-
-        self.bn1 = nn.BatchNorm2d(cout)
-
-    def forward(self, x):
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = F.relu(x)
-        return x
-
-
-class ResNetBlock(nn.Module):
-    """Transition block"""
-
-    def __init__(self, cin):
-        super(ResNetBlock, self).__init__()
-        self.conv1 = nn.Conv2d(cin, cin, 3, padding=1, stride=1)
-        self.bn1 = nn.BatchNorm2d(cin)
-        self.conv2 = nn.Conv2d(cin, cin, 3, padding=1, stride=1)
-        self.bn2 = nn.BatchNorm2d(cin)
-
-    def forward(self, x):
-        conv1 = F.relu(self.bn1(self.conv1(x)))
-        conv2 = F.relu(self.bn2(self.conv2(conv1)))
-        return conv2 + x
-
-
-class UpSampleConv(nn.Module):
-    """interpolate with nearest neighbors then convolves"""
-
-    def __init__(self, cin, cout, kernel, scale_factor=2, non_linearity=lambda s: s, **kwargs):
-        super(UpSampleConv, self).__init__()
-        self.non_linearity = non_linearity
-        self.scale_factor = scale_factor
-        self.conv1 = nn.Conv2d(cin, cout, kernel, **kwargs)
-        self.bn1 = nn.BatchNorm2d(cout)
-
-    def forward(self, x):
-        conv1 = self.conv1(F.interpolate(x, scale_factor=self.scale_factor))
-        return self.non_linearity(self.bn1(conv1))
-
-
-class double_conv(nn.Module):
-    '''(conv => BN => ReLU) * 2'''
-
+class UpCatRNN(nn.Module):
     def __init__(self, in_ch, out_ch):
-        super(double_conv, self).__init__()
-        self.conv = nn.Sequential(
-            nn.Conv2d(in_ch, out_ch, 3, padding=1),
-            nn.BatchNorm2d(out_ch),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(out_ch, out_ch, 3, padding=1),
-            nn.BatchNorm2d(out_ch),
-            nn.ReLU(inplace=True)
-        )
-
-    def forward(self, x):
-        x = self.conv(x)
-        return x
-
-
-class inconv(nn.Module):
-    def __init__(self, in_ch, out_ch):
-        super(inconv, self).__init__()
-        self.conv = double_conv(in_ch, out_ch)
-
-    def forward(self, x):
-        x = self.conv(x)
-        return x
-
-
-class down(nn.Module):
-    def __init__(self, in_ch, out_ch):
-        super(down, self).__init__()
-        self.mpconv = nn.Sequential(
-            nn.MaxPool2d(2),
-            double_conv(in_ch, out_ch)
-        )
-
-    def forward(self, x):
-        x = self.mpconv(x)
-        return x
-
-
-class up(nn.Module):
-    def __init__(self, in_ch, out_ch, bilinear=True):
-        super(up, self).__init__()
-
-        #  would be a nice idea if the upsampling could be learned too,
-        #  but my machine do not have enough memory to handle all those weights
-
-        if not bilinear:
-            self.up = nn.ConvTranspose2d(in_ch // 2, in_ch // 2, 2, stride=2)
-
-        self.conv = double_conv(in_ch, out_ch)
+        super(UpCatRNN, self).__init__()
+        self.convrnn = ConvGRU(in_ch, out_ch)
 
     def forward(self, x1, x2):
-        if hasattr(self, 'up'):
-            x1 = self.up(x1)
-        else:
-            x1 = F.interpolate(x1, scale_factor=2, mode='bilinear', align_corners=True)
+
+        x1, n = time_to_batch(x1)
+        x1 = F.interpolate(x1, scale_factor=2, mode='bilinear', align_corners=True)
 
         # input is CHW
-        diffY = x2.size()[2] - x1.size()[2]
-        diffX = x2.size()[3] - x1.size()[3]
+        diffY = x2.size()[-2] - x1.size()[-2]
+        diffX = x2.size()[-1] - x1.size()[-1]
 
         x1 = F.pad(x1, (diffX // 2, diffX - diffX // 2,
                         diffY // 2, diffY - diffY // 2))
 
-        # for padding issues, see
-        # https://github.com/HaiyongJiang/U-Net-Pytorch-Unstructured-Buggy/commit/0e854509c2cea854e247a9c615f175f76fbb2e3a
-        # https://github.com/xiaopeng-liao/Pytorch-UNet/commit/8ebac70e633bac59fc22bb5195e513d5832fb3bd
+        x1 = batch_to_time(x1, n)
 
-        x = torch.cat([x2, x1], dim=1)
-        x = self.conv(x)
+        x = torch.cat([x2, x1], dim=2)
+        x = self.convrnn(x)
         return x
 
-
-class outconv(nn.Module):
-    def __init__(self, in_ch, out_ch):
-        super(outconv, self).__init__()
-        self.conv = nn.Conv2d(in_ch, out_ch, 1)
-
-    def forward(self, x):
-        x = self.conv(x)
-        return x
 
 
 class UNet(nn.Module):
-    def __init__(self, in_channels, out_channels, base, n_layers):
+    def __init__(self, in_channels, out_channels, base, n_layers, up, down):
         super(UNet, self).__init__()
-        self.inc = inconv(in_channels, base)
+
+        self.inc = SequenceWise(double_conv(in_channels, base))
 
         self.downs = []
         self.ups = []
@@ -342,17 +304,17 @@ class UNet(nn.Module):
         for i in range(n_layers):
             channels = min(base * 2 ** (n_layers-1), self.channels[-1] * 2)
             self.channels.append(channels)
-            self.downs.append( down(self.channels[-2], self.channels[-1]) )
+            self.downs.append( SequenceWise(down(self.channels[-2], self.channels[-1])) )
 
         self.channels.pop()
 
         for i in range(n_layers):
             channels = self.channels.pop()
             in_ch = channels * 2
-            out_ch = max(base, channels /2)
+            out_ch = max(base, channels // 2)
             self.ups.append(up(in_ch, out_ch) )
 
-        self.outc = outconv(base, out_channels)
+        self.outc = SequenceWise(nn.Conv2d(base, out_channels, 1))
 
         self.downs = nn.ModuleList(self.downs)
         self.ups = nn.ModuleList(self.ups)
@@ -371,3 +333,17 @@ class UNet(nn.Module):
 
         x = self.outc(x)
         return x
+
+
+
+
+if __name__ == '__main__':
+    t, n, c, h, w = 10, 1, 3, 64, 64
+
+    x = torch.rand(t, n, c, h, w)
+
+    net = nn.Sequential(
+            UNet(c, 64, 16, 3, up=UpCatRNN, down=down_ff),
+            UNet(64, 64, 16, 3, up=UpCatRNN, down=down_ff))
+
+    out = net(x)
