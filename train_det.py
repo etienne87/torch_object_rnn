@@ -10,6 +10,7 @@ import torch.backends.cudnn as cudnn
 
 from core.ssd.model import SSD
 from core.ctdet.model import CenterNet
+from core.rpn import WrapRPN
 from core.trainer import DetTrainer
 from core.utils import opts
 
@@ -52,8 +53,9 @@ def main():
 
     # Model
     print('==> Building model..')
-    # net = SSD(num_classes=classes, cin=cin, height=height, width=width, act="softmax")
-    net = CenterNet(num_classes=classes, cin=cin, height=height, width=width)
+    net = SSD(num_classes=classes, cin=cin, height=height, width=width, act="softmax")
+    #net = CenterNet(num_classes=classes, cin=cin, height=height, width=width)
+    net = WrapRPN(num_classes=classes, in_channels=cin, height=height, width=width)
 
     if args.cuda:
         net.cuda()
