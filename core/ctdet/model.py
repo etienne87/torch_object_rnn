@@ -12,7 +12,7 @@ import math
 from core.utils.image import gaussian_radius, draw_umich_gaussian, draw_msra_gaussian
 from core.utils.image import draw_dense_reg
 
-from core.modules import StackedHourGlassRNN
+from core.modules import UNet
 
 
 
@@ -30,15 +30,15 @@ class Options:
 
 
 class CenterNet(nn.Module):
-    def __init__(self, feature_extractor=StackedHourGlassRNN,
+    def __init__(self, backbone=UNet,
                         num_classes=2, cin=2, height=300, width=300):
         super(CenterNet, self).__init__()
         self.num_classes = num_classes
         self.height, self.width = height, width
         self.cin = cin
-        self.extractor = feature_extractor(cin)
+        self.backbone = backbone(cin)
         x = torch.randn(1, 1, self.cin, self.height, self.width)
-        y = self.extractor(x)
+        y = self.backbone(x)
         c, h, w = y.shape[-3:]
         self.stride = max(self.height / h, self.width / w)
         self.pred = nn.Conv2d(c, (4+self.num_classes), kernel_size=3, padding=1, stride=1)
@@ -55,7 +55,7 @@ class CenterNet(nn.Module):
         self.extractor.reset()
 
     def forward(self, x):
-        y = self.extractor(x)
+        y = self.backbone(x)
         out = self.pred(x)
         out = out.permute([0, 2, 3, 1]).contiguous().view(out.size(0), -1, 4 + self.num_classes)
         loc, cls = out[..., :4], out[..., 4:]

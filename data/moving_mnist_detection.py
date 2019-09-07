@@ -31,7 +31,7 @@ class MovingMnistAnimation(toy.Animation):
             self.objects[i].class_id = y
             img = x.numpy()[0]
             abs_img = np.abs(img)
-            y, x = np.where(abs_img > 0.3)
+            y, x = np.where(abs_img > 0.45)
             x1, x2 = np.min(x), np.max(x)
             y1, y2 = np.min(y), np.max(y)
             self.objects[i].img = np.repeat(img[y1:y2, x1:x2][...,None], self.channels, 2)

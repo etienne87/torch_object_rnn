@@ -5,21 +5,20 @@ from __future__ import print_function
 import torch.nn as nn
 from torch.nn import functional as F
 import torch
-from utils.opts import time_to_batch, batch_to_time
+from core.utils.opts import time_to_batch, batch_to_time
 
 
+class ConvBN(nn.Module):
 
-class Conv2d(nn.Module):
-
-    def __init__(self, cin, cout, kernel_size, stride, padding, dilation=1, act=nn.ReLU(inplace=True)):
-        super(Conv2d, self).__init__()
-        self.cin = cin
-        self.cout = cout
-        self.conv1 = nn.Conv2d(cin, cout, kernel_size=kernel_size, stride=stride, dilation=dilation,
+    def __init__(self, in_channels, out_channels,
+                 kernel_size=3, stride=1, padding=1, dilation=1,
+                 bias=True, act=nn.ReLU6(inplace=True)):
+        super(ConvBN, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, dilation=dilation,
                                padding=padding,
-                               bias=True)
+                               bias=bias)
 
-        self.bn1 = nn.BatchNorm2d(cout)
+        self.bn1 = nn.BatchNorm2d(out_channels)
         self.act = act
 
     def forward(self, x):
@@ -29,30 +28,10 @@ class Conv2d(nn.Module):
         return x
 
 
-class ResNetBlock(nn.Module):
-    """Transition block"""
-
-    def __init__(self, cin):
-        super(ResNetBlock, self).__init__()
-        self.conv1 = Conv2d(cin, cin, 3, padding=1, stride=1)
-        self.conv2 = Conv2d(cin, cin, 3, padding=1, stride=1)
-
-    def forward(self, x):
-        conv1 = self.conv1(x)
-        return self.conv2(conv1) + x
-
-
-def double_conv(in_ch, out_ch):
-    return nn.Sequential(
-            Conv2d(in_ch, out_ch, 3, padding=1, stride=1),
-            Conv2d(out_ch, out_ch, 3, padding=1, stride=1)
-    )
-
-
 def down_ff(in_ch, out_ch):
     return nn.Sequential(
         nn.MaxPool2d(2),
-        double_conv(in_ch, out_ch)
+        ConvBN(in_ch, out_ch, 5, 1, 2)
     )
 
 
@@ -84,7 +63,7 @@ class ConvLSTMCell(nn.Module):
     r"""ConvLSTMCell module, applies sequential part of LSTM.
     """
 
-    def __init__(self, hidden_dim, kernel_size, conv_func=nn.Conv2d, nonlin=torch.tanh):
+    def __init__(self, hidden_dim, kernel_size, conv_func=ConvBN, nonlin=torch.tanh):
         super(ConvLSTMCell, self).__init__()
         self.hidden_dim = hidden_dim
 
@@ -149,46 +128,21 @@ class ConvLSTMCell(nn.Module):
         self.prev_h, self.prev_c = None, None
 
 
-class ConvLSTM(nn.Module):
-    r"""ConvLSTM module.
-    """
-    def __init__(self, nInputPlane, nOutputPlane, kernel_size, stride, padding, dilation=1):
-        super(ConvLSTM, self).__init__()
-
-        self.cin = nInputPlane
-        self.cout = nOutputPlane
-
-        self.conv_x2h = SequenceWise(Conv2d(nInputPlane, 4 * nOutputPlane,
-                                            kernel_size=kernel_size,
-                                            stride=stride,
-                                            dilation=dilation,
-                                           padding=padding,
-                                           act=nn.Identity()))
-
-        self.timepool = ConvLSTMCell(nOutputPlane, 3)
-
-    def forward(self, x):
-        y = self.conv_x2h(x)
-        h = self.timepool(y)
-        return h
-
-
-
 class ConvGRUCell(nn.Module):
     r"""ConvGRUCell module, applies sequential part of LSTM.
     """
-    def __init__(self, hidden_dim, kernel_size, bias):
+    def __init__(self, hidden_dim, kernel_size, bias, conv_func=ConvBN):
         super(ConvGRUCell, self).__init__()
         self.hidden_dim = hidden_dim
 
         # Fully-Gated
-        self.conv_h2zr = nn.Conv2d(in_channels=self.hidden_dim,
+        self.conv_h2zr = conv_func(in_channels=self.hidden_dim,
                                   out_channels=2 * self.hidden_dim,
                                   kernel_size=kernel_size,
                                   padding=1,
                                   bias=bias)
 
-        self.conv_h2h = nn.Conv2d(in_channels=self.hidden_dim,
+        self.conv_h2h = conv_func(in_channels=self.hidden_dim,
                                   out_channels=self.hidden_dim,
                                   kernel_size=kernel_size,
                                   padding=1,
@@ -242,33 +196,41 @@ class ConvGRUCell(nn.Module):
         self.prev_h = None
 
 
-class ConvGRU(nn.Module):
-    r"""ConvGRU module.
+class ConvRNN(nn.Module):
+    r"""ConvRNN module.
     """
-    def __init__(self, nInputPlane, nOutputPlane, kernel_size=5, stride=1, padding=2, dilation=1):
-        super(ConvGRU, self).__init__()
+    def __init__(self, nInputPlane, nOutputPlane, kernel_size=5, stride=1, padding=2, dilation=1, cell='gru'):
+        super(ConvRNN, self).__init__()
 
         self.cin = nInputPlane
         self.cout = nOutputPlane
-        self.conv_x2h = SequenceWise(Conv2d(nInputPlane, 3 * nOutputPlane,
+        if cell == 'gru':
+            self.timepool = ConvGRUCell(nOutputPlane, 3, True)
+            factor = 3
+        else:
+            self.timepool = ConvLSTMCell(nOutputPlane, 3, True)
+            factor = 4
+
+        self.conv_x2h = SequenceWise(ConvBN(nInputPlane, factor * nOutputPlane,
                                             kernel_size=kernel_size,
                                             stride=stride,
                                             dilation=dilation,
                                             padding=padding,
                                             act=nn.Identity()))
 
-        self.timepool = ConvGRUCell(nOutputPlane, 3, True)
-
     def forward(self, x):
         y = self.conv_x2h(x)
         h = self.timepool(y)
         return h
 
+    def reset(self):
+        self.timepool.reset()
+
 
 class UpCatRNN(nn.Module):
     def __init__(self, in_ch, out_ch):
         super(UpCatRNN, self).__init__()
-        self.convrnn = ConvGRU(in_ch, out_ch)
+        self.convrnn = ConvLSTM(in_ch, out_ch)
 
     def forward(self, x1, x2):
 
@@ -288,13 +250,15 @@ class UpCatRNN(nn.Module):
         x = self.convrnn(x)
         return x
 
+    def reset(self):
+        self.convrnn.reset()
 
 
 class UNet(nn.Module):
     def __init__(self, in_channels, out_channels, base, n_layers, up, down):
         super(UNet, self).__init__()
 
-        self.inc = SequenceWise(double_conv(in_channels, base))
+        self.inc = SequenceWise(ConvBN(in_channels, base))
 
         self.downs = []
         self.ups = []
@@ -334,7 +298,14 @@ class UNet(nn.Module):
         x = self.outc(x)
         return x
 
+    def reset(self):
+        for module in self.downs:
+            if hasattr(module, "reset"):
+                module.reset()
 
+        for module in self.ups:
+            if hasattr(module, "reset"):
+                module.reset()
 
 
 if __name__ == '__main__':
