@@ -7,8 +7,11 @@ import torch
 from core.utils.box import box_nms, change_box_order, assign_priors
 from core.utils import opts
 
-class SSDBoxCoder:
+
+class SSDBoxCoder(torch.nn.Module):
     def __init__(self, ssd_model, iou_threshold=0.5):
+        super(SSDBoxCoder, self).__init__()
+
         self.steps = ssd_model.steps
         self.box_sizes = ssd_model.box_sizes
         self.aspect_ratios = ssd_model.aspect_ratios
@@ -16,13 +19,13 @@ class SSDBoxCoder:
         self.height = ssd_model.height
         self.width = ssd_model.width
         self.fm_len = []
-        self.default_boxes = self._get_default_boxes()
-        self.default_boxes_xyxy =  change_box_order(self.default_boxes, 'xywh2xyxy')
+        self.register_buffer('default_boxes', self._get_default_boxes())
+        self.register_buffer('default_boxes_xyxy', change_box_order(self.default_boxes, 'xywh2xyxy'))
         self.iou_threshold = iou_threshold
         self.use_cuda = False
         self.variances = (0.1, 0.1)
 
-    def print_info(self):
+    def __greet__(self):
         print('steps', self.steps)
         print('box_sizes', self.box_sizes)
         print('aspect_ratios', self.aspect_ratios)
@@ -39,11 +42,6 @@ class SSDBoxCoder:
         self.width = ssd_model.width
         self.default_boxes = self._get_default_boxes()
         self.default_boxes_xyxy =  change_box_order(self.default_boxes, 'xywh2xyxy')
-
-    def cuda(self):
-          self.default_boxes = self.default_boxes.cuda()
-          self.default_boxes_xyxy = self.default_boxes_xyxy.cuda()
-          self.use_cuda = True
 
     def _get_default_boxes(self):
         boxes = []
@@ -121,21 +119,19 @@ class SSDBoxCoder:
     def encode_txn_boxes(self, targets):
         loc_targets, cls_targets = [], []
 
+        device = self.default_boxes.device
+
         for t in range(len(targets)):
             for i in range(len(targets[t])):
                 boxes, labels = targets[t][i][:, :-1], targets[t][i][:, -1]
-                if self.use_cuda:
-                    boxes, labels = boxes.cuda(), labels.cuda()
+                boxes, labels = boxes.to(device), labels.to(device)
+
                 loc_t, cls_t = self.encode(boxes, labels)
                 loc_targets.append(loc_t.unsqueeze(0))
                 cls_targets.append(cls_t.unsqueeze(0).long())
 
         loc_targets = torch.cat(loc_targets, dim=0)  # (N,#anchors,4)
         cls_targets = torch.cat(cls_targets, dim=0)  # (N,#anchors,C)
-
-        if self.use_cuda:
-            loc_targets = loc_targets.cuda()
-            cls_targets = cls_targets.cuda()
 
         return loc_targets, cls_targets
 

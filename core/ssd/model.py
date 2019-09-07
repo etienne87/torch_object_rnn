@@ -9,8 +9,44 @@ from torch.autograd import Variable
 
 from core.ssd.box_coder import SSDBoxCoder
 from core.ssd.loss import SSDLoss, FocalLoss
-from core.modules import Conv2d, ConvLSTM, ConvGRU, batch_to_time, time_to_batch
+from core import modules as crnn
+from core.modules import ConvBN, SequenceWise, time_to_batch, batch_to_time
 import math
+
+
+# class ConvRNNFeatureExtractor(nn.Module):
+#     def __init__(self, cin=1, cout=128, nmaps=3):
+#         super(ConvRNNFeatureExtractor, self).__init__()
+#         self.cin = cin
+#         self.base = 8
+#         self.cout = cout
+#         self.nmaps = nmaps
+#
+#         self.conv1 = SequenceWise(nn.Sequential(
+#             ConvBN(cin, self.base, kernel_size=7, stride=2, padding=3),
+#             ConvBN(self.base, self.base * 4, kernel_size=7, stride=2, padding=3)
+#         ))
+#
+#         self.conv2 = crnn.UNet(self.base * 4,
+#                                self.cout * self.nmaps,
+#                                self.base * 4, 3,
+#                                up=crnn.UpCatRNN, down=crnn.down_ff)
+#
+#         self.end_point_channels = [self.cout] * self.nmaps
+#
+#
+#     def forward(self, x):
+#         x1 = self.conv1(x)
+#         x2 = self.conv2(x1)
+#         x2 = time_to_batch(x2)[0]
+#
+#         sources = torch.split(x2, self.cout, dim=1)
+#         return sources
+#
+#     def reset(self):
+#         for name, module in self._modules.iteritems():
+#             if hasattr(module, "reset"):
+#                 module.reset()
 
 
 class ConvRNNFeatureExtractor(nn.Module):
@@ -18,13 +54,13 @@ class ConvRNNFeatureExtractor(nn.Module):
         super(ConvRNNFeatureExtractor, self).__init__()
         self.cin = cin
         base = 8
-        self.conv1 = Conv2d(cin, base, kernel_size=7, stride=2, padding=3)
-        self.conv2 = Conv2d(base, base * 4, kernel_size=7, stride=2, padding=3)
+        self.conv1 = ConvBN(cin, base, kernel_size=7, stride=2, padding=3)
+        self.conv2 = ConvBN(base, base * 4, kernel_size=7, stride=2, padding=3)
 
-        self.conv3 = ConvLSTM(base * 4, base * 8, kernel_size=7, stride=2, padding=3)
-        self.conv4 = ConvLSTM(base * 8, base * 16, kernel_size=7, stride=1, dilation=1, padding=3)
-        self.conv5 = ConvLSTM(base * 16, base * 16, kernel_size=7, stride=1, dilation=2, padding=3)
-        self.conv6 = ConvLSTM(base * 16, base * 16, kernel_size=7, stride=1, dilation=3, padding=3 * 2)
+        self.conv3 = crnn.ConvRNN(base * 4, base * 8, kernel_size=7, stride=2, padding=3)
+        self.conv4 = crnn.ConvRNN(base * 8, base * 8, kernel_size=7, stride=1, dilation=1, padding=3)
+        self.conv5 = crnn.ConvRNN(base * 8, base * 8, kernel_size=7, stride=1, dilation=2, padding=3)
+        self.conv6 = crnn.ConvRNN(base * 8, base * 8, kernel_size=7, stride=1, dilation=3, padding=3 * 2)
 
         self.end_point_channels = [self.conv3.cout,  # 8
                                    self.conv4.cout,  # 16
@@ -54,8 +90,7 @@ class ConvRNNFeatureExtractor(nn.Module):
 
     def reset(self):
         for name, module in self._modules.iteritems():
-            if isinstance(module, ConvLSTM) or \
-                    isinstance(module, ConvGRU):
+            if isinstance(module, crnn.ConvRNN):
                 module.timepool.reset()
 
 
@@ -164,3 +199,15 @@ class SSD(nn.Module):
         loss = loc_loss + cls_loss
         return loss
 
+    # def cuda(self):
+    #     super(nn.Module, self).cuda()
+    #     self.box_coder.cuda()
+    #     self.criterion.cuda()
+
+if __name__ == '__main__':
+    net = ConvRNNFeatureExtractor(1)
+
+    t, n, c, h, w = 10, 1, 1, 128, 128
+    x = torch.rand(t, n, c, h, w)
+
+    y = net(x)
