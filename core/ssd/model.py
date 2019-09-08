@@ -14,44 +14,44 @@ from core.modules import ConvBN, SequenceWise, time_to_batch, batch_to_time
 import math
 
 
-# class ConvRNNFeatureExtractor(nn.Module):
-#     def __init__(self, cin=1, cout=128, nmaps=3):
-#         super(ConvRNNFeatureExtractor, self).__init__()
-#         self.cin = cin
-#         self.base = 8
-#         self.cout = cout
-#         self.nmaps = nmaps
-#
-#         self.conv1 = SequenceWise(nn.Sequential(
-#             ConvBN(cin, self.base, kernel_size=7, stride=2, padding=3),
-#             ConvBN(self.base, self.base * 4, kernel_size=7, stride=2, padding=3)
-#         ))
-#
-#         self.conv2 = crnn.UNet(self.base * 4,
-#                                self.cout * self.nmaps,
-#                                self.base * 4, 3,
-#                                up=crnn.UpCatRNN, down=crnn.down_ff)
-#
-#         self.end_point_channels = [self.cout] * self.nmaps
-#
-#
-#     def forward(self, x):
-#         x1 = self.conv1(x)
-#         x2 = self.conv2(x1)
-#         x2 = time_to_batch(x2)[0]
-#
-#         sources = torch.split(x2, self.cout, dim=1)
-#         return sources
-#
-#     def reset(self):
-#         for name, module in self._modules.iteritems():
-#             if hasattr(module, "reset"):
-#                 module.reset()
+class FPN(nn.Module):
+    def __init__(self, cin=1, cout=128, nmaps=3):
+        super(FPN, self).__init__()
+        self.cin = cin
+        self.base = 8
+        self.cout = cout
+        self.nmaps = nmaps
+
+        self.conv1 = SequenceWise(nn.Sequential(
+            ConvBN(cin, self.base, kernel_size=7, stride=2, padding=3),
+            ConvBN(self.base, self.base * 4, kernel_size=7, stride=2, padding=3)
+        ))
+
+        self.conv2 = crnn.UNet(self.base * 4,
+                               self.cout * self.nmaps,
+                               self.base * 4, 3,
+                               up=crnn.UpCatRNN, down=crnn.down_ff)
+
+        self.end_point_channels = [self.cout] * self.nmaps
 
 
-class ConvRNNFeatureExtractor(nn.Module):
+    def forward(self, x):
+        x1 = self.conv1(x)
+        x2 = self.conv2(x1)
+        x2 = time_to_batch(x2)[0]
+
+        sources = torch.split(x2, self.cout, dim=1)
+        return sources
+
+    def reset(self):
+        for name, module in self._modules.iteritems():
+            if hasattr(module, "reset"):
+                module.reset()
+
+
+class Trident(nn.Module):
     def __init__(self, cin=1):
-        super(ConvRNNFeatureExtractor, self).__init__()
+        super(Trident, self).__init__()
         self.cin = cin
         base = 8
         self.conv1 = ConvBN(cin, base, kernel_size=7, stride=2, padding=3)
@@ -115,6 +115,8 @@ def get_box_params(sources, h, w):
         # box_size is scale * image_size
         box_sizes.append(math.floor(s_k * image_size))
 
+        print("box size: ", box_sizes[-1])
+
     s_k = s_min + (s_max - s_min)
     box_sizes.append(s_k * image_size)
 
@@ -138,7 +140,7 @@ def decode_boxes(box_map, num_classes, num_anchors):
 
 
 class SSD(nn.Module):
-    def __init__(self, feature_extractor=ConvRNNFeatureExtractor,
+    def __init__(self, feature_extractor=Trident,
                  num_classes=2, cin=2, height=300, width=300, act='softmax'):
         super(SSD, self).__init__()
         self.num_classes = num_classes

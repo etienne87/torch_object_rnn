@@ -43,6 +43,9 @@ class SSDLoss(nn.Module):
         loss:
           (tensor) loss = SmoothL1Loss(loc_preds, loc_targets) + CrossEntropyLoss(cls_preds, cls_targets).
         '''
+        mask_ign = cls_targets < 0
+        cls_targets[mask_ign] = 0
+
         pos = cls_targets > 0  # [N,#anchors]
         batch_size = pos.size(0)
         num_pos = pos.sum().item()
@@ -58,7 +61,7 @@ class SSDLoss(nn.Module):
         cls_loss = F.cross_entropy(cls_preds.view(-1,self.num_classes), \
                                    cls_targets.view(-1), reduction='none')  # [N*#anchors,]
         cls_loss = cls_loss.view(batch_size, -1)
-        cls_loss[cls_targets<0] = 0  # set ignored loss to 0
+        cls_loss[mask_ign] = 0  # set ignored loss to 0
         neg = self._hard_negative_mining(cls_loss, pos)  # [N,#anchors]
         cls_loss = cls_loss[pos|neg].sum()
 

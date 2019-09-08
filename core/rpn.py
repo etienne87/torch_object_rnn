@@ -4,7 +4,7 @@ from __future__ import print_function
 
 import torch
 import torch.nn as nn
-from core.ssd.model import ConvRNNFeatureExtractor
+from core.ssd.model import Trident
 from torchvision.models.detection import rpn
 from torchvision.models.detection.image_list import ImageList
 
@@ -22,7 +22,7 @@ class WrapRPN(nn.Module):
         post_nms_top_n = {'training':100, 'testing':10}
 
 
-        self._backbone = ConvRNNFeatureExtractor(in_channels)
+        self._backbone = Trident(in_channels)
 
         self.num_classes = num_classes
         self.in_channels = in_channels
