@@ -138,7 +138,7 @@ def box_nms(bboxes, scores, threshold=0.5):
 
 
 def assign_priors(gt_boxes, gt_labels, corner_form_priors,
-                  iou_threshold):
+                  fg_iou_threshold, bg_iou_threshold):
     """Assign ground truth boxes and targets to priors.
     Args:
         gt_boxes (num_targets, 4): ground truth boxes.
@@ -162,6 +162,17 @@ def assign_priors(gt_boxes, gt_labels, corner_form_priors,
     best_target_per_prior.index_fill_(0, best_prior_per_target_index, 2)
     # size: num_priors
     labels = gt_labels[best_target_per_prior_index]
-    labels[best_target_per_prior < iou_threshold] = 0  # the background id
+
+    mask = (best_target_per_prior > bg_iou_threshold) * (best_target_per_prior < fg_iou_threshold)
+
+    # if sum(mask) > 0:
+    #     import pdb
+    #     pdb.set_trace()
+    #     print('blah')
+
+    labels[mask] = -1
+    labels[best_target_per_prior < bg_iou_threshold] = 0  # the background id
     boxes = gt_boxes[best_target_per_prior_index]
+
+
     return boxes, labels

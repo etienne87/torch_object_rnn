@@ -160,7 +160,7 @@ class SSD(nn.Module):
                                            kernel_size=3, padding=1, stride=1)]
 
         self.act = act
-        self.box_coder = SSDBoxCoder(self, 0.5)
+        self.box_coder = SSDBoxCoder(self, 0.6, 0.4)
         self.criterion = SSDLoss(num_classes=num_classes)
 
     def get_ssd_params(self):
@@ -199,10 +199,6 @@ class SSD(nn.Module):
         loss = loc_loss + cls_loss
         return loss
 
-    # def cuda(self):
-    #     super(nn.Module, self).cuda()
-    #     self.box_coder.cuda()
-    #     self.criterion.cuda()
 
 if __name__ == '__main__':
     net = ConvRNNFeatureExtractor(1)

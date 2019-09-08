@@ -9,7 +9,7 @@ from core.utils import opts
 
 
 class SSDBoxCoder(torch.nn.Module):
-    def __init__(self, ssd_model, iou_threshold=0.5):
+    def __init__(self, ssd_model, fg_iou_threshold=0.6, bg_iou_threshold=0.4):
         super(SSDBoxCoder, self).__init__()
 
         self.steps = ssd_model.steps
@@ -21,7 +21,8 @@ class SSDBoxCoder(torch.nn.Module):
         self.fm_len = []
         self.register_buffer('default_boxes', self._get_default_boxes())
         self.register_buffer('default_boxes_xyxy', change_box_order(self.default_boxes, 'xywh2xyxy'))
-        self.iou_threshold = iou_threshold
+        self.fg_iou_threshold = fg_iou_threshold
+        self.bg_iou_threshold = bg_iou_threshold
         self.use_cuda = False
         self.variances = (0.1, 0.1)
 
@@ -72,7 +73,8 @@ class SSDBoxCoder(torch.nn.Module):
         return boxes
 
     def encode(self, gt_boxes, labels):
-        boxes, cls_targets = assign_priors(gt_boxes, labels + 1, self.default_boxes_xyxy, self.iou_threshold)
+        boxes, cls_targets = assign_priors(gt_boxes, labels + 1, self.default_boxes_xyxy,
+                                            self.fg_iou_threshold, self.bg_iou_threshold)
         boxes = change_box_order(boxes, 'xyxy2xywh')
         default_boxes = self.default_boxes
         loc_xy = (boxes[:, :2] - default_boxes[:, :2]) / default_boxes[:, 2:] / self.variances[0]
