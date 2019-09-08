@@ -137,6 +137,76 @@ def box_nms(bboxes, scores, threshold=0.5):
     return torch.tensor(keep, dtype=torch.long)
 
 
+def box_soft_nms(boxes, scores, nms_threshold=0.3,
+                                 soft_threshold=0.3,
+                                 sigma=0.5,
+                                 mode='union'):
+    """
+    soft-nms implentation according the soft-nms paper
+    :param bboxes:
+    :param scores:
+    :param labels:
+    :param nms_threshold:
+    :param soft_threshold:
+    :return:
+    """
+
+    keep = []
+    c_boxes = boxes
+    weights = scores.clone()
+    x1 = c_boxes[:, 0]
+    y1 = c_boxes[:, 1]
+    x2 = c_boxes[:, 2]
+    y2 = c_boxes[:, 3]
+    areas = (x2 - x1 + 1) * (y2 - y1 + 1)
+    _, order = weights.sort(0, descending=True)
+    while order.numel() > 0:
+        if order.dim() == 0:
+            i = order.item()
+        else:
+            i = order[0]
+
+        keep.append(i)
+
+        if order.numel() == 1:
+            break
+
+        xx1 = x1[order[1:]].clamp(min=x1[i])
+        yy1 = y1[order[1:]].clamp(min=y1[i])
+        xx2 = x2[order[1:]].clamp(max=x2[i])
+        yy2 = y2[order[1:]].clamp(max=y2[i])
+
+        w = (xx2 - xx1 + 1).clamp(min=0)
+        h = (yy2 - yy1 + 1).clamp(min=0)
+        inter = w * h
+
+        if mode == 'union':
+            ovr = inter / (areas[i] + areas[order[1:]] - inter)
+        elif mode == 'min':
+            ovr = inter / areas[order[1:]].clamp(max=areas[i])
+        else:
+            raise TypeError('Unknown nms mode: %s.' % mode)
+
+        ids_t= (ovr>=nms_threshold).nonzero().squeeze()
+
+        weights[[order[ids_t+1]]] *= torch.exp(-(ovr[ids_t] * ovr[ids_t]) / sigma)
+
+        ids = (weights[order[1:]] >= soft_threshold).nonzero().squeeze()
+        if ids.numel() == 0:
+            break
+        c_boxes = c_boxes[order[1:]][ids]
+        _, order = weights[order[1:]][ids].sort(0, descending=True)
+        if c_boxes.dim()==1:
+            c_boxes=c_boxes.unsqueeze(0)
+        x1 = c_boxes[:, 0]
+        y1 = c_boxes[:, 1]
+        x2 = c_boxes[:, 2]
+        y2 = c_boxes[:, 3]
+        areas = (x2 - x1 + 1) * (y2 - y1 + 1)
+
+    return torch.tensor(keep, dtype=torch.long)
+
+
 def assign_priors(gt_boxes, gt_labels, corner_form_priors,
                   fg_iou_threshold, bg_iou_threshold):
     """Assign ground truth boxes and targets to priors.

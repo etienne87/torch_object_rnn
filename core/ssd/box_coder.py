@@ -4,7 +4,7 @@ from __future__ import print_function
 
 import math
 import torch
-from core.utils.box import box_nms, change_box_order, assign_priors
+from core.utils.box import box_soft_nms, box_nms, change_box_order, assign_priors
 from core.utils import opts
 
 
@@ -87,10 +87,13 @@ class SSDBoxCoder(torch.nn.Module):
         wh = torch.exp(loc_preds[:,2:] * self.variances[1]) * self.default_boxes[:,2:]
 
         box_preds = torch.cat([xy-wh/2, xy+wh/2], 1)
+
         boxes = []
         labels = []
         scores = []
         num_classes = cls_preds.size(1)
+
+
         for i in range(num_classes-1):
             score = cls_preds[:,i+1]  # class i corresponds to (i+1) column
             mask = score > score_thresh
@@ -105,10 +108,12 @@ class SSDBoxCoder(torch.nn.Module):
                 labels.append(torch.LongTensor(len(box)).fill_(i))
                 scores.append(score)
             else:
+                #keep = box_nms(box, score, nms_thresh)
                 keep = box_nms(box, score, nms_thresh)
                 boxes.append(box[keep])
                 labels.append(torch.LongTensor(len(box[keep])).fill_(i))
                 scores.append(score[keep])
+
 
         if len(boxes) > 0:
             boxes = torch.cat(boxes, 0)
@@ -146,7 +151,7 @@ class SSDBoxCoder(torch.nn.Module):
             for i in range(loc_preds.size(1)):
                 boxes, labels, scores = self.decode(loc_preds[t, i].data,
                                                                 cls_preds[t, i].data,
-                                                                nms_thresh=0.8)
+                                                                nms_thresh=0.6)
                 targets_t.append((boxes, labels, scores))
             targets.append(targets_t)
         return targets
