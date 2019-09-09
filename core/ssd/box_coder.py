@@ -9,7 +9,7 @@ from core.utils import opts
 
 
 class SSDBoxCoder(torch.nn.Module):
-    def __init__(self, ssd_model, fg_iou_threshold=0.6, bg_iou_threshold=0.4):
+    def __init__(self, ssd_model, fg_iou_threshold=0.6, bg_iou_threshold=0.4, soft_nms=False):
         super(SSDBoxCoder, self).__init__()
 
         self.steps = ssd_model.steps
@@ -25,6 +25,7 @@ class SSDBoxCoder(torch.nn.Module):
         self.bg_iou_threshold = bg_iou_threshold
         self.use_cuda = False
         self.variances = (0.1, 0.1)
+        self.nms = box_soft_nms if soft_nms else box_nms
 
     def __greet__(self):
         print('steps', self.steps)
@@ -108,8 +109,7 @@ class SSDBoxCoder(torch.nn.Module):
                 labels.append(torch.LongTensor(len(box)).fill_(i))
                 scores.append(score)
             else:
-                #keep = box_nms(box, score, nms_thresh)
-                keep = box_nms(box, score, nms_thresh)
+                keep = self.nms(box, score, nms_thresh)
                 boxes.append(box[keep])
                 labels.append(torch.LongTensor(len(box[keep])).fill_(i))
                 scores.append(score[keep])
