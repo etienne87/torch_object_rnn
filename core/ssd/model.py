@@ -176,12 +176,14 @@ class SSD(nn.Module):
 
         # Init for strong bias toward bg class for focal loss
         px = 0.99
-        for l in self.cls_layers:
+        K = num_classes - 1
+        bias_bg = math.log(K * px / (1 - px))
+        for i, l in enumerate(self.cls_layers):
             torch.nn.init.normal_(l.weight, std=0.01)
             torch.nn.init.constant_(l.bias, 0)
-            l.bias = l.bias.reshape(self.num_anchors[i], self.num_classes)
-            l.bias.data[:, 0] = (self.num_classes-1) * math.log(px / (1-px))
-            l.bias = l.bias.reshape(-1)
+            l.bias.data = l.bias.data.reshape(self.num_anchors[i], self.num_classes)
+            l.bias.data[:, 0] += bias_bg
+            l.bias.data = l.bias.data.reshape(-1)
 
     def get_ssd_params(self):
         x = Variable(torch.randn(1, 1, self.cin, self.height, self.width))
@@ -190,6 +192,13 @@ class SSD(nn.Module):
 
     def reset(self):
         self.extractor.reset()
+
+    def _print_average_scores_fg_bg(self, cls_preds):
+        # Verbose check of Average Probability
+        scores = F.softmax(cls_preds.data, dim=-1)
+        bg_score = scores[:, :, 0].mean().item()
+        fg_score = scores[:, :, 1:].sum(dim=-1).mean().item()
+        print('Average BG_Score: ', bg_score, 'Averag FG_Score: ', fg_score)
 
     def forward(self, x):
         loc_preds = []
@@ -209,6 +218,9 @@ class SSD(nn.Module):
         loc_preds = torch.cat(loc_preds, 1)
         cls_preds = torch.cat(cls_preds, 1)
 
+
+        # self._print_average_scores_fg_bg(cls_preds)
+
         if not self.training:
             if self.act == 'softmax':
                 cls_preds = F.softmax(cls_preds, dim=2)
@@ -226,9 +238,7 @@ class SSD(nn.Module):
 
 
 if __name__ == '__main__':
-    net = ConvRNNFeatureExtractor(1)
-
+    net = Trident(1)
     t, n, c, h, w = 10, 1, 1, 128, 128
     x = torch.rand(t, n, c, h, w)
-
     y = net(x)

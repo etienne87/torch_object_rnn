@@ -9,8 +9,8 @@ import torch.optim as optim
 import torch.backends.cudnn as cudnn
 
 from core.ssd.model import SSD
-from core.ctdet.model import CenterNet
-from core.rpn import WrapRPN
+# from core.ctdet.model import CenterNet
+# from core.rpn import WrapRPN
 from core.trainer import DetTrainer
 from core.utils import opts
 
