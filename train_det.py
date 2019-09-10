@@ -68,7 +68,7 @@ def main():
         start_epoch = opts.load_last_checkpoint(net, args.logdir)
 
 
-    optimizer = optim.Adam(net.parameters(), lr=args.lr, betas=(0.9, 0.999), eps=1e-8, weight_decay=0)
+    optimizer = optim.Adam(net.parameters(), lr=args.lr, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.0)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.99)
     trainer = DetTrainer(args.logdir, net, optimizer)
 

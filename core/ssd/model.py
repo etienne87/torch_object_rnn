@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 
 from core.ssd.box_coder import SSDBoxCoder
-from core.ssd.loss import SSDLoss, FocalLoss
+from core.ssd.loss import SSDLoss
 from core import modules as crnn
 from core.modules import ConvBN, SequenceWise, time_to_batch, batch_to_time
 import math
@@ -123,10 +123,6 @@ def get_box_params(sources, h, w):
     return fm_sizes, steps, box_sizes
 
 
-def init_prior_probability(shape, prior_probability=0.01):
-    return torch.ones(shape) * -math.log((1 - prior_probability) / prior_probability)
-
-
 def decode_boxes(box_map, num_classes, num_anchors):
     """
     box_map: N, C, H, W
@@ -156,14 +152,36 @@ class SSD(nn.Module):
         self.in_channels = self.extractor.end_point_channels
         self.num_anchors = [2 * len(self.aspect_ratios) + 2 for i in range(len(self.in_channels))]
 
-        self.pred_layers = nn.ModuleList()
+        # self.pred_layers = nn.ModuleList()
+        # for i in range(len(self.in_channels)):
+        #     self.pred_layers += [nn.Conv2d(self.in_channels[i], self.num_anchors[i]*(4+self.num_classes),
+        #                                    kernel_size=3, padding=1, stride=1)]
+
+        self.cls_layers = nn.ModuleList()
+        self.reg_layers = nn.ModuleList()
         for i in range(len(self.in_channels)):
-            self.pred_layers += [nn.Conv2d(self.in_channels[i], self.num_anchors[i]*(4+self.num_classes),
-                                           kernel_size=3, padding=1, stride=1)]
+            self.reg_layers += [nn.Conv2d(self.in_channels[i], self.num_anchors[i]*4,
+                                               kernel_size=3, padding=1, stride=1)]
+            self.cls_layers += [nn.Conv2d(self.in_channels[i], self.num_anchors[i]*self.num_classes,
+                                               kernel_size=3, padding=1, stride=1)]
+
 
         self.act = act
         self.box_coder = SSDBoxCoder(self, 0.6, 0.4)
         self.criterion = SSDLoss(num_classes=num_classes)
+
+        for l in self.reg_layers:
+            torch.nn.init.normal_(l.weight, std=0.01)
+            torch.nn.init.constant_(l.bias, 0)
+
+        # Init for strong bias toward bg class for focal loss
+        px = 0.99
+        for l in self.cls_layers:
+            torch.nn.init.normal_(l.weight, std=0.01)
+            torch.nn.init.constant_(l.bias, 0)
+            l.bias = l.bias.reshape(self.num_anchors[i], self.num_classes)
+            l.bias.data[:, 0] = (self.num_classes-1) * math.log(px / (1-px))
+            l.bias = l.bias.reshape(-1)
 
     def get_ssd_params(self):
         x = Variable(torch.randn(1, 1, self.cin, self.height, self.width))
@@ -178,8 +196,13 @@ class SSD(nn.Module):
         cls_preds = []
         xs = self.extractor(x)
         for i, x in enumerate(xs):
-            pred = self.pred_layers[i](x)
-            loc_pred, cls_pred = decode_boxes(pred, self.num_classes, self.num_anchors[i])
+            #pred = self.pred_layers[i](x)
+            #loc_pred, cls_pred = decode_boxes(pred, self.num_classes, self.num_anchors[i])
+            loc_pred = self.reg_layers[i](x)
+            cls_pred = self.cls_layers[i](x)
+            loc_pred = loc_pred.permute(0, 2, 3, 1).contiguous()
+            cls_pred = cls_pred.permute(0, 2, 3, 1).contiguous()
+
             loc_preds.append(loc_pred.view(loc_pred.size(0), -1, 4))
             cls_preds.append(cls_pred.view(cls_pred.size(0), -1, self.num_classes))
 
