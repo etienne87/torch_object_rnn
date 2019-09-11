@@ -5,7 +5,6 @@ from __future__ import print_function
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.autograd import Variable
 
 from core.ssd.box_coder import SSDBoxCoder
 from core.ssd.loss import SSDLoss
@@ -28,19 +27,15 @@ class FPN(nn.Module):
         ))
 
         self.conv2 = crnn.UNet(self.base * 4,
-                               self.cout * self.nmaps,
-                               self.base * 4, 3,
-                               up=crnn.UpRNN, down=crnn.down_ff)
-
-        self.end_point_channels = [self.cout] * self.nmaps
-
+                               self.cout,
+                               self.base * 4, 3)
 
     def forward(self, x):
         x1 = self.conv1(x)
-        x2 = self.conv2(x1)
-        x2 = time_to_batch(x2)[0]
+        self.conv2(x1)
 
-        sources = torch.split(x2, self.cout, dim=1)
+        sources = [time_to_batch(item)[0] for item in self.conv2.decoded]
+
         return sources
 
     def reset(self):
@@ -136,7 +131,7 @@ def decode_boxes(box_map, num_classes, num_anchors):
 
 
 class SSD(nn.Module):
-    def __init__(self, feature_extractor=Trident,
+    def __init__(self, feature_extractor=FPN,
                  num_classes=2, cin=2, height=300, width=300, act='softmax'):
         super(SSD, self).__init__()
         self.num_classes = num_classes
@@ -145,17 +140,16 @@ class SSD(nn.Module):
 
         self.extractor = feature_extractor(cin)
 
-        self.fm_sizes, self.steps, self.box_sizes = self.get_ssd_params()
+        x = torch.randn(1, 1, self.cin, self.height, self.width)
+        sources = self.extractor(x)
+
+        self.fm_sizes, self.steps, self.box_sizes = get_box_params(sources, self.height, self.width)
         self.ary = float(width) / height
 
         self.aspect_ratios = []
-        self.in_channels = self.extractor.end_point_channels
+        self.in_channels = [item.size(1) for item in sources]
         self.num_anchors = [2 * len(self.aspect_ratios) + 2 for i in range(len(self.in_channels))]
 
-        # self.pred_layers = nn.ModuleList()
-        # for i in range(len(self.in_channels)):
-        #     self.pred_layers += [nn.Conv2d(self.in_channels[i], self.num_anchors[i]*(4+self.num_classes),
-        #                                    kernel_size=3, padding=1, stride=1)]
 
         self.cls_layers = nn.ModuleList()
         self.reg_layers = nn.ModuleList()
@@ -167,7 +161,7 @@ class SSD(nn.Module):
 
 
         self.act = act
-        self.box_coder = SSDBoxCoder(self, 0.8, 0.3)
+        self.box_coder = SSDBoxCoder(self, 0.5, 0.4)
         self.criterion = SSDLoss(num_classes=num_classes)
 
         for l in self.reg_layers:
@@ -185,11 +179,6 @@ class SSD(nn.Module):
             l.bias.data[:, 0] += bias_bg
             l.bias.data = l.bias.data.reshape(-1)
 
-    def get_ssd_params(self):
-        x = Variable(torch.randn(1, 1, self.cin, self.height, self.width))
-        sources = self.extractor(x)
-        return get_box_params(sources, self.height, self.width)
-
     def reset(self):
         self.extractor.reset()
 
@@ -205,8 +194,6 @@ class SSD(nn.Module):
         cls_preds = []
         xs = self.extractor(x)
         for i, x in enumerate(xs):
-            #pred = self.pred_layers[i](x)
-            #loc_pred, cls_pred = decode_boxes(pred, self.num_classes, self.num_anchors[i])
             loc_pred = self.reg_layers[i](x)
             cls_pred = self.cls_layers[i](x)
             loc_pred = loc_pred.permute(0, 2, 3, 1).contiguous()
@@ -218,9 +205,7 @@ class SSD(nn.Module):
         loc_preds = torch.cat(loc_preds, 1)
         cls_preds = torch.cat(cls_preds, 1)
 
-
         # self._print_average_scores_fg_bg(cls_preds)
-
         if not self.training:
             if self.act == 'softmax':
                 cls_preds = F.softmax(cls_preds, dim=2)

@@ -6,7 +6,8 @@ import torch.nn as nn
 from torch.nn import functional as F
 import torch
 from core.utils.opts import time_to_batch, batch_to_time
-
+from functools import partial
+import pdb
 
 class ConvBN(nn.Module):
 
@@ -38,20 +39,13 @@ class SequenceWise(nn.Module):
         """
         super(SequenceWise, self).__init__()
         self.module = module
-        self.is_rnn = hasattr(self.module, 'reset')
 
-    def sequence_wise(self, x):
+    def forward(self, x):
         t, n = x.size(0), x.size(1)
         x = time_to_batch(x)[0]
         x = self.module(x)
         x = batch_to_time(x, n)
         return x
-
-    def forward(self, x):
-        if self.is_rnn:
-            return self.module(x)
-        else:
-            return self.sequence_wise(x)
 
     def __repr__(self):
         tmpstr = self.__class__.__name__ + ' (\n'
@@ -228,33 +222,26 @@ class ConvRNN(nn.Module):
         self.timepool.reset()
 
 
-class UpRNN(nn.Module):
+class UpFuseRNN(nn.Module):
     def __init__(self, in_ch, out_ch, mode='cat'):
-        super(UpRNN, self).__init__()
-        self.convrnn = ConvRNN(in_ch, out_ch)
+        super(UpFuseRNN, self).__init__()
         self.mode = mode
+        self.convrnn = ConvRNN(in_ch, out_ch, 3, 1, 1)
 
-    def forward(self, x_tuple):
-        x1, x2 = x_tuple
+    def forward(self, x1, x2):
         h, w = x2.shape[-2:]
         x1, n = time_to_batch(x1)
         x1 = F.interpolate(x1, size=(h, w), mode='bilinear', align_corners=True)
         x1 = batch_to_time(x1, n)
-
-        if self.mode == 'cat':
-            x = torch.cat([x2, x1], dim=2)
-        else:
-            x = x1 + x2
-
-        x = self.convrnn(x)
-        return x
+        x = x1 + x2
+        return self.convrnn(x)
 
     def reset(self):
         self.convrnn.reset()
 
 
 class UNet(nn.Module):
-    def __init__(self, in_channels, out_channels, base, n_layers, up, down):
+    def __init__(self, in_channels, out_channels, base, n_layers):
         super(UNet, self).__init__()
 
         self.inc = SequenceWise(ConvBN(in_channels, base))
@@ -264,18 +251,21 @@ class UNet(nn.Module):
 
         self.channels = [base]
 
+        down = partial(ConvRNN, kernel_size=3, stride=2, padding=1, dilation=1)
+        up  = UpFuseRNN
+
         for i in range(n_layers):
             channels = min(base * 2 ** (n_layers-1), self.channels[-1] * 2)
             self.channels.append(channels)
-            self.downs.append( SequenceWise(down(self.channels[-2], self.channels[-1])) )
+            self.downs.append( down(self.channels[-2], self.channels[-1]) )
 
         self.channels.pop()
 
         for i in range(n_layers):
             channels = self.channels.pop()
-            in_ch = channels * 2
+            in_ch = channels
             out_ch = max(base, channels // 2)
-            self.ups.append( SequenceWise(up(in_ch, out_ch)) )
+            self.ups.append( up(in_ch, out_ch) )
 
         self.outc = SequenceWise(nn.Conv2d(base, out_channels, 1))
 
@@ -293,7 +283,7 @@ class UNet(nn.Module):
 
         self.decoded = []
         for up_layer in self.ups:
-            x = up_layer( (x, encoded.pop()))
+            x = up_layer(x, encoded.pop())
             self.decoded.append(x)
 
         x = self.outc(x)
@@ -311,20 +301,16 @@ class UNet(nn.Module):
                 module.reset()
 
 
-def down_ff(in_ch, out_ch):
-    return nn.Sequential(
-        nn.MaxPool2d(2),
-        ConvBN(in_ch, out_ch, 5, 1, 2)
-    )
-
-
 if __name__ == '__main__':
     t, n, c, h, w = 10, 1, 3, 64, 64
 
     x = torch.rand(t, n, c, h, w)
 
     net = nn.Sequential(
-            UNet(c, 64, 16, 3, up=UpRNN, down=down_ff),
-            UNet(64, 64, 16, 3, up=UpRNN, down=down_ff))
+            UNet(c, 64, 16, 3),
+            UNet(64, 64, 16, 3))
 
     out = net(x)
+
+    net[0].reset()
+    net[1].reset()
