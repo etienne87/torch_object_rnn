@@ -10,7 +10,7 @@ from torch.autograd import Variable
 from core.ssd.box_coder import SSDBoxCoder
 from core.ssd.loss import SSDLoss
 from core import modules as crnn
-from core.modules import ConvBN, SequenceWise, time_to_batch, batch_to_time
+from core.modules import ConvRNN, ConvBN, SequenceWise, time_to_batch, batch_to_time
 import math
 
 
@@ -30,7 +30,7 @@ class FPN(nn.Module):
         self.conv2 = crnn.UNet(self.base * 4,
                                self.cout * self.nmaps,
                                self.base * 4, 3,
-                               up=crnn.UpCatRNN, down=crnn.down_ff)
+                               up=crnn.UpRNN, down=crnn.down_ff)
 
         self.end_point_channels = [self.cout] * self.nmaps
 
@@ -57,10 +57,10 @@ class Trident(nn.Module):
         self.conv1 = ConvBN(cin, base, kernel_size=7, stride=2, padding=3)
         self.conv2 = ConvBN(base, base * 4, kernel_size=7, stride=2, padding=3)
 
-        self.conv3 = crnn.ConvRNN(base * 4, base * 8, kernel_size=7, stride=2, padding=3)
-        self.conv4 = crnn.ConvRNN(base * 8, base * 8, kernel_size=7, stride=1, dilation=1, padding=3)
-        self.conv5 = crnn.ConvRNN(base * 8, base * 8, kernel_size=7, stride=1, dilation=2, padding=3)
-        self.conv6 = crnn.ConvRNN(base * 8, base * 8, kernel_size=7, stride=1, dilation=3, padding=3 * 2)
+        self.conv3 = ConvRNN(base * 4, base * 8, kernel_size=7, stride=2, padding=3)
+        self.conv4 = ConvRNN(base * 8, base * 8, kernel_size=7, stride=1, dilation=1, padding=3)
+        self.conv5 = ConvRNN(base * 8, base * 8, kernel_size=7, stride=1, dilation=2, padding=3)
+        self.conv6 = ConvRNN(base * 8, base * 8, kernel_size=7, stride=1, dilation=3, padding=3 * 2)
 
         self.end_point_channels = [self.conv3.cout,  # 8
                                    self.conv4.cout,  # 16
@@ -167,7 +167,7 @@ class SSD(nn.Module):
 
 
         self.act = act
-        self.box_coder = SSDBoxCoder(self, 0.6, 0.4)
+        self.box_coder = SSDBoxCoder(self, 0.8, 0.3)
         self.criterion = SSDLoss(num_classes=num_classes)
 
         for l in self.reg_layers:
@@ -238,7 +238,7 @@ class SSD(nn.Module):
 
 
 if __name__ == '__main__':
-    net = Trident(1)
+    net = FPN(1)
     t, n, c, h, w = 10, 1, 1, 128, 128
     x = torch.rand(t, n, c, h, w)
     y = net(x)

@@ -28,29 +28,30 @@ class ConvBN(nn.Module):
         return x
 
 
-def down_ff(in_ch, out_ch):
-    return nn.Sequential(
-        nn.MaxPool2d(2),
-        ConvBN(in_ch, out_ch, 5, 1, 2)
-    )
-
-
 class SequenceWise(nn.Module):
     def __init__(self, module):
         """
         Collapses input of dim T*N*H to (T*N)*H, and applies to a module.
         Allows handling of variable sequence lengths and minibatch sizes.
+        If RNN (has reset module), will bypass reshapes
         :param module: Module to apply input to.
         """
         super(SequenceWise, self).__init__()
         self.module = module
+        self.is_rnn = hasattr(self.module, 'reset')
 
-    def forward(self, x):
+    def sequence_wise(self, x):
         t, n = x.size(0), x.size(1)
         x = time_to_batch(x)[0]
         x = self.module(x)
         x = batch_to_time(x, n)
         return x
+
+    def forward(self, x):
+        if self.is_rnn:
+            return self.module(x)
+        else:
+            return self.sequence_wise(x)
 
     def __repr__(self):
         tmpstr = self.__class__.__name__ + ' (\n'
@@ -227,26 +228,24 @@ class ConvRNN(nn.Module):
         self.timepool.reset()
 
 
-class UpCatRNN(nn.Module):
-    def __init__(self, in_ch, out_ch):
-        super(UpCatRNN, self).__init__()
-        self.convrnn = ConvLSTM(in_ch, out_ch)
+class UpRNN(nn.Module):
+    def __init__(self, in_ch, out_ch, mode='cat'):
+        super(UpRNN, self).__init__()
+        self.convrnn = ConvRNN(in_ch, out_ch)
+        self.mode = mode
 
-    def forward(self, x1, x2):
-
+    def forward(self, x_tuple):
+        x1, x2 = x_tuple
+        h, w = x2.shape[-2:]
         x1, n = time_to_batch(x1)
-        x1 = F.interpolate(x1, scale_factor=2, mode='bilinear', align_corners=True)
-
-        # input is CHW
-        diffY = x2.size()[-2] - x1.size()[-2]
-        diffX = x2.size()[-1] - x1.size()[-1]
-
-        x1 = F.pad(x1, (diffX // 2, diffX - diffX // 2,
-                        diffY // 2, diffY - diffY // 2))
-
+        x1 = F.interpolate(x1, size=(h, w), mode='bilinear', align_corners=True)
         x1 = batch_to_time(x1, n)
 
-        x = torch.cat([x2, x1], dim=2)
+        if self.mode == 'cat':
+            x = torch.cat([x2, x1], dim=2)
+        else:
+            x = x1 + x2
+
         x = self.convrnn(x)
         return x
 
@@ -276,7 +275,7 @@ class UNet(nn.Module):
             channels = self.channels.pop()
             in_ch = channels * 2
             out_ch = max(base, channels // 2)
-            self.ups.append(up(in_ch, out_ch) )
+            self.ups.append( SequenceWise(up(in_ch, out_ch)) )
 
         self.outc = SequenceWise(nn.Conv2d(base, out_channels, 1))
 
@@ -285,17 +284,21 @@ class UNet(nn.Module):
 
 
     def forward(self, x):
-        self.encoded = [self.inc(x)]
+        encoded = [self.inc(x)]
 
         for down_layer in self.downs:
-            self.encoded.append(down_layer(self.encoded[-1]))
+            encoded.append(down_layer(encoded[-1]))
 
-        x = self.encoded.pop()
+        x = encoded.pop()
 
+        self.decoded = []
         for up_layer in self.ups:
-            x = up_layer(x, self.encoded.pop())
+            x = up_layer( (x, encoded.pop()))
+            self.decoded.append(x)
 
         x = self.outc(x)
+        self.decoded.append(x)
+
         return x
 
     def reset(self):
@@ -308,13 +311,20 @@ class UNet(nn.Module):
                 module.reset()
 
 
+def down_ff(in_ch, out_ch):
+    return nn.Sequential(
+        nn.MaxPool2d(2),
+        ConvBN(in_ch, out_ch, 5, 1, 2)
+    )
+
+
 if __name__ == '__main__':
     t, n, c, h, w = 10, 1, 3, 64, 64
 
     x = torch.rand(t, n, c, h, w)
 
     net = nn.Sequential(
-            UNet(c, 64, 16, 3, up=UpCatRNN, down=down_ff),
-            UNet(64, 64, 16, 3, up=UpCatRNN, down=down_ff))
+            UNet(c, 64, 16, 3, up=UpRNN, down=down_ff),
+            UNet(64, 64, 16, 3, up=UpRNN, down=down_ff))
 
     out = net(x)
