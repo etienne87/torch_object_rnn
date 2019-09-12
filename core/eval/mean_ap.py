@@ -8,6 +8,31 @@ from terminaltables import AsciiTable
 from core.eval.bbox_overlaps import bbox_overlaps
 
 
+
+def convert(gts, proposals, num_classes=10):
+    r"""Convert list of K array gt & proposal to format used here
+
+    :param gts:  [:,5] (box + class]
+    :param proposals: [:,6] [box + score + class]
+    :param num_classes:
+    :return:
+    """
+    gt_boxes, gt_labels = [], []
+    pred_boxes = []
+    for gt, pred in zip(gts, proposals):
+        gt_boxes.append(gt[:, :4])
+        gt_labels.append(gt[:, 4])
+
+        preds = []
+        for i in range(num_classes):
+            idx = np.where(pred[:,-1] == i)
+            det_boxes = pred[idx][:, :-1]
+            preds.append(det_boxes)
+
+        pred_boxes.append(preds)
+    return pred_boxes, gt_boxes, gt_labels
+
+
 def average_precision(recalls, precisions, mode='area'):
     """Calculate average precision (for single or multiple scales).
     Args:
@@ -162,6 +187,7 @@ def tpfp_default(det_bboxes, gt_bboxes, gt_ignore, iou_thr, area_ranges=None):
             for i, (min_area, max_area) in enumerate(area_ranges):
                 fp[i, (det_areas >= min_area) & (det_areas < max_area)] = 1
         return tp, fp
+
     ious = bbox_overlaps(det_bboxes, gt_bboxes)
     ious_max = ious.max(axis=1)
     ious_argmax = ious.argmax(axis=1)
@@ -203,7 +229,7 @@ def get_cls_results(det_results, gt_bboxes, gt_labels, gt_ignore, class_id):
     cls_gt_ignore = []
     for j in range(len(gt_bboxes)):
         gt_bbox = gt_bboxes[j]
-        cls_inds = (gt_labels[j] == class_id + 1)
+        cls_inds = (gt_labels[j] == class_id) #i removed the +1
         cls_gt = gt_bbox[cls_inds, :] if gt_bbox.shape[0] > 0 else gt_bbox
         cls_gts.append(cls_gt)
         if gt_ignore is None:
