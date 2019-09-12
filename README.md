@@ -1,15 +1,13 @@
 # torch_object_rnn
 ssd + convlstm
 
-ssd part is mostly stolen from torch_cv: https://github.com/kuangliu/torchcv 
+some code is taken from from torch_cv: https://github.com/kuangliu/torchcv
 
 main differences:
 
-- rnn training (requires a dataloader which streams temporally coherent batches)
-- adaptive anchor-boxes creation
-- a simple simulator of moving boxes to train your rnn detector (test this code right away)
+- rnn training (the moving_mnist dataloader is an example which streams temporally coherent batches
+- a simple simulator of moving digits to train the rnn detector
 - use of tensorboardX (install tf-nightly, tb-nightly, launch tensorboard --logdir runs)
-- a custom "moving mnist"
 
 
 ![](moving_mnist_detection.gif)

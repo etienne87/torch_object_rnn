@@ -221,6 +221,11 @@ class SSD(nn.Module):
         loss = loc_loss + cls_loss
         return loss
 
+    def get_boxes(self, x):
+        loc_preds, cls_preds = self.net(x)
+        targets = self.box_coder.decode_txn_boxes(loc_preds, cls_preds, x.size(1))
+        return targets
+
 
 if __name__ == '__main__':
     net = FPN(1)

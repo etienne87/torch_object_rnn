@@ -6,7 +6,8 @@ import time
 import torch
 import numpy as np
 from tensorboardX import SummaryWriter
-from .utils import vis, tbx
+from core.utils import vis, tbx
+from core.eval import mean_ap
 
 
 class DetTrainer(object):
@@ -66,13 +67,14 @@ class DetTrainer(object):
 
             start = time.time()
 
-    #TODO: Add some Metrics...
     def validate(self, epoch, dataset, args):
         print('\nEpoch: %d (val)' % epoch)
         self.net.eval()
         self.net.reset()
         val_loss = 0
 
+        gts = []
+        proposals = []
         start = 0
         runtime_stats = {'dataloader': 0, 'network': 0}
         for batch_idx, data in enumerate(dataset):
@@ -83,20 +85,16 @@ class DetTrainer(object):
                 inputs = inputs.cuda()
 
             start = time.time()
-            loss = self.net.compute_loss(inputs, targets)
-            val_loss += loss.item()
+            preds = self.net.get_boxes(inputs)
             runtime_stats['network'] += time.time() - start
 
-            if batch_idx % args.log_every == 0:
-                print('\rval_loss: %.3f | avg_loss: %.3f [%d/%d] | @data: %.3f | @net: %.3f'
-                      % (loss.data.item(), val_loss / (batch_idx + 1), batch_idx + 1, len(dataset),
-                         runtime_stats['dataloader'] / (batch_idx + 1),
-                         runtime_stats['network'] / (batch_idx + 1)
-                         ), ' ')
+            #TODO: convert to independent frames
+
+
 
             start = time.time()
 
-        self.writer.add_scalar('val_loss', loss.data.item(), epoch)
+        self.writer.add_scalar('mean_ap', mean_ap, epoch)
 
     def test(self, epoch, dataset, nrows, args):
         print('\nEpoch: %d (test)' % epoch)
@@ -116,13 +114,12 @@ class DetTrainer(object):
         for period in range(periods):
             inputs, targets = dataset.next()
 
+            images = inputs.clone().data.numpy()
+
             if args.cuda:
                 inputs = inputs.cuda()
 
-            loc_preds, cls_preds = self.net(inputs)
-
-            images = inputs.cpu().data.numpy()
-            targets = self.net.box_coder.decode_txn_boxes(loc_preds, cls_preds, dataset.batchsize)
+            targets = self.net.get_boxes(inputs)
 
             vis.draw_txn_boxes_on_images(images, targets, grid, self.make_image,
                                          period, time, ncols, dataset.labelmap)
