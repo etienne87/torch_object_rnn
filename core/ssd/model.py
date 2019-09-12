@@ -131,7 +131,7 @@ def decode_boxes(box_map, num_classes, num_anchors):
 
 
 class SSD(nn.Module):
-    def __init__(self, feature_extractor=FPN,
+    def __init__(self, feature_extractor=Trident,
                  num_classes=2, cin=2, height=300, width=300, act='softmax'):
         super(SSD, self).__init__()
         self.num_classes = num_classes
@@ -161,7 +161,7 @@ class SSD(nn.Module):
 
 
         self.act = act
-        self.box_coder = SSDBoxCoder(self, 0.5, 0.4)
+        self.box_coder = SSDBoxCoder(self, 0.6, 0.4)
         self.criterion = SSDLoss(num_classes=num_classes)
 
         for l in self.reg_layers:
@@ -222,7 +222,7 @@ class SSD(nn.Module):
         return loss
 
     def get_boxes(self, x):
-        loc_preds, cls_preds = self.net(x)
+        loc_preds, cls_preds = self(x)
         targets = self.box_coder.decode_txn_boxes(loc_preds, cls_preds, x.size(1))
         return targets
 

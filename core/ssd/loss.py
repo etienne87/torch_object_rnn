@@ -43,7 +43,7 @@ class SSDLoss(nn.Module):
         Return:
           (tensor) focal loss.
         '''
-        gamma = 1.5
+        gamma = 2.0
         r = torch.arange(x.size(0))
         ce = F.log_softmax(x, dim=1)[r, y]
         pt = torch.exp(ce)

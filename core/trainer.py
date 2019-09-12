@@ -89,9 +89,6 @@ class DetTrainer(object):
             runtime_stats['network'] += time.time() - start
 
             #TODO: convert to independent frames
-
-
-
             start = time.time()
 
         self.writer.add_scalar('mean_ap', mean_ap, epoch)
