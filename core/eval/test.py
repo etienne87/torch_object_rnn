@@ -20,7 +20,7 @@ def random_box(minheight, minwidth, height, width):
     return x1, y1, x2, y2
 
 
-def generate_dummy_imgs(num_imgs=10, height=512, width=512, max_box=10, num_classes=10):
+def generate_dummy_imgs(num_imgs=10, height=512, width=512, max_box=10, num_classes=1):
     gts = []
     proposals = []
     minheight, minwidth = 30, 30
@@ -43,12 +43,12 @@ def generate_dummy_imgs(num_imgs=10, height=512, width=512, max_box=10, num_clas
                 pt1 = cxy - wh/2
                 pt2 = cxy + wh/2
                 pred[k, :4] = np.array([pt1[0], pt1[1], pt2[0], pt2[1]])
-                pred[k, 4] = np.random.uniform(0.7, 1.0)
+                pred[k, 4] = np.random.uniform(0.9, 1.0)
                 pred[k, 5] = gt[k, 4]
-            else:
-                pred[k, :4] = random_box(minheight, minwidth, height, width)
-                pred[k, 4] = np.random.uniform(0.0, 0.2)
-                pred[k, 5] = np.random.randint(0, num_classes+1)
+            # else:
+            #     pred[k, :4] = random_box(minheight, minwidth, height, width)
+            #     pred[k, 4] = np.random.uniform(0.0, 0.2)
+            #     pred[k, 5] = np.random.randint(0, num_classes+1)
 
         gts.append(gt)
         proposals.append(pred)
@@ -86,7 +86,8 @@ def show_gt_pred(gts, preds, height=512, width=512):
 
 if __name__ == '__main__':
 
-    gts, proposals = generate_dummy_imgs(1000)
+    num_classes = 1
+    gts, proposals = generate_dummy_imgs(1000, num_classes=1)
     show_gt_pred(gts, proposals)
 
     # recalls = recall.eval_recalls(gts,
@@ -95,13 +96,13 @@ if __name__ == '__main__':
     #              iou_thrs=[0.3, 0.5],
     #              print_summary=True)
 
-    det_results, gt_bboxes, gt_labels = convert(gts, proposals)
+    det_results, gt_bboxes, gt_labels = convert(gts, proposals, num_classes)
 
     mean_ap, eval_results = mean_ap.eval_map(det_results,
                                              gt_bboxes,
                                              gt_labels,
                                              gt_ignore=None,
                                              scale_ranges=None,
-                                             iou_thr=0.5,
+                                             iou_thr=0.9,
                                              dataset=None,
                                              print_summary=True)

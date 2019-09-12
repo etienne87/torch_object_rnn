@@ -23,18 +23,18 @@ class FPN(nn.Module):
 
         self.conv1 = SequenceWise(nn.Sequential(
             ConvBN(cin, self.base, kernel_size=7, stride=2, padding=3),
-            ConvBN(self.base, self.base * 4, kernel_size=7, stride=2, padding=3)
+            ConvBN(self.base, self.base * 8, kernel_size=7, stride=2, padding=3)
         ))
 
-        self.conv2 = crnn.UNet(self.base * 4,
+        self.conv2 = crnn.UNet(self.base * 8,
                                self.cout,
-                               self.base * 4, 3)
+                               self.base * 8, 4)
 
     def forward(self, x):
         x1 = self.conv1(x)
         self.conv2(x1)
 
-        sources = [time_to_batch(item)[0] for item in self.conv2.decoded]
+        sources = [time_to_batch(item)[0] for item in self.conv2.decoded][::-1]
 
         return sources
 

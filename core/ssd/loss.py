@@ -43,24 +43,12 @@ class SSDLoss(nn.Module):
         Return:
           (tensor) focal loss.
         '''
-        gamma = 2.0
+        gamma = 1.5
         r = torch.arange(x.size(0))
-        ce = -F.log_softmax(x, dim=1)[r, y]
-        pt = torch.exp(-ce)
+        ce = F.log_softmax(x, dim=1)[r, y]
+        pt = torch.exp(ce)
         weights = (1-pt).pow(gamma)
-        loss = (weights * ce)
-
-        # Stupid Check
-        # pos = (y > 0)
-        # losses = (weights * ce).data
-        # pos_loss = losses[pos].mean()
-        # neg_loss = losses[~pos].mean()
-        # print('pos: ', pos_loss, ' neg: ', neg_loss)
-
-        # logpt = F.log_softmax(x, dim=1)
-        # pt2 = torch.exp(logpt)
-        # logpt = (1 - pt2) ** gamma * logpt
-        # loss = F.nll_loss(logpt, y, reduction='mean')
+        loss = -(weights * ce)
 
         if reduction == 'mean':
             loss = loss.mean()
@@ -97,7 +85,6 @@ class SSDLoss(nn.Module):
         #===============================================================
         # cls_loss = CrossEntropyLoss(cls_preds, cls_targets)
         #===============================================================
-
         if self.mode != 'focal':
             cls_loss = F.cross_entropy(cls_preds.view(-1, self.num_classes), \
                                        cls_targets.view(-1), reduction='none')  # [N*#anchors,]
@@ -115,14 +102,6 @@ class SSDLoss(nn.Module):
             cls_loss[mask_ign] = 0
             cls_loss = cls_loss.sum()
             cls_loss /= num_pos
-
-            # pos_neg = cls_targets > -1
-            # mask = pos_neg.unsqueeze(2).expand_as(cls_preds)
-            # masked_cls_preds = cls_preds[mask].view(-1, self.num_classes)
-            # cls_loss_2 = self._softmax_focal_loss(masked_cls_preds, cls_targets[pos_neg]).sum() / num_pos
-            # import pdb
-            # pdb.set_trace()
-            # print('test')
 
         #print('loc_loss: %.3f | cls_loss: %.3f' % (loc_loss.item()/num_pos, cls_loss.item()/num_pos), end=' | ')
         loc_loss /= num_pos
