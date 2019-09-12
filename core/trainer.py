@@ -6,8 +6,9 @@ import time
 import torch
 import numpy as np
 from tensorboardX import SummaryWriter
-from core.utils import vis, tbx
+from core.utils import vis, tbx, plot
 from core.eval import mean_ap
+
 
 
 class DetTrainer(object):
@@ -67,14 +68,14 @@ class DetTrainer(object):
 
             start = time.time()
 
-    def validate(self, epoch, dataset, args):
+    def evaluate(self, epoch, dataset, args):
         print('\nEpoch: %d (val)' % epoch)
         self.net.eval()
         self.net.reset()
         val_loss = 0
 
-        gts = []
-        proposals = []
+        gts = [] #list of K array of size 5
+        proposals = [] #list of K array of size 6
         start = 0
         runtime_stats = {'dataloader': 0, 'network': 0}
         for batch_idx, data in enumerate(dataset):
@@ -88,10 +89,42 @@ class DetTrainer(object):
             preds = self.net.get_boxes(inputs)
             runtime_stats['network'] += time.time() - start
 
-            #TODO: convert to independent frames
+            for t in range(len(targets)):
+                for i in range(len(targets[t])):
+                    gt_boxes = targets[t][i]
+                    boxes, labels, scores = preds[t][i]
+
+                    gts.append(gt_boxes.cpu().numpy())
+                    if boxes is None:
+                        pred = np.zeros((0, 6), dtype=np.float32)
+                    else:
+                        boxes, labels, scores = boxes.cpu(), labels.cpu()[:,None].float(), scores.cpu()[:,None]
+                        pred = torch.cat([boxes, scores, labels], dim=1).numpy()
+
+                    proposals.append(pred)
+
             start = time.time()
 
-        self.writer.add_scalar('mean_ap', mean_ap, epoch)
+        det_results, gt_bboxes, gt_labels = mean_ap.convert(gts, proposals, self.net.num_classes-1)
+
+        map, eval_results = mean_ap.eval_map(det_results,
+                                                 gt_bboxes,
+                                                 gt_labels,
+                                                 gt_ignore=None,
+                                                 scale_ranges=None,
+                                                 iou_thr=0.5,
+                                                 dataset=None,
+                                                 print_summary=True)
+
+        self.writer.add_scalar('mean_ap', map, epoch)
+        xs = [item['recall'] for item in eval_results]
+        ys = [item['precision'] for item in eval_results]
+        fig = plot.xy_curves(xs, ys)
+        self.writer.add_figure('pr_curves', fig, epoch)
+
+        aps = np.array([item['ap'] for item in eval_results])
+        self.writer.add_histogram('aps', aps, epoch)
+
 
     def test(self, epoch, dataset, nrows, args):
         print('\nEpoch: %d (test)' % epoch)

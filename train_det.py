@@ -48,6 +48,7 @@ def main():
     test_dataset = MovingMnistDataset(args.batchsize, time, height, width, cin, train=False)
 
     train_dataset.num_frames = args.train_iter
+    test_dataset.num_frames = args.test_iter
     dataloader = train_dataset
 
 
@@ -74,7 +75,7 @@ def main():
 
     for epoch in range(start_epoch, args.epochs):
         trainer.train(epoch, dataloader, args)
-        # trainer.validate(epoch, test_dataset, args)
+        trainer.evaluate(epoch, test_dataset, args)
         trainer.test(epoch, test_dataset, nrows, args)
         trainer.save_ckpt(epoch, args)
         trainer.writer.add_scalar('learning rate', optimizer.param_groups[0]['lr'], epoch)
