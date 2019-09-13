@@ -38,7 +38,7 @@ def main():
 
     os.environ['OMP_NUM_THREADS'] = '1'
 
-    classes, cin, time, height, width = 11, 3, 10, 128, 128
+    classes, cin, time, height, width = 11, 3, 10, 256, 256
     nrows = 4
 
     # Dataset

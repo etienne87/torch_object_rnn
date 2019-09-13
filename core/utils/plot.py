@@ -1,5 +1,5 @@
 import matplotlib
-# matplotlib.use('Agg')
+matplotlib.use('Agg')
 from matplotlib.ticker import LinearLocator
 from matplotlib import pyplot as plt
 import numpy as np
@@ -15,10 +15,20 @@ def xy_curves(x, y):
     ax.grid(True)
     return fig
 
+def bar(x):
+    fig2, ax2, = plt.subplots(1, figsize=(7, 7))
+    ax2.bar(np.arange(len(x)), x, align='center', alpha=0.5,
+           color='red',
+           edgecolor='blue')
+    plt.xticks(np.arange(len(x)), [str(i) for i in range(len(x))])
+    plt.ylabel('AP')
+    return fig2
 
 if __name__ == '__main__':
     x = [np.linspace(0, 1, 100) for i in range(10)]
     y = [item**np.random.rand() for item in x]
 
-    fig = xy_curves(x, y)
+
+    x = np.random.uniform(0, 1, 10)
+    fig = bar(x)
     plt.show()

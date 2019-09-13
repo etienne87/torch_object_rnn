@@ -51,11 +51,12 @@ class Trident(nn.Module):
         base = 8
         self.conv1 = ConvBN(cin, base, kernel_size=7, stride=2, padding=3)
         self.conv2 = ConvBN(base, base * 4, kernel_size=7, stride=2, padding=3)
+        self.conv2b = ConvBN(base * 4, base * 8, kernel_size=7, stride=2, padding=3)
 
-        self.conv3 = ConvRNN(base * 4, base * 8, kernel_size=7, stride=2, padding=3)
-        self.conv4 = ConvRNN(base * 8, base * 8, kernel_size=7, stride=1, dilation=1, padding=3)
-        self.conv5 = ConvRNN(base * 8, base * 8, kernel_size=7, stride=1, dilation=2, padding=3)
-        self.conv6 = ConvRNN(base * 8, base * 8, kernel_size=7, stride=1, dilation=3, padding=3 * 2)
+        self.conv3 = ConvRNN(base * 8, base * 8, kernel_size=7, stride=2, padding=3)
+        self.conv4 = ConvRNN(base * 8, base * 16, kernel_size=7, stride=1, dilation=1, padding=3)
+        self.conv5 = ConvRNN(base * 16, base * 16, kernel_size=7, stride=1, dilation=2, padding=3)
+        self.conv6 = ConvRNN(base * 16, base * 16, kernel_size=7, stride=1, dilation=3, padding=3 * 2)
 
         self.end_point_channels = [self.conv3.cout,  # 8
                                    self.conv4.cout,  # 16
@@ -68,6 +69,7 @@ class Trident(nn.Module):
         x0, n = time_to_batch(x)
         x1 = self.conv1(x0)
         x2 = self.conv2(x1)
+        x2 = self.conv2b(x2)
         x2 = batch_to_time(x2, n)
 
         x3 = self.conv3(x2)
@@ -161,7 +163,8 @@ class SSD(nn.Module):
 
 
         self.act = act
-        self.box_coder = SSDBoxCoder(self, 0.6, 0.4)
+        self.box_coder = SSDBoxCoder(self, 0.7, 0.4)
+        self.box_coder.re_init()
         self.criterion = SSDLoss(num_classes=num_classes)
 
         for l in self.reg_layers:

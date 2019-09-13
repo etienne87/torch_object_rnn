@@ -123,7 +123,8 @@ class DetTrainer(object):
         self.writer.add_figure('pr_curves', fig, epoch)
 
         aps = np.array([item['ap'] for item in eval_results])
-        self.writer.add_histogram('aps', aps, epoch)
+        fig2 = plot.bar(aps)
+        self.writer.add_figure('aps', fig2, epoch)
 
 
     def test(self, epoch, dataset, nrows, args):
