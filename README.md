@@ -10,4 +10,6 @@ main differences:
 - use of tensorboardX (install tf-nightly, tb-nightly, launch tensorboard --logdir runs)
 
 
-![](moving_mnist_detection.gif)
+![](data/moving_mnist_detection.gif)
+
+![](data/focal_softmax_vs_sigmoid.png)
