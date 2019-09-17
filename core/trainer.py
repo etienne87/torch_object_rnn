@@ -125,6 +125,7 @@ class DetTrainer(object):
         aps = np.array([item['ap'] for item in eval_results])
         fig2 = plot.bar(aps)
         self.writer.add_figure('aps', fig2, epoch)
+        return map
 
 
     def test(self, epoch, dataset, nrows, args):

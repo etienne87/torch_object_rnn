@@ -14,7 +14,7 @@ from core.ssd.model import SSD
 from core.trainer import DetTrainer
 from core.utils import opts
 
-from data.moving_mnist_detection import MovingMnistDataset
+from datasets.moving_mnist_detection import MovingMnistDataset
 
 
 def parse_args():
@@ -54,7 +54,7 @@ def main():
 
     # Model
     print('==> Building model..')
-    net = SSD(num_classes=classes, cin=cin, height=height, width=width, act="softmax")
+    net = SSD(num_classes=classes, cin=cin, height=height, width=width, act="sigmoid")
     # net = CenterNet(num_classes=classes, cin=cin, height=height, width=width)
     # net = WrapRPN(num_classes=classes, in_channels=cin, height=height, width=width)
 
@@ -70,16 +70,17 @@ def main():
 
 
     optimizer = optim.Adam(net.parameters(), lr=args.lr, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.0)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.99)
+    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.99)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min')
     trainer = DetTrainer(args.logdir, net, optimizer)
 
     for epoch in range(start_epoch, args.epochs):
         trainer.train(epoch, dataloader, args)
-        trainer.evaluate(epoch, test_dataset, args)
+        map = trainer.evaluate(epoch, test_dataset, args)
         trainer.test(epoch, test_dataset, nrows, args)
         trainer.save_ckpt(epoch, args)
         trainer.writer.add_scalar('learning rate', optimizer.param_groups[0]['lr'], epoch)
-        scheduler.step()
+        scheduler.step(map)
 
 if __name__ == '__main__':
     main()

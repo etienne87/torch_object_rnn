@@ -164,16 +164,32 @@ class SSD(nn.Module):
 
         self.act = act
         self.box_coder = SSDBoxCoder(self, 0.7, 0.4)
-        self.box_coder.re_init()
-        self.criterion = SSDLoss(num_classes=num_classes)
+        self.criterion = SSDLoss(num_classes=num_classes, use_sigmoid=self.act=='sigmoid')
 
         for l in self.reg_layers:
             torch.nn.init.normal_(l.weight, std=0.01)
             torch.nn.init.constant_(l.bias, 0)
 
         # Init for strong bias toward bg class for focal loss
+        if self.act == 'softmax':
+            self.softmax_init()
+        else:
+            self.sigmoid_init()
+
+    def sigmoid_init(self):
         px = 0.99
-        K = num_classes - 1
+        bias_bg = math.log(px / (1 - px))
+        for i, l in enumerate(self.cls_layers):
+            torch.nn.init.normal_(l.weight, std=0.01)
+            torch.nn.init.constant_(l.bias, 0)
+            l.bias.data = l.bias.data.reshape(self.num_anchors[i], self.num_classes)
+            l.bias.data[:, 0] += bias_bg
+            l.bias.data[:, 1:] -= bias_bg
+            l.bias.data = l.bias.data.reshape(-1)
+
+    def softmax_init(self):
+        px = 0.99
+        K = self.num_classes - 1
         bias_bg = math.log(K * px / (1 - px))
         for i, l in enumerate(self.cls_layers):
             torch.nn.init.normal_(l.weight, std=0.01)
