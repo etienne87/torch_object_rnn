@@ -54,7 +54,7 @@ def main():
 
     # Model
     print('==> Building model..')
-    net = SSD(num_classes=classes, cin=cin, height=height, width=width, act="sigmoid")
+    net = SSD(num_classes=classes, cin=cin, height=height, width=width, act="softmax")
     # net = CenterNet(num_classes=classes, cin=cin, height=height, width=width)
     # net = WrapRPN(num_classes=classes, in_channels=cin, height=height, width=width)
 

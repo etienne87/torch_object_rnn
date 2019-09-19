@@ -85,6 +85,10 @@ class DetTrainer(object):
             if args.cuda:
                 inputs = inputs.cuda()
 
+            if batch_idx%10 == 0:
+                dataset.reset()
+                self.net.reset()
+
             start = time.time()
             preds = self.net.get_boxes(inputs)
             runtime_stats['network'] += time.time() - start

@@ -164,7 +164,10 @@ class SSD(nn.Module):
 
         self.act = act
         self.box_coder = SSDBoxCoder(self, 0.7, 0.4)
-        self.criterion = SSDLoss(num_classes=num_classes, use_sigmoid=self.act=='sigmoid')
+        self.criterion = SSDLoss(num_classes=num_classes,
+                                 mode='none',
+                                 use_sigmoid=self.act=='sigmoid',
+                                 use_iou=False)
 
         for l in self.reg_layers:
             torch.nn.init.normal_(l.weight, std=0.01)
@@ -236,6 +239,11 @@ class SSD(nn.Module):
     def compute_loss(self, x, targets):
         loc_preds, cls_preds = self(x)
         loc_targets, cls_targets = self.box_coder.encode_txn_boxes(targets)
+
+        if self.criterion.use_iou:
+            loc_preds = self.box_coder.decode_loc(loc_preds)
+            loc_targets = self.box_coder.decode_loc(loc_targets)
+
         loc_loss, cls_loss = self.criterion(loc_preds, loc_targets, cls_preds, cls_targets)
         loss = loc_loss + cls_loss
         return loss

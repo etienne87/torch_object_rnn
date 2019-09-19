@@ -83,6 +83,17 @@ class SSDBoxCoder(torch.nn.Module):
         loc_targets = torch.cat([loc_xy, loc_wh], 1)
         return loc_targets, cls_targets
 
+    def decode_loc(self, loc_preds):
+        if loc_preds.dim() > self.default_boxes.dim():
+            default_boxes = self.default_boxes[None, ...]
+        else:
+            default_boxes = self.default_boxes
+
+        xy = loc_preds[..., :2] * self.variances[0] * default_boxes[..., 2:] + default_boxes[..., :2]
+        wh = torch.exp(loc_preds[..., 2:] * self.variances[1]) * default_boxes[..., 2:]
+        box_preds = torch.cat([xy - wh / 2, xy + wh / 2], -1)
+        return box_preds
+
     def decode(self, loc_preds, cls_preds, score_thresh=0.6, nms_thresh=0.45):
         xy = loc_preds[:,:2] * self.variances[0] * self.default_boxes[:,2:] + self.default_boxes[:,:2]
         wh = torch.exp(loc_preds[:,2:] * self.variances[1]) * self.default_boxes[:,2:]

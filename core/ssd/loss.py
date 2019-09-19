@@ -5,6 +5,8 @@ from __future__ import print_function
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from core.utils.box import box_iou
+
 
 def reduce(loss, mode='none'):
     if mode == 'mean':
@@ -15,12 +17,13 @@ def reduce(loss, mode='none'):
 
 
 class SSDLoss(nn.Module):
-    def __init__(self, num_classes, mode='focal', use_sigmoid=False):
+    def __init__(self, num_classes, mode='focal', use_sigmoid=False, use_iou=False):
         super(SSDLoss, self).__init__()
         self.num_classes = num_classes
         self.mode = mode
         self.alpha = torch.nn.Parameter(torch.ones(num_classes))
         self.focal_loss = self._sigmoid_focal_loss if use_sigmoid else self._softmax_focal_loss
+        self.use_iou = use_iou
 
     def _hard_negative_mining(self, cls_loss, pos):
         '''Return negative indices that is 3x the number as positive indices.
@@ -61,6 +64,15 @@ class SSDLoss(nn.Module):
         return reduce(loss, reduction)
 
     def _sigmoid_focal_loss(self, pred, target, reduction='none'):
+        '''Sigmoid Focal loss.
+
+        Args:
+          x: (tensor) predictions, sized [N,D].
+          y: (tensor) targets, sized [N,].
+
+        Return:
+          (tensor) focal loss.
+        '''
         alpha = 0.25
         gamma = 2.0
         pred_sigmoid = pred.sigmoid()
@@ -95,19 +107,25 @@ class SSDLoss(nn.Module):
         num_pos = pos.sum().item()
 
         #===============================================================
-        # loc_loss = SmoothL1Loss(pos_loc_preds, pos_loc_targets)
+        # loc_loss
         #===============================================================
-        mask = pos.unsqueeze(2).expand_as(loc_preds)       # [N,#anchors,4]
-        loc_loss = F.smooth_l1_loss(loc_preds[mask], loc_targets[mask], reduction='sum')
+        if self.use_iou:
+            # loc_loss = self._iou_loss(loc_preds[pos], loc_targets[pos])
+            loc_loss = self._bounded_iou_loss(loc_preds[pos], loc_targets[pos])
+            loc_loss = reduce(loc_loss, mode='sum')
+        else:
+            mask = pos.unsqueeze(2).expand_as(loc_preds)  # [N,#anchors,4]
+            loc_loss = F.smooth_l1_loss(loc_preds[mask], loc_targets[mask], reduction='sum')
+
         #===============================================================
-        # cls_loss = CrossEntropyLoss(cls_preds, cls_targets)
+        # cls_loss
         #===============================================================
         if self.mode != 'focal':
             cls_loss = F.cross_entropy(cls_preds.view(-1, self.num_classes), \
                                        cls_targets.view(-1), reduction='none')  # [N*#anchors,]
             cls_loss = cls_loss.view(batch_size, -1)
             cls_loss[mask_ign] = 0  # set ignored loss to 0
-            if self.mode == 'hardneg':
+            if self.mode == 'ohem':
                 neg = self._hard_negative_mining(cls_loss, pos)  # [N,#anchors]
                 cls_loss = cls_loss[pos|neg].sum()
             else:
@@ -123,3 +141,47 @@ class SSDLoss(nn.Module):
         #print('loc_loss: %.3f | cls_loss: %.3f' % (loc_loss.item()/num_pos, cls_loss.item()/num_pos), end=' | ')
         loc_loss /= num_pos
         return loc_loss, cls_loss
+
+    def _iou_loss(self, pred, target):
+        ious = box_iou(pred, target).max(dim=-1)[0]
+        loc_loss = -torch.log(ious)
+        return loc_loss
+
+    def _bounded_iou_loss(self, pred, target, beta=0.2, eps=1e-3):
+        """Improving Object Localization with Fitness NMS and Bounded IoU Loss,
+        https://arxiv.org/abs/1711.00164.
+        Args:
+            pred (tensor): Predicted bboxes.
+            target (tensor): Target bboxes.
+            beta (float): beta parameter in smoothl1.
+            eps (float): eps to avoid NaN.
+        """
+        pred_ctrx = (pred[:, 0] + pred[:, 2]) * 0.5
+        pred_ctry = (pred[:, 1] + pred[:, 3]) * 0.5
+        pred_w = pred[:, 2] - pred[:, 0] + 1
+        pred_h = pred[:, 3] - pred[:, 1] + 1
+        with torch.no_grad():
+            target_ctrx = (target[:, 0] + target[:, 2]) * 0.5
+            target_ctry = (target[:, 1] + target[:, 3]) * 0.5
+            target_w = target[:, 2] - target[:, 0] + 1
+            target_h = target[:, 3] - target[:, 1] + 1
+
+        dx = target_ctrx - pred_ctrx
+        dy = target_ctry - pred_ctry
+
+        loss_dx = 1 - torch.max(
+            (target_w - 2 * dx.abs()) /
+            (target_w + 2 * dx.abs() + eps), torch.zeros_like(dx))
+        loss_dy = 1 - torch.max(
+            (target_h - 2 * dy.abs()) /
+            (target_h + 2 * dy.abs() + eps), torch.zeros_like(dy))
+        loss_dw = 1 - torch.min(target_w / (pred_w + eps), pred_w /
+                                (target_w + eps))
+        loss_dh = 1 - torch.min(target_h / (pred_h + eps), pred_h /
+                                (target_h + eps))
+        loss_comb = torch.stack([loss_dx, loss_dy, loss_dw, loss_dh],
+                                dim=-1).view(loss_dx.size(0), -1)
+
+        loss = torch.where(loss_comb < beta, 0.5 * loss_comb * loss_comb / beta,
+                           loss_comb - 0.5 * beta)
+        return loss
