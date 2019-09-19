@@ -143,6 +143,12 @@ class SSDLoss(nn.Module):
         return loc_loss, cls_loss
 
     def _iou_loss(self, pred, target):
+        """
+        iou loss between positive anchors & gt
+        Args:
+            pred (tensor): Predicted bboxes.
+            target (tensor): Target bboxes.
+        """
         ious = box_iou(pred, target).max(dim=-1)[0]
         loc_loss = -torch.log(ious)
         return loc_loss

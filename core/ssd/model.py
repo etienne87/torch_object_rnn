@@ -245,7 +245,13 @@ class SSD(nn.Module):
             loc_targets = self.box_coder.decode_loc(loc_targets)
 
         loc_loss, cls_loss = self.criterion(loc_preds, loc_targets, cls_preds, cls_targets)
-        loss = loc_loss + cls_loss
+
+        sat_loss = 0
+        for name, module in self.extractor._modules.iteritems():
+            if hasattr(module, "reset"):
+                sat_loss += module.timepool.saturation_cost
+
+        loss = loc_loss + cls_loss + sat_loss
         return loss
 
     def get_boxes(self, x):

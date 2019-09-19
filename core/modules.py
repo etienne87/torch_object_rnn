@@ -7,7 +7,8 @@ from torch.nn import functional as F
 import torch
 from core.utils.opts import time_to_batch, batch_to_time
 from functools import partial
-import pdb
+
+
 
 class ConvBN(nn.Module):
 
@@ -53,13 +54,54 @@ class SequenceWise(nn.Module):
         tmpstr += ')'
         return tmpstr
 
+class RNNCell(nn.Module):
+    """
+    base class that has memory, each class with hidden state has to derive from basernn
+    """
 
-class ConvLSTMCell(nn.Module):
+    def __init__(self, hard):
+        super(RNNCell, self).__init__()
+        self.saturation_cost = 0
+        self.saturation_limit = 0.9
+        self.saturation_weight = 1e-4
+        self.set_gates(hard)
+
+    def set_gates(self, hard):
+        if hard:
+            self.sigmoid = self.hard_sigmoid
+            self.tanh = self.hard_tanh
+        else:
+            self.sigmoid = torch.sigmoid
+            self.tanh = torch.tanh
+
+    def hard_sigmoid(self, x_in):
+        self.add_saturation_cost(x_in)
+        x = x_in * 0.5 + 0.5
+        y = torch.clamp(x, 0.0, 1.0)
+        return y
+
+    def hard_tanh(self, x):
+        self.add_saturation_cost(x)
+        y = torch.clamp(x, -1.0, 1.0)
+        return y
+
+    def add_saturation_cost(self, var):
+        """Calculate saturation cost."""
+        sat_loss = F.relu(torch.abs(var) - self.saturation_limit)
+        cost = sat_loss.sum()
+        cost *= self.saturation_weight
+        self.saturation_cost += cost
+
+    def reset(self):
+        raise NotImplementedError()
+
+
+class ConvLSTMCell(RNNCell):
     r"""ConvLSTMCell module, applies sequential part of LSTM.
     """
 
-    def __init__(self, hidden_dim, kernel_size, conv_func=ConvBN, nonlin=torch.tanh):
-        super(ConvLSTMCell, self).__init__()
+    def __init__(self, hidden_dim, kernel_size, conv_func=ConvBN, hard=False):
+        super(ConvLSTMCell, self).__init__(hard)
         self.hidden_dim = hidden_dim
 
         self.conv_h2h = conv_func(in_channels=self.hidden_dim,
@@ -69,9 +111,9 @@ class ConvLSTMCell(nn.Module):
                                   bias=False)
 
         self.reset()
-        self.nonlin = nonlin
 
     def forward(self, xi):
+        self.saturation_cost = 0
         inference = (len(xi.shape) == 4)  # inference for model conversion
         if inference:
             xiseq = [xi]
@@ -93,15 +135,15 @@ class ConvLSTMCell(nn.Module):
                 tmp = xt
 
             cc_i, cc_f, cc_o, cc_g = torch.split(tmp, self.hidden_dim, dim=1)
-            i = torch.sigmoid(cc_i)
-            f = torch.sigmoid(cc_f)
-            o = torch.sigmoid(cc_o)
-            g = torch.tanh(cc_g)
+            i = self.sigmoid(cc_i)
+            f = self.sigmoid(cc_f)
+            o = self.sigmoid(cc_o)
+            g = self.tanh(cc_g)
             if self.prev_c is None:
                 c = i * g
             else:
                 c = f * self.prev_c + i * g
-            h = o * self.nonlin(c)
+            h = o * self.tanh(c)
             if not inference:
                 result.append(h.unsqueeze(0))
             self.prev_h = h
@@ -112,22 +154,15 @@ class ConvLSTMCell(nn.Module):
             res = torch.cat(result, dim=0)
         return res
 
-    def set(self, prev_h, prev_c):
-        self.prev_h = prev_h
-        self.prev_c = prev_c
-
-    def get(self):
-        return self.prev_h, self.prev_c
-
     def reset(self):
         self.prev_h, self.prev_c = None, None
 
 
-class ConvGRUCell(nn.Module):
+class ConvGRUCell(RNNCell):
     r"""ConvGRUCell module, applies sequential part of LSTM.
     """
-    def __init__(self, hidden_dim, kernel_size, bias, conv_func=ConvBN):
-        super(ConvGRUCell, self).__init__()
+    def __init__(self, hidden_dim, kernel_size, bias, conv_func=ConvBN, hard=False):
+        super(ConvGRUCell, self).__init__(hard)
         self.hidden_dim = hidden_dim
 
         # Fully-Gated
@@ -145,8 +180,9 @@ class ConvGRUCell(nn.Module):
 
         self.reset()
 
-
     def forward(self, xi):
+        self.saturation_cost = 0
+
         xiseq = xi.split(1, 0) #t,n,c,h,w
 
 
@@ -167,14 +203,14 @@ class ConvGRUCell(nn.Module):
                 tmp = x_zr
 
             cc_z, cc_r = torch.split(tmp, self.hidden_dim, dim=1)
-            z = torch.sigmoid(cc_z)
-            r = torch.sigmoid(cc_r)
+            z = self.sigmoid(cc_z)
+            r = self.sigmoid(cc_r)
 
             if self.prev_h is not None:
                 tmp = self.conv_h2h(r * self.prev_h) + x_h
             else:
                 tmp = x_h
-            tmp = torch.tanh(tmp)
+            tmp = self.tanh(tmp)
 
             if self.prev_h is not None:
                 h = (1-z) * self.prev_h + z * tmp
@@ -194,16 +230,18 @@ class ConvGRUCell(nn.Module):
 class ConvRNN(nn.Module):
     r"""ConvRNN module.
     """
-    def __init__(self, nInputPlane, nOutputPlane, kernel_size=5, stride=1, padding=2, dilation=1, cell='gru'):
+    def __init__(self, nInputPlane, nOutputPlane,
+                 kernel_size=5, stride=1, padding=2, dilation=1,
+                 cell='gru', hard=True):
         super(ConvRNN, self).__init__()
 
         self.cin = nInputPlane
         self.cout = nOutputPlane
         if cell == 'gru':
-            self.timepool = ConvGRUCell(nOutputPlane, 3, True)
+            self.timepool = ConvGRUCell(nOutputPlane, 3, True, hard=hard)
             factor = 3
         else:
-            self.timepool = ConvLSTMCell(nOutputPlane, 3, True)
+            self.timepool = ConvLSTMCell(nOutputPlane, 3, True, hard=hard)
             factor = 4
 
         self.conv_x2h = SequenceWise(ConvBN(nInputPlane, factor * nOutputPlane,
