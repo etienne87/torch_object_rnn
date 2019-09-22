@@ -8,87 +8,10 @@ import torch.nn.functional as F
 
 from core.ssd.box_coder import SSDBoxCoder
 from core.ssd.loss import SSDLoss
-from core import modules as crnn
-from core.modules import ConvRNN, ConvBN, SequenceWise, time_to_batch, batch_to_time
+from core.modules import FPN, Trident
 import math
 
 
-class FPN(nn.Module):
-    def __init__(self, cin=1, cout=128, nmaps=3):
-        super(FPN, self).__init__()
-        self.cin = cin
-        self.base = 8
-        self.cout = cout
-        self.nmaps = nmaps
-
-        self.conv1 = SequenceWise(nn.Sequential(
-            ConvBN(cin, self.base, kernel_size=7, stride=2, padding=3),
-            ConvBN(self.base, self.base * 8, kernel_size=7, stride=2, padding=3)
-        ))
-
-        self.conv2 = crnn.UNet(self.base * 8,
-                               self.cout,
-                               self.base * 8, 4)
-
-    def forward(self, x):
-        x1 = self.conv1(x)
-        self.conv2(x1)
-
-        sources = [time_to_batch(item)[0] for item in self.conv2.decoded][::-1]
-
-        return sources
-
-    def reset(self):
-        for name, module in self._modules.iteritems():
-            if hasattr(module, "reset"):
-                module.reset()
-
-
-class Trident(nn.Module):
-    def __init__(self, cin=1):
-        super(Trident, self).__init__()
-        self.cin = cin
-        base = 8
-        self.conv1 = ConvBN(cin, base, kernel_size=7, stride=2, padding=3)
-        self.conv2 = ConvBN(base, base * 4, kernel_size=7, stride=2, padding=3)
-        self.conv2b = ConvBN(base * 4, base * 8, kernel_size=7, stride=2, padding=3)
-
-        self.conv3 = ConvRNN(base * 8, base * 8, kernel_size=7, stride=2, padding=3)
-        self.conv4 = ConvRNN(base * 8, base * 16, kernel_size=7, stride=1, dilation=1, padding=3)
-        self.conv5 = ConvRNN(base * 16, base * 16, kernel_size=7, stride=1, dilation=2, padding=3)
-        self.conv6 = ConvRNN(base * 16, base * 16, kernel_size=7, stride=1, dilation=3, padding=3 * 2)
-
-        self.end_point_channels = [self.conv3.cout,  # 8
-                                   self.conv4.cout,  # 16
-                                   self.conv5.cout,  # 32
-                                   self.conv6.cout]  # 64
-
-    def forward(self, x):
-        sources = list()
-
-        x0, n = time_to_batch(x)
-        x1 = self.conv1(x0)
-        x2 = self.conv2(x1)
-        x2 = self.conv2b(x2)
-        x2 = batch_to_time(x2, n)
-
-        x3 = self.conv3(x2)
-        x4 = self.conv4(x3)
-        x5 = self.conv5(x4)
-        x6 = self.conv6(x5)
-
-        x3, n = time_to_batch(x3)
-        x4, n = time_to_batch(x4)
-        x5, n = time_to_batch(x5)
-        x6, n = time_to_batch(x6)
-
-        sources += [x3, x4, x5, x6]
-        return sources
-
-    def reset(self):
-        for name, module in self._modules.iteritems():
-            if isinstance(module, crnn.ConvRNN):
-                module.timepool.reset()
 
 
 def get_box_params(sources, h, w):
@@ -133,8 +56,8 @@ def decode_boxes(box_map, num_classes, num_anchors):
 
 
 class SSD(nn.Module):
-    def __init__(self, feature_extractor=Trident,
-                 num_classes=2, cin=2, height=300, width=300, act='softmax'):
+    def __init__(self, feature_extractor=FPN,
+                 num_classes=2, cin=2, height=300, width=300, act='softmax', shared=False):
         super(SSD, self).__init__()
         self.num_classes = num_classes
         self.height, self.width = height, width
@@ -152,20 +75,26 @@ class SSD(nn.Module):
         self.in_channels = [item.size(1) for item in sources]
         self.num_anchors = [2 * len(self.aspect_ratios) + 2 for i in range(len(self.in_channels))]
 
-
+        self.shared = shared
         self.cls_layers = nn.ModuleList()
         self.reg_layers = nn.ModuleList()
-        for i in range(len(self.in_channels)):
-            self.reg_layers += [nn.Conv2d(self.in_channels[i], self.num_anchors[i]*4,
-                                               kernel_size=3, padding=1, stride=1)]
-            self.cls_layers += [nn.Conv2d(self.in_channels[i], self.num_anchors[i]*self.num_classes,
-                                               kernel_size=3, padding=1, stride=1)]
+        if self.shared:
+            self.reg_layers += [nn.Conv2d(self.in_channels[0], self.num_anchors[0] * 4,
+                                          kernel_size=3, padding=1, stride=1)]
+            self.cls_layers += [nn.Conv2d(self.in_channels[0], self.num_anchors[0] * self.num_classes,
+                                          kernel_size=3, padding=1, stride=1)]
+        else:
+            for i in range(len(self.in_channels)):
+                self.reg_layers += [nn.Conv2d(self.in_channels[i], self.num_anchors[i]*4,
+                                                   kernel_size=3, padding=1, stride=1)]
+                self.cls_layers += [nn.Conv2d(self.in_channels[i], self.num_anchors[i]*self.num_classes,
+                                                   kernel_size=3, padding=1, stride=1)]
 
 
         self.act = act
         self.box_coder = SSDBoxCoder(self, 0.7, 0.4)
         self.criterion = SSDLoss(num_classes=num_classes,
-                                 mode='none',
+                                 mode='ohem',
                                  use_sigmoid=self.act=='sigmoid',
                                  use_iou=False)
 
@@ -216,8 +145,12 @@ class SSD(nn.Module):
         cls_preds = []
         xs = self.extractor(x)
         for i, x in enumerate(xs):
-            loc_pred = self.reg_layers[i](x)
-            cls_pred = self.cls_layers[i](x)
+            if self.shared:
+                loc_pred = self.reg_layers[0](x)
+                cls_pred = self.cls_layers[0](x)
+            else:
+                loc_pred = self.reg_layers[i](x)
+                cls_pred = self.cls_layers[i](x)
             loc_pred = loc_pred.permute(0, 2, 3, 1).contiguous()
             cls_pred = cls_pred.permute(0, 2, 3, 1).contiguous()
 
@@ -246,12 +179,7 @@ class SSD(nn.Module):
 
         loc_loss, cls_loss = self.criterion(loc_preds, loc_targets, cls_preds, cls_targets)
 
-        sat_loss = 0
-        for name, module in self.extractor._modules.iteritems():
-            if hasattr(module, "reset"):
-                sat_loss += module.timepool.saturation_cost
-
-        loss = loc_loss + cls_loss + sat_loss
+        loss = loc_loss + cls_loss
         return loss
 
     def get_boxes(self, x):
