@@ -1,6 +1,11 @@
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+
 import numpy as np
 from torchvision import datasets, transforms
-import moving_box_detection as toy
+import datasets.moving_box_detection as toy
 import cv2
 
 TRAIN_DATASET = datasets.MNIST('../data', train=True, download=True,

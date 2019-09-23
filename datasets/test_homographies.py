@@ -172,23 +172,24 @@ if __name__ == '__main__':
         R2 = angles_to_R(rvec2)
         R_1to2, tvec_1to2 = computeC2MC1(R1, tvec1, R2, tvec2)
         dinv = compute_dinv(R1, tvec1, normal)
-        H = computeHomography(R_1to2, tvec_1to2, 1, normal)
+        H = computeHomography(R_1to2, tvec_1to2, dinv, normal)
         G = K.dot(H).dot(Kinv)
         G /= G[2,2]
 
-        tx = np.sin(t*0.01) * width/2
-        ty = np.cos(t * 0.01) * height/2
-        z = np.cos(t*0.01)/2 + 1
-        mat = reset_offset(height, width)
-        mat = np.array([[z, 0, 0],
-                            [0, z, 0],
-                            [0, 0, 1]]).dot(mat)
-
-        mat = np.array([[1, 0, tx],
-                                       [0, 1, ty],
-                                       [0, 0, 1]]).dot(mat)
-
-        G = offset(height, width).dot(mat).dot(G)
+        # Cheating
+        # tx = np.sin(t*0.01) * width/2
+        # ty = np.cos(t * 0.01) * height/2
+        # z = np.cos(t*0.01)/2 + 1
+        # mat = reset_offset(height, width)
+        # mat = np.array([[z, 0, 0],
+        #                     [0, z, 0],
+        #                     [0, 0, 1]]).dot(mat)
+        #
+        # mat = np.array([[1, 0, tx],
+        #                                [0, 1, ty],
+        #                                [0, 0, 1]]).dot(mat)
+        #
+        # G = offset(height, width).dot(mat).dot(G)
 
 
         out = cv2.warpPerspective(img, G, (width, height), flags=cv2.INTER_CUBIC,

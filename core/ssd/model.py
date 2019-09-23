@@ -57,7 +57,7 @@ def decode_boxes(box_map, num_classes, num_anchors):
 
 class SSD(nn.Module):
     def __init__(self, feature_extractor=FPN,
-                 num_classes=2, cin=2, height=300, width=300, act='sigmoid', shared=True):
+                 num_classes=2, cin=2, height=300, width=300, act='softmax', shared=True):
         super(SSD, self).__init__()
         self.num_classes = num_classes
         self.height, self.width = height, width
@@ -92,9 +92,9 @@ class SSD(nn.Module):
 
 
         self.act = act
-        self.box_coder = SSDBoxCoder(self, 0.3, 0.5)
+        self.box_coder = SSDBoxCoder(self, 0.4, 0.5)
         self.criterion = SSDLoss(num_classes=num_classes,
-                                 mode='focal',
+                                 mode='ohem',
                                  use_sigmoid=self.act=='sigmoid',
                                  use_iou=False)
 

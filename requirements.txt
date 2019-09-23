@@ -1,4 +1,6 @@
 opencv-python
-tensorboard
+tensorboardX
 torch
 terminaltables
+imageio
+matplotlib

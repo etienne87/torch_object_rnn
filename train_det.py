@@ -33,6 +33,23 @@ def parse_args():
     return parser.parse_args()
 
 
+def progressive_resize(epoch, net, train_dataset, test_dataset):
+    if epoch < 3:
+        size = 64
+    elif epoch < 9:
+        size = 128
+    elif epoch < 12:
+        size = 256
+    else:
+        size = 512
+
+    train_dataset.resize(size, size)
+    test_dataset.resize(size, size)
+    net.resize(size, size)
+    net.box_coder.cuda()
+    print('size: ', size)
+
+
 def main():
     args = parse_args()
 
@@ -76,20 +93,7 @@ def main():
 
     for epoch in range(start_epoch, args.epochs):
 
-        if epoch < 3:
-            size = 64
-        elif epoch < 9:
-            size = 128
-        elif epoch < 12:
-            size = 256
-        else:
-            size = 512
 
-        dataloader.resize(size, size)
-        test_dataset.resize(size, size)
-        trainer.net.resize(size, size)
-        trainer.net.box_coder.cuda()
-        print('size: ', size)
 
 
         trainer.train(epoch, dataloader, args)

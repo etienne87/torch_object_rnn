@@ -8,29 +8,43 @@ import torch
 from core.utils.opts import time_to_batch, batch_to_time
 from functools import partial
 
+try:
+    from inplace_abn import ABN, InPlaceABN
+except:
+    print('ibn not imported, module will use more memory')
 
 
-class ConvBN(nn.Module):
 
-    def __init__(self, in_channels, out_channels,
-                 kernel_size=3, stride=1, padding=1, dilation=1,
-                 bias=True, act=nn.ReLU6(inplace=True)):
-        super(ConvBN, self).__init__()
-        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, dilation=dilation,
-                               padding=padding,
-                               bias=bias)
 
-        self.bn1 = nn.BatchNorm2d(out_channels)
-        self.act = act
 
-        self.bn1.weight.data.fill_(1)
-        self.bn1.bias.data.zero_()
+if ABN is not None:
+    class ConvBN(nn.Sequential):
 
-    def forward(self, x):
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = self.act(x)
-        return x
+        def __init__(self, in_channels, out_channels,
+                     kernel_size=3, stride=1, padding=1, dilation=1,
+                     bias=True, activation='leaky_relu'):
+            activation = 'identity' if activation=='Identity' else 'identity'
+            super(ConvBN, self).__init__(
+                nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, dilation=dilation,
+                          padding=padding,
+                          bias=bias),
+                InPlaceABN(out_channels, activation=activation)
+            )
+else:
+    class ConvBN(nn.Sequential):
+
+        def __init__(self, in_channels, out_channels,
+                     kernel_size=3, stride=1, padding=1, dilation=1,
+                     bias=True, activation='LeakyReLU'):
+            super(ConvBN, self).__init__(
+                nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, dilation=dilation,
+                          padding=padding,
+                          bias=bias),
+                nn.BatchNorm2d(out_channels),
+                getattr(nn, activation)()
+            )
+
+
 
 
 class ASPP(nn.Module):
@@ -266,12 +280,13 @@ class ConvRNN(nn.Module):
             self.timepool = ConvLSTMCell(out_channels, 3, True, hard=hard)
             factor = 4
 
+
         self.conv_x2h = SequenceWise(ConvBN(in_channels, factor * out_channels,
-                                            kernel_size=kernel_size,
-                                            stride=stride,
-                                            dilation=dilation,
-                                            padding=padding,
-                                            act=nn.Identity()))
+                                             kernel_size=kernel_size,
+                                             stride=stride,
+                                             dilation=dilation,
+                                             padding=padding,
+                                             activation='Identity'))
 
     def forward(self, x):
         y = self.conv_x2h(x)
@@ -386,7 +401,7 @@ class FPN(nn.Module):
             ConvBN(cin, self.base, kernel_size=7, stride=2, padding=3),
             ConvBN(self.base, self.base * 8, kernel_size=7, stride=2, padding=3),
             ConvBN(self.base * 8, self.base * 8, kernel_size=7, stride=2, padding=3),
-            nn.Upsample(size=(16, 16), mode='bilinear')
+            nn.Upsample(size=(32, 32), mode='bilinear', align_corners=True)
         ))
 
         self.conv2 = UNet(self.base * 8,
@@ -402,7 +417,7 @@ class FPN(nn.Module):
         return sources
 
     def reset(self):
-        for name, module in self._modules.iteritems():
+        for name, module in self._modules.items():
             if hasattr(module, "reset"):
                 module.reset()
 
@@ -449,7 +464,7 @@ class Trident(nn.Module):
         return sources
 
     def reset(self):
-        for name, module in self._modules.iteritems():
+        for name, module in self._modules.items():
             if isinstance(module, ConvRNN):
                 module.timepool.reset()
 
