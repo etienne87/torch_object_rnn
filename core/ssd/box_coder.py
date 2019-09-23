@@ -27,6 +27,17 @@ class SSDBoxCoder(torch.nn.Module):
         self.variances = (0.1, 0.1)
         self.nms = box_soft_nms if soft_nms else box_nms
 
+    def reset(self, ssd_model):
+        self.steps = ssd_model.steps
+        self.box_sizes = ssd_model.box_sizes
+        self.aspect_ratios = ssd_model.aspect_ratios
+        self.fm_sizes = ssd_model.fm_sizes
+        self.height = ssd_model.height
+        self.width = ssd_model.width
+        self.fm_len = []
+        self.register_buffer('default_boxes', self._get_default_boxes())
+        self.register_buffer('default_boxes_xyxy', change_box_order(self.default_boxes, 'xywh2xyxy'))
+
     def __greet__(self):
         print('steps', self.steps)
         print('box_sizes', self.box_sizes)

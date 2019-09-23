@@ -57,7 +57,7 @@ def decode_boxes(box_map, num_classes, num_anchors):
 
 class SSD(nn.Module):
     def __init__(self, feature_extractor=FPN,
-                 num_classes=2, cin=2, height=300, width=300, act='softmax', shared=False):
+                 num_classes=2, cin=2, height=300, width=300, act='sigmoid', shared=True):
         super(SSD, self).__init__()
         self.num_classes = num_classes
         self.height, self.width = height, width
@@ -92,9 +92,9 @@ class SSD(nn.Module):
 
 
         self.act = act
-        self.box_coder = SSDBoxCoder(self, 0.7, 0.4)
+        self.box_coder = SSDBoxCoder(self, 0.3, 0.5)
         self.criterion = SSDLoss(num_classes=num_classes,
-                                 mode='ohem',
+                                 mode='focal',
                                  use_sigmoid=self.act=='sigmoid',
                                  use_iou=False)
 
@@ -108,6 +108,16 @@ class SSD(nn.Module):
         else:
             self.sigmoid_init()
 
+    def resize(self, height, width):
+        self.height, self.width = height, width
+        self.extractor.reset()
+        x = torch.randn(1, 1, self.cin, self.height, self.width).to(self.box_coder.default_boxes.device)
+        sources = self.extractor(x)
+        self.fm_sizes, self.steps, self.box_sizes = get_box_params(sources, self.height, self.width)
+        self.ary = float(width) / height
+        self.box_coder.reset(self)
+        self.extractor.reset()
+
     def sigmoid_init(self):
         px = 0.99
         bias_bg = math.log(px / (1 - px))
@@ -115,8 +125,7 @@ class SSD(nn.Module):
             torch.nn.init.normal_(l.weight, std=0.01)
             torch.nn.init.constant_(l.bias, 0)
             l.bias.data = l.bias.data.reshape(self.num_anchors[i], self.num_classes)
-            l.bias.data[:, 0] += bias_bg
-            l.bias.data[:, 1:] -= bias_bg
+            l.bias.data[:, 0:] -= bias_bg
             l.bias.data = l.bias.data.reshape(-1)
 
     def softmax_init(self):

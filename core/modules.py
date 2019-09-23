@@ -23,6 +23,9 @@ class ConvBN(nn.Module):
         self.bn1 = nn.BatchNorm2d(out_channels)
         self.act = act
 
+        self.bn1.weight.data.fill_(1)
+        self.bn1.bias.data.zero_()
+
     def forward(self, x):
         x = self.conv1(x)
         x = self.bn1(x)
@@ -30,7 +33,23 @@ class ConvBN(nn.Module):
         return x
 
 
-class SpatialPyramidPool
+class ASPP(nn.Module):
+    def __init__(self, in_channels, out_channels, atrous_rates=[3, 6, 12, 18]):
+        super(ASPP, self).__init__()
+        modules = []
+        for rate in atrous_rates:
+            modules.append(ConvBN(in_channels, out_channels, dilation=rate))
+
+        self.convs = nn.ModuleList(modules)
+        self.project = ConvBN(out_channels * len(self.convs), out_channels)
+
+    def forward(self, x):
+        res = []
+        for conv in self.convs:
+            res.append(conv(x))
+        res = torch.cat(res, dim=1)
+        res = self.project(res)
+        return res
 
 
 class SequenceWise(nn.Module):
@@ -366,20 +385,13 @@ class FPN(nn.Module):
         self.conv1 = SequenceWise(nn.Sequential(
             ConvBN(cin, self.base, kernel_size=7, stride=2, padding=3),
             ConvBN(self.base, self.base * 8, kernel_size=7, stride=2, padding=3),
-            ConvBN(self.base * 8, self.base * 8, kernel_size=7, stride=2, padding=3)
+            ConvBN(self.base * 8, self.base * 8, kernel_size=7, stride=2, padding=3),
+            nn.Upsample(size=(16, 16), mode='bilinear')
         ))
-
-        # for m in self.modules():
-        #     if isinstance(m, nn.Conv2d):
-        #         n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
-        #         m.weight.data.normal_(0, math.sqrt(2. / n))
-        #     elif isinstance(m, nn.BatchNorm2d):
-        #         m.weight.data.fill_(1)
-        #         m.bias.data.zero_()
 
         self.conv2 = UNet(self.base * 8,
                                self.cout,
-                               channels_per_layer=[self.base * 8, self.base * 16, self.base * 32])
+                               channels_per_layer=[self.base * 16, self.base * 16, self.base * 16])
 
     def forward(self, x):
         x1 = self.conv1(x)

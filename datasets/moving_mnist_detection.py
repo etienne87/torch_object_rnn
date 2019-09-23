@@ -42,7 +42,7 @@ class MovingMnistAnimation(toy.Animation):
         boxes = np.zeros((len(self.objects), 5), dtype=np.float32)
         for i, object in enumerate(self.objects):
             x1, y1, x2, y2 = object.run()
-            boxes[i] = np.array([x1, y1, x2, y2, object.class_id])
+            boxes[i] = np.array([x1, y1, x2, y2, object.class_id]) #TODO: put id
             #draw in roi resized version of img
             thumbnail = cv2.resize(object.img, (x2-x1, y2-y1), cv2.INTER_LINEAR)
             self.img[y1:y2, x1:x2] = np.maximum(self.img[y1:y2, x1:x2], thumbnail)
@@ -60,6 +60,10 @@ class MovingMnistDataset(toy.SquaresVideos):
                                                 max_classes, 'none', True)
         self.labelmap = [str(i) for i in range(10)]
 
+    def resize(self, height, width):
+        self.height, self.width = height, width
+        self.reset()
+
     def reset(self):
         self.animations = [MovingMnistAnimation(self.time, self.height,
                                                 self.width, self.channels, self.max_stops,
@@ -72,7 +76,7 @@ class MovingMnistDataset(toy.SquaresVideos):
 
 if __name__ == '__main__':
     import torch
-    from core.utils import boxarray_to_boxes, draw_bboxes, make_single_channel_display
+    from core.utils.vis import boxarray_to_boxes, draw_bboxes, make_single_channel_display
 
     # anim = MovingMnistAnimation()
     # labelmap = [str(i) for i in range(10)]

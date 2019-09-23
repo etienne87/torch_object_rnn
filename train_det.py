@@ -75,6 +75,23 @@ def main():
     trainer = DetTrainer(args.logdir, net, optimizer)
 
     for epoch in range(start_epoch, args.epochs):
+
+        if epoch < 3:
+            size = 64
+        elif epoch < 9:
+            size = 128
+        elif epoch < 12:
+            size = 256
+        else:
+            size = 512
+
+        dataloader.resize(size, size)
+        test_dataset.resize(size, size)
+        trainer.net.resize(size, size)
+        trainer.net.box_coder.cuda()
+        print('size: ', size)
+
+
         trainer.train(epoch, dataloader, args)
         map = trainer.evaluate(epoch, test_dataset, args)
         trainer.test(epoch, test_dataset, nrows, args)
