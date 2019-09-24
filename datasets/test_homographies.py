@@ -138,43 +138,46 @@ if __name__ == '__main__':
     img = cv2.imread("datasets/scene.jpg", cv2.IMREAD_GRAYSCALE)
     height, width = img.shape
 
-    K = np.array([[width/2, 0, width / 2],
-                  [0, height/2, height / 2],
+    K = np.array([[width/3, 0, width / 2],
+                  [0, height/3, height / 2],
                   [0, 0, 1]], dtype=np.float32)
     Kinv = np.linalg.inv(K)
 
-    rvec2 = np.zeros((3), dtype=np.float32)
+    rvec2 = np.array([0,0,0], dtype=np.float32)
     tvec2 = np.array([0,0,0], dtype=np.float32)
 
-    R1 = np.eye(3)
-    tvec1 = np.array([0,0,0], dtype=np.float32)
+    rvec1 = np.array([0,0,0], dtype=np.float32)
+    tvec1 = np.array([0,0,1], dtype=np.float32)
     normal = np.array([0,0,1], dtype=np.float32)
+
+    R1 = angles_to_R(rvec1)
 
     alpha = 1e-6
 
 
-    rvec_speed = np.random.randn(3) * 0.1
-    tvec_speed = np.random.randn(3) * 0.1
+    rvec_speed = np.array([1,0,0], dtype=np.float32)
+    tvec_speed = np.array([0,0,1], dtype=np.float32)
 
     prev_img = img.astype(np.float32)
 
     t = 0
 
     while 1:
-        rvec_speed = (1 - alpha) * rvec_speed + (alpha) * np.random.randn(3)
-        tvec_speed = (1 - alpha) * tvec_speed + (alpha) * np.random.randn(3)
+        # rvec_speed = (1 - alpha) * rvec_speed + (alpha) * np.random.randn(3)
+        # tvec_speed = (1 - alpha) * tvec_speed + (alpha) * np.random.randn(3)
 
 
         rvec2 = rvec_speed * np.sin(t*0.01)
-        tvec2 = tvec_speed * np.sin(t*0.01)
+        tvec2 = tvec_speed #* np.sin(t*0.01)
 
 
         R2 = angles_to_R(rvec2)
         R_1to2, tvec_1to2 = computeC2MC1(R1, tvec1, R2, tvec2)
         dinv = compute_dinv(R1, tvec1, normal)
+        print('dinv: ', dinv)
         H = computeHomography(R_1to2, tvec_1to2, dinv, normal)
         G = K.dot(H).dot(Kinv)
-        G /= G[2,2]
+        G /= G[2, 2]
 
         # Cheating
         # tx = np.sin(t*0.01) * width/2
