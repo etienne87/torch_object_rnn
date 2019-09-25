@@ -9,15 +9,13 @@ from core.utils.opts import time_to_batch, batch_to_time
 from functools import partial
 
 try:
-    from inplace_abn import ABN, InPlaceABN
+    from inplace_abn import InPlaceABN
 except:
     print('ibn not imported, module will use more memory')
 
 
 
-
-
-if ABN is not None:
+if InPlaceABN is not None:
     class ConvBN(nn.Sequential):
 
         def __init__(self, in_channels, out_channels,
@@ -52,7 +50,7 @@ class ASPP(nn.Module):
         super(ASPP, self).__init__()
         modules = []
         for rate in atrous_rates:
-            modules.append(ConvBN(in_channels, out_channels, dilation=rate))
+            modules.append(ConvBN(in_channels, out_channels, dilation=rate, padding=rate))
 
         self.convs = nn.ModuleList(modules)
         self.project = ConvBN(out_channels * len(self.convs), out_channels)
@@ -136,7 +134,7 @@ class ConvLSTMCell(RNNCell):
     r"""ConvLSTMCell module, applies sequential part of LSTM.
     """
 
-    def __init__(self, hidden_dim, kernel_size, conv_func=ConvBN, hard=False):
+    def __init__(self, hidden_dim, kernel_size, conv_func=nn.Conv2d, hard=False):
         super(ConvLSTMCell, self).__init__(hard)
         self.hidden_dim = hidden_dim
 
@@ -197,7 +195,7 @@ class ConvLSTMCell(RNNCell):
 class ConvGRUCell(RNNCell):
     r"""ConvGRUCell module, applies sequential part of LSTM.
     """
-    def __init__(self, hidden_dim, kernel_size, bias, conv_func=ConvBN, hard=False):
+    def __init__(self, hidden_dim, kernel_size, bias, conv_func=nn.Conv2d, hard=False):
         super(ConvGRUCell, self).__init__(hard)
         self.hidden_dim = hidden_dim
 
@@ -277,7 +275,7 @@ class ConvRNN(nn.Module):
             self.timepool = ConvGRUCell(out_channels, 3, True, hard=hard)
             factor = 3
         else:
-            self.timepool = ConvLSTMCell(out_channels, 3, True, hard=hard)
+            self.timepool = ConvLSTMCell(out_channels, 3, hard=hard)
             factor = 4
 
 
@@ -318,7 +316,7 @@ class UpFuse(nn.Module):
 
 class UNet(nn.Module):
     def __init__(self, in_channels, out_channels, channels_per_layer,
-                        mode='sum', scale_factor=2, ):
+                        mode='sum', scale_factor=2):
         super(UNet, self).__init__()
 
         base = channels_per_layer[0]
@@ -401,7 +399,8 @@ class FPN(nn.Module):
             ConvBN(cin, self.base, kernel_size=7, stride=2, padding=3),
             ConvBN(self.base, self.base * 8, kernel_size=7, stride=2, padding=3),
             ConvBN(self.base * 8, self.base * 8, kernel_size=7, stride=2, padding=3),
-            nn.Upsample(size=(32, 32), mode='bilinear', align_corners=True)
+            # nn.Upsample(size=(32, 32), mode='bilinear', align_corners=True),
+            # ASPP(self.base * 8, self.base * 16)
         ))
 
         self.conv2 = UNet(self.base * 8,
@@ -427,40 +426,34 @@ class Trident(nn.Module):
         super(Trident, self).__init__()
         self.cin = cin
         base = 8
-        self.conv1 = ConvBN(cin, base, kernel_size=7, stride=2, padding=3)
-        self.conv2 = ConvBN(base, base * 4, kernel_size=7, stride=2, padding=3)
-        self.conv2b = ConvBN(base * 4, base * 8, kernel_size=7, stride=2, padding=3)
+        self.conv1 = SequenceWise(nn.Sequential(
+                ConvBN(cin, base, kernel_size=7, stride=2, padding=3),
+                ConvBN(base, base * 4, kernel_size=7, stride=2, padding=3),
+                ConvBN(base * 4, base * 8, kernel_size=7, stride=2, padding=3)
+        ))
 
         self.conv3 = ConvRNN(base * 8, base * 8, kernel_size=7, stride=2, padding=3)
         self.conv4 = ConvRNN(base * 8, base * 16, kernel_size=7, stride=1, dilation=1, padding=3)
         self.conv5 = ConvRNN(base * 16, base * 16, kernel_size=7, stride=1, dilation=2, padding=3)
         self.conv6 = ConvRNN(base * 16, base * 16, kernel_size=7, stride=1, dilation=3, padding=3 * 2)
 
-        self.end_point_channels = [self.conv3.cout,  # 8
-                                   self.conv4.cout,  # 16
-                                   self.conv5.cout,  # 32
-                                   self.conv6.cout]  # 64
+        self.end_point_channels = [self.conv3.out_channels,  # 8
+                                   self.conv4.out_channels,  # 16
+                                   self.conv5.out_channels,  # 32
+                                   self.conv6.out_channels]  # 64
 
     def forward(self, x):
         sources = list()
 
-        x0, n = time_to_batch(x)
-        x1 = self.conv1(x0)
-        x2 = self.conv2(x1)
-        x2 = self.conv2b(x2)
-        x2 = batch_to_time(x2, n)
+        x2 = self.conv1(x)
 
         x3 = self.conv3(x2)
         x4 = self.conv4(x3)
         x5 = self.conv5(x4)
         x6 = self.conv6(x5)
 
-        x3, n = time_to_batch(x3)
-        x4, n = time_to_batch(x4)
-        x5, n = time_to_batch(x5)
-        x6, n = time_to_batch(x6)
+        sources = [time_to_batch(item)[0] for item in [x3, x4, x5, x6]]
 
-        sources += [x3, x4, x5, x6]
         return sources
 
     def reset(self):
@@ -470,19 +463,20 @@ class Trident(nn.Module):
 
 
 
+
+
+
+
 if __name__ == '__main__':
-    t, n, c, h, w = 10, 1, 3, 64, 64
-
+    t, n, c, h, w = 10, 3, 3, 128, 128
     x = torch.rand(t, n, c, h, w)
+    # net = UNet(c, 128, channels_per_layer=[128, 128, 128])
+    # out = net(x)
 
-    net = UNet(c, 64, channels_per_layer=[32, 64, 128, 256])
-
-    print(net)
+    net = FPN(cin=c, cout=128, nmaps=3)
     out = net(x)
 
-    print(out.shape)
-    #
-    # net[0].reset()
-    # net[1].reset()
-
-    # print(net)
+    # im = torch.rand(n, c, h, w)
+    # net = CosineConv2d(c, 16, kernel_size=3, stride=1, padding=1)
+    # y = net.forward(im)
+    # print(y.mean(), y.std())

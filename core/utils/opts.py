@@ -84,3 +84,21 @@ class BatchRenorm(nn.Module):
                 ' max_length={max_length}, affine={affine})'
             .format(name=self.__class__.__name__, **self.__dict__))
 
+class CosineConv2d(nn.Conv2d):
+    """Drop-in Replace Conv+BN, but is quite costly"""
+    def __init__(self, *args, **kwargs):
+        super(CosineConv2d, self).__init__(*args, **kwargs)
+
+        self.factor = self.in_channels * self.kernel_size[0]**2
+        self.register_buffer('avg',
+                             torch.ones((1, self.in_channels, self.kernel_size[0], self.kernel_size[0]),
+                                        dtype=torch.float32)/self.factor)
+        self.eps = 1e-8
+
+    def forward(self, x):
+        y = F.conv2d(x, self.weight, None, self.stride, self.padding, self.dilation, self.groups)
+
+        wn = self.weight.view(self.out_channels, -1).norm(p=2, dim=1, keepdim=True)
+        xn = F.conv2d(x**2, self.avg, None, self.stride, self.padding, self.dilation, 1)
+        xn = F.relu(wn[None,:,:,None] * torch.sqrt(xn) - self.eps)
+        return F.leaky_relu(y / xn)

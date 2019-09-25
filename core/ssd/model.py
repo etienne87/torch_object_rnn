@@ -43,21 +43,10 @@ def get_box_params(sources, h, w):
     return fm_sizes, steps, box_sizes
 
 
-def decode_boxes(box_map, num_classes, num_anchors):
-    """
-    box_map: N, C, H, W
-    # N, C, H, W -> N, H, W, C -> N, HWNa, 4+Classes
-    """
-    fm_h, fm_w = box_map.shape[-2:]
-    nboxes = fm_h * fm_w * num_anchors
-
-    box_map = box_map.permute([0, 2, 3, 1]).contiguous().view(box_map.size(0), nboxes, 4 + num_classes)
-    return box_map[..., :4], box_map[..., 4:]
-
 
 class SSD(nn.Module):
-    def __init__(self, feature_extractor=FPN,
-                 num_classes=2, cin=2, height=300, width=300, act='softmax', shared=True):
+    def __init__(self, feature_extractor=Trident,
+                 num_classes=2, cin=2, height=300, width=300, act='softmax', shared=False):
         super(SSD, self).__init__()
         self.num_classes = num_classes
         self.height, self.width = height, width
@@ -92,7 +81,7 @@ class SSD(nn.Module):
 
 
         self.act = act
-        self.box_coder = SSDBoxCoder(self, 0.4, 0.5)
+        self.box_coder = SSDBoxCoder(self, 0.4, 0.7)
         self.criterion = SSDLoss(num_classes=num_classes,
                                  mode='ohem',
                                  use_sigmoid=self.act=='sigmoid',
