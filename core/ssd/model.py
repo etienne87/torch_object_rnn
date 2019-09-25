@@ -180,9 +180,9 @@ class SSD(nn.Module):
         loss = loc_loss + cls_loss
         return loss
 
-    def get_boxes(self, x):
+    def get_boxes(self, x, score_thresh=0.4):
         loc_preds, cls_preds = self(x)
-        targets = self.box_coder.decode_txn_boxes(loc_preds, cls_preds, x.size(1))
+        targets = self.box_coder.decode_txn_boxes(loc_preds, cls_preds, x.size(1), score_thresh=score_thresh)
         return targets
 
 

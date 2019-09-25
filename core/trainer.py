@@ -90,7 +90,7 @@ class DetTrainer(object):
                 self.net.reset()
 
             start = time.time()
-            preds = self.net.get_boxes(inputs)
+            preds = self.net.get_boxes(inputs, score_thresh=0.1)
             runtime_stats['network'] += time.time() - start
 
             for t in range(len(targets)):

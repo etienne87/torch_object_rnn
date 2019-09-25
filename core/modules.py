@@ -15,7 +15,7 @@ except:
 
 
 
-if InPlaceABN is not None:
+if hasattr(__file__, 'InPlaceABN'):
     class ConvBN(nn.Sequential):
 
         def __init__(self, in_channels, out_channels,

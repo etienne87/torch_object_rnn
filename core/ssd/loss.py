@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from core.utils.box import box_iou
+from core.utils.opts import time_to_batch, batch_to_time
 
 
 def reduce(loss, mode='none'):
@@ -141,6 +142,29 @@ class SSDLoss(nn.Module):
         #print('loc_loss: %.3f | cls_loss: %.3f' % (loc_loss.item()/num_pos, cls_loss.item()/num_pos), end=' | ')
         loc_loss /= num_pos
         return loc_loss, cls_loss
+
+    def _asso_loss(self, pred_scores, batchsize):
+        """
+        In Time, just promote similar pairwise scores
+        :param pred_scores:
+        :param target_scores:
+        :return:
+        """
+        pred_scores_txn = batch_to_time(pred_scores, batchsize)
+        loss_asso = pred_scores_txn.std(dim=0)
+        import pdb
+        pdb.set_trace()
+        return loss_asso
+
+
+    def _asso_embeddings_loss(self, pred_embeddings, ids, tubelet_ids, batchsize):
+        """
+        In Time, promote similarity between embeddings of same tubelet
+        :param pred_embeddings:
+        :param ids:
+        :return:
+        """
+        pass
 
     def _iou_loss(self, pred, target):
         """

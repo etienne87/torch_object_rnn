@@ -164,7 +164,7 @@ class SSDBoxCoder(torch.nn.Module):
 
         return loc_targets, cls_targets
 
-    def decode_txn_boxes(self, loc_preds, cls_preds, batchsize):
+    def decode_txn_boxes(self, loc_preds, cls_preds, batchsize, score_thresh):
         loc_preds = opts.batch_to_time(loc_preds, batchsize)
         cls_preds = opts.batch_to_time(cls_preds, batchsize)
         targets = []
@@ -173,6 +173,7 @@ class SSDBoxCoder(torch.nn.Module):
             for i in range(loc_preds.size(1)):
                 boxes, labels, scores = self.decode(loc_preds[t, i].data,
                                                                 cls_preds[t, i].data,
+                                                                score_thresh=score_thresh,
                                                                 nms_thresh=0.6)
                 targets_t.append((boxes, labels, scores))
             targets.append(targets_t)

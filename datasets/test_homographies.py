@@ -4,7 +4,6 @@ from __future__ import print_function
 
 import numpy as np
 import cv2
-import math
 
 def moving_average(item, alpha):
     return (1-alpha)*item + alpha * np.random.randn(*item.shape)
