@@ -26,7 +26,7 @@ def parse_args():
     parser.add_argument('--resume', action='store_true', help='resume from checkpoint')
     parser.add_argument('--train_iter', type=int, default=100, help='#iter / train epoch')
     parser.add_argument('--test_iter', type=int, default=10, help='#iter / test epoch')
-    parser.add_argument('--epochs', type=int, default=1000, help='num epochs to train')
+    parser.add_argument('--epochs', type=int, default=50, help='num epochs to train')
     parser.add_argument('--cuda', action='store_true', help='use cuda')
     parser.add_argument('--log_every', type=int, default=10, help='log every')
     parser.add_argument('--save_video', action='store_true')

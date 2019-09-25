@@ -50,18 +50,19 @@ class DetTrainer(object):
             start = time.time()
             self.optimizer.zero_grad()
             loss = self.net.compute_loss(inputs, targets)
-            loss.backward()
+            loss['total'].backward()
             self.optimizer.step()
 
             runtime_stats['network'] += time.time() - start
 
-            train_loss += loss.item()
+            train_loss += loss['total'].item()
 
-            self.writer.add_scalar('train_loss', loss.data.item(), batch_idx + epoch * len(dataset))
+            for key, value in loss.items():
+                self.writer.add_scalar('train_'+key, value.data.item(), batch_idx + epoch * len(dataset))
 
             if batch_idx % args.log_every == 0:
                 print('\rtrain_loss: %.3f | avg_loss: %.3f [%d/%d] | @data: %.3f | @net: %.3f'
-                      % (loss.data.item(), train_loss / (batch_idx + 1), batch_idx + 1, len(dataset),
+                      % (loss['total'].data.item(), train_loss / (batch_idx + 1), batch_idx + 1, len(dataset),
                          runtime_stats['dataloader'] / (batch_idx + 1),
                          runtime_stats['network'] / (batch_idx + 1)
                          ), ' ')

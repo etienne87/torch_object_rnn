@@ -178,7 +178,7 @@ class SSD(nn.Module):
         loc_loss, cls_loss = self.criterion(loc_preds, loc_targets, cls_preds, cls_targets)
 
         loss = loc_loss + cls_loss
-        return loss
+        return {'total':loss, 'loc': loc_loss, 'cls_loss': cls_loss}
 
     def get_boxes(self, x, score_thresh=0.4):
         loc_preds, cls_preds = self(x)
