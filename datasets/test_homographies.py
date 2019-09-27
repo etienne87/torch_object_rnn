@@ -55,16 +55,22 @@ class PlanarVoyage(object):
         self.tvec1 = np.array([0, 0, 0], dtype=np.float32)
         self.nt = np.array([0, 0, -1], dtype=np.float32).reshape(1, 3)
 
-        self.rvec_speed = np.random.rand(3) * 0.25
-        self.tvec_speed = np.random.rand(3) * 0.5
+        self.rvec_amp = np.random.rand(3) * 0.25
+        self.tvec_amp  = np.random.rand(3) * 0.5
+
+        self.rvec_speed = np.random.choice([1e-1,1e-2,1e-3])
+        self.tvec_speed = np.random.choice([1e-1, 1e-2, 1e-3])
+
         self.tshift = np.random.randn(3)
+        self.rshift = np.random.randn(3)
         self.d = 1
         self.time = 0
 
     def __call__(self):
-        tshift = moving_average(self.tshift, 1e-4)
-        rvec2 = self.rvec_speed * np.sin(self.time * 0.01)
-        tvec2 = self.tvec_speed * np.sin(self.time * 0.01 + tshift)
+        self.tshift = moving_average(self.tshift, 1e-4)
+        self.rshift = moving_average(self.rshift, 1e-4)
+        rvec2 = self.rvec_amp * np.sin(self.time * self.rvec_speed + self.rshift)
+        tvec2 = self.tvec_amp * np.sin(self.time * self.tvec_speed + self.tshift)
         G_0to2 = generate_homography(self.rvec1, self.tvec1, rvec2, tvec2, self.nt, self.K, self.Kinv, self.d)
 
         self.time += 1
@@ -94,22 +100,19 @@ def show_voyage(img, anns):
         G_0to2 = voyage()
 
         out = cv2.warpPerspective(img, G_0to2, (width, height),
-                                  flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT).astype(np.float32)
+                                  flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP).astype(np.float32)
         out = (out - out.min()) / (out.max() - out.min())
 
 
         out_mask = cv2.warpPerspective(mask_rgb, G_0to2, (width, height),
-                                  flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT).astype(np.float32)
+                                  flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP).astype(np.float32)
 
         diff = out - prev_img
 
         # Remove some events
         diff *= np.random.rand(height, width, 3) < 0.9
-
-
         diff = viz_diff(diff) + out_mask / 3
 
-        print(diff.min(), diff.max())
 
         # Salt-and-Pepper
         # diff += (np.random.rand(height, width)[:,:,None].repeat(3,2) < 0.00001)/2
