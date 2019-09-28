@@ -45,7 +45,7 @@ def get_box_params(sources, h, w):
 
 
 class SSD(nn.Module):
-    def __init__(self, feature_extractor=Trident,
+    def __init__(self, feature_extractor=FPN,
                  num_classes=2, cin=2, height=300, width=300, act='softmax', shared=False):
         super(SSD, self).__init__()
         self.num_classes = num_classes

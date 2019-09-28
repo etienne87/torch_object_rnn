@@ -14,6 +14,24 @@ except:
     print('ibn not imported, module will use more memory')
 
 
+def get_padding(kernel, dilation):
+    k2 = kernel + (kernel-1) * (dilation-1)
+    return k2//2
+
+
+class DilateSharedConv2d(nn.Conv2d):
+    def __init__(self, *args, **kwargs):
+        super(DilateSharedConv2d, self).__init__(*args, **kwargs)
+
+    def forward(self, sources, rates):
+        outputs = []
+        for src, rate in zip(sources, rates):
+            pad = get_padding(self.kernel_size[0], rate)
+            y = F.conv2d(src, self.weight, self.bias, self.stride, pad, rate, self.groups)
+            outputs.append(y)
+        return outputs
+
+
 
 if hasattr(__file__, 'InPlaceABN'):
     class ConvBN(nn.Sequential):
@@ -41,6 +59,32 @@ else:
                 nn.BatchNorm2d(out_channels),
                 getattr(nn, activation)()
             )
+
+
+#TODO: make conv2 recurrent
+class Bottleneck(nn.Module):
+    def __init__(self, in_planes, planes, stride=1):
+        super(Bottleneck, self).__init__()
+        mid_planes = planes//4
+        self.conv1 = ConvBN(in_channels=in_planes, out_channels=mid_planes, kernel_size=1, padding=0, bias=False)
+        self.conv2 = ConvBN(in_channels=mid_planes, out_channels=mid_planes, kernel_size=3, stride=stride, padding=1,
+                               bias=False)
+        self.conv3 = ConvBN(in_channels=mid_planes, out_channels=planes, kernel_size=1, padding=0, bias=False)
+
+        self.downsample = nn.Sequential()
+        if stride != 1 or in_planes != planes:
+            self.downsample = ConvBN(in_channels=in_planes, out_channels=planes,
+                                     kernel_size=1, padding=0, stride=stride,
+                          bias=False, activation='Identity')
+
+
+    def forward(self, x):
+        out = self.conv1(x)
+        out = self.conv2(out)
+        out = self.conv3(out)
+        out += self.downsample(x)
+        out = F.relu(out)
+        return out
 
 
 
@@ -396,9 +440,9 @@ class FPN(nn.Module):
         self.nmaps = nmaps
 
         self.conv1 = SequenceWise(nn.Sequential(
-            ConvBN(cin, self.base, kernel_size=7, stride=2, padding=3),
-            ConvBN(self.base, self.base * 8, kernel_size=7, stride=2, padding=3),
-            ConvBN(self.base * 8, self.base * 8, kernel_size=7, stride=2, padding=3),
+            Bottleneck(cin, self.base, 2),
+            Bottleneck(self.base, self.base * 8, 2),
+            Bottleneck(self.base * 8, self.base * 8, 2)
             # nn.Upsample(size=(32, 32), mode='bilinear', align_corners=True),
             # ASPP(self.base * 8, self.base * 16)
         ))
