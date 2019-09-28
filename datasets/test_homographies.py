@@ -43,6 +43,62 @@ def viz_diff(diff):
     diff = (diff - diff.min()) / (diff.max() - diff.min())
     return diff
 
+def gradient(plane, k=3):
+    gx, gy = cv2.spatialGradient(plane, k, k)
+    return np.concatenate([gx[...,None], gy[...,None]], axis=2).astype(np.float32)/255.0
+
+def compute_timesurface(img, flow, diff):
+    if img.ndim == 3:
+        gxys = [gradient(img[...,i]) for i in range(3)]
+        gxy = np.maximum(np.maximum(gxys[0], gxys[1]), gxys[2])
+    else:
+        gxy = gradient(img)
+
+    if diff.ndim == 3:
+        diff = diff.mean(axis=2)
+
+    # normalize
+    gxy = (gxy - gxy.min()) / (gxy.max() - gxy.min())
+
+    gflow = (gxy * flow).sum(axis=2)
+    time = diff / (1e-7 + gflow)
+    return time
+
+
+def get_flow(homography, height, width):
+    x, y = np.meshgrid(np.linspace(-width/2, width/2, width), np.linspace(-height/2, height/2, height))
+    x, y = x[:, :, None], y[:, :, None]
+    o = np.ones_like(x)
+    xy1 = np.concatenate([x, y, o], axis=2)
+    xyn = xy1.reshape(height * width, 3)
+    xyn2 = xyn.dot(homography)
+    denom = (1e-7 + xyn2[:,2][:,None])
+    xy2 = xyn2[:,:2] / denom
+    xy2 = xy2.reshape(height, width, 2)
+    flow = xy2-xy1[...,:2]
+    flow[:,:,0] /= width
+    flow[:,:,1] /= height
+    return flow
+
+
+def filter_outliers(input_val, num_std=2):
+    val_range = num_std * input_val.std()
+    img_min = input_val.mean() - val_range
+    img_max = input_val.mean() + val_range
+    normed = np.clip(input_val, img_min, img_max)  # clamp
+    return normed
+
+def flow_viz(flow):
+    h, w, c = flow.shape
+    hsvImg = np.zeros((h, w, 3), dtype=np.uint8)
+    hsvImg[..., 1] = 255
+    _, ang = cv2.cartToPolar(flow[:,:,0], flow[:,:,1])
+    hsvImg[..., 0] = 0.5 * ang * 180 / np.pi
+    hsvImg[..., 1] = 255
+    hsvImg[..., 2] = 255
+    rgbImg = cv2.cvtColor(hsvImg, cv2.COLOR_HSV2BGR)
+    return rgbImg
+
 
 class PlanarVoyage(object):
     def __init__(self, height, width):
@@ -72,7 +128,7 @@ class PlanarVoyage(object):
         rvec2 = self.rvec_amp * np.sin(self.time * self.rvec_speed + self.rshift)
         tvec2 = self.tvec_amp * np.sin(self.time * self.tvec_speed + self.tshift)
         G_0to2 = generate_homography(self.rvec1, self.tvec1, rvec2, tvec2, self.nt, self.K, self.Kinv, self.d)
-
+        G_0to2 /= G_0to2[2,2]
         self.time += 1
         return G_0to2
 
@@ -110,17 +166,33 @@ def show_voyage(img, anns):
         diff = out - prev_img
 
         # Remove some events
-        diff *= np.random.rand(height, width, 3) < 0.9
-        diff = viz_diff(diff) + out_mask / 3
+
+
+        # flow = get_flow(G_0to2, height, width)
+        # flow = (flow-flow.min())/(flow.max()-flow.min())
+        # viz_flow = flow_viz(flow)
+        # cv2.imshow('flow', viz_flow)
+        # im = (prev_img*255).astype(np.uint8)
+        # ts = compute_timesurface(im, flow, diff).clip(0)
+        # ts = filter_outliers(ts)
+        # ts = (ts-ts.min())/(ts.max()-ts.min())
+        # cv2.imshow('ts', ts)
+
+
+
 
 
         # Salt-and-Pepper
         # diff += (np.random.rand(height, width)[:,:,None].repeat(3,2) < 0.00001)/2
         # diff -= (np.random.rand(height, width)[:,:,None].repeat(3,2) < 0.00001) / 2
 
+        diff *= np.random.rand(height, width, 3) < 0.9
+        diff = viz_diff(diff) + out_mask / 3
+
+
         cv2.imshow("diff", diff)
         cv2.imshow("out", out)
-        key = cv2.waitKey(5)
+        key = cv2.waitKey(0)
         if key == 27:
             break
         prev_img = out

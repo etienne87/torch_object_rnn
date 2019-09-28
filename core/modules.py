@@ -61,7 +61,7 @@ else:
             )
 
 
-#TODO: make conv2 recurrent
+
 class Bottleneck(nn.Module):
     def __init__(self, in_planes, planes, stride=1):
         super(Bottleneck, self).__init__()
@@ -339,6 +339,35 @@ class ConvRNN(nn.Module):
         self.timepool.reset()
 
 
+class BottleneckRNN(nn.Module):
+    def __init__(self, in_planes, planes, stride=1):
+        super(BottleneckRNN, self).__init__()
+        mid_planes = planes//4
+        self.conv1 = SequenceWise(
+            ConvBN(in_channels=in_planes, out_channels=mid_planes, kernel_size=1, padding=0, bias=False))
+
+        self.conv2 = ConvRNN(in_channels=mid_planes, out_channels=mid_planes, kernel_size=3, stride=stride, padding=1)
+        self.conv3 = SequenceWise(ConvBN(in_channels=mid_planes, out_channels=planes, kernel_size=1, padding=0, bias=False))
+
+        self.downsample = nn.Sequential()
+        if stride != 1 or in_planes != planes:
+            self.downsample = SequenceWise(ConvBN(in_channels=in_planes, out_channels=planes,
+                                     kernel_size=1, padding=0, stride=stride,
+                          bias=False, activation='Identity'))
+
+
+    def forward(self, x):
+        out = self.conv1(x)
+        out = self.conv2(out)
+        out = self.conv3(out)
+        out += self.downsample(x)
+        out = F.relu(out)
+        return out
+
+    def reset(self):
+        self.conv2.reset()
+
+
 class UpFuse(nn.Module):
     r"""
     Useful for UNet, upscale x1 and merge to x2 by concat or sum
@@ -377,6 +406,10 @@ class UNet(nn.Module):
 
         down = partial(ConvRNN, kernel_size=3, stride=2, padding=1, dilation=1)
         up  = partial(ConvRNN, kernel_size=3, stride=1, padding=1, dilation=1)
+
+        # down = partial(BottleneckRNN, stride=2)
+        # up = partial(BottleneckRNN, stride=1)
+
 
         for i in range(n_layers):
             channels = channels_per_layer[i]
@@ -443,8 +476,6 @@ class FPN(nn.Module):
             Bottleneck(cin, self.base, 2),
             Bottleneck(self.base, self.base * 8, 2),
             Bottleneck(self.base * 8, self.base * 8, 2)
-            # nn.Upsample(size=(32, 32), mode='bilinear', align_corners=True),
-            # ASPP(self.base * 8, self.base * 16)
         ))
 
         self.conv2 = UNet(self.base * 8,

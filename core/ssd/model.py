@@ -46,7 +46,7 @@ def get_box_params(sources, h, w):
 
 class SSD(nn.Module):
     def __init__(self, feature_extractor=FPN,
-                 num_classes=2, cin=2, height=300, width=300, act='softmax', shared=False):
+                 num_classes=2, cin=2, height=300, width=300, act='sigmoid', shared=True):
         super(SSD, self).__init__()
         self.num_classes = num_classes
         self.height, self.width = height, width
@@ -62,40 +62,52 @@ class SSD(nn.Module):
 
         self.aspect_ratios = []
         self.in_channels = [item.size(1) for item in sources]
-        self.num_anchors = [2 * len(self.aspect_ratios) + 2 for i in range(len(self.in_channels))]
+        self.num_anchors = 2 * len(self.aspect_ratios) + 2
 
         self.shared = shared
-        self.cls_layers = nn.ModuleList()
-        self.reg_layers = nn.ModuleList()
-        if self.shared:
-            self.reg_layers += [nn.Conv2d(self.in_channels[0], self.num_anchors[0] * 4,
-                                          kernel_size=3, padding=1, stride=1)]
-            self.cls_layers += [nn.Conv2d(self.in_channels[0], self.num_anchors[0] * self.num_classes,
-                                          kernel_size=3, padding=1, stride=1)]
-        else:
-            for i in range(len(self.in_channels)):
-                self.reg_layers += [nn.Conv2d(self.in_channels[i], self.num_anchors[i]*4,
-                                                   kernel_size=3, padding=1, stride=1)]
-                self.cls_layers += [nn.Conv2d(self.in_channels[i], self.num_anchors[i]*self.num_classes,
-                                                   kernel_size=3, padding=1, stride=1)]
-
-
         self.act = act
+
+        if self.shared:
+            self.loc_head = self._make_head(self.in_channels[0], self.num_anchors * 4)
+            self.cls_head = self._make_head(self.in_channels[0], self.num_anchors * self.num_classes)
+
+            torch.nn.init.normal_(self.loc_head[-1].weight, std=0.01)
+            torch.nn.init.constant_(self.loc_head[-1].bias, 0)
+
+            if self.act == 'softmax':
+                self.softmax_init(self.cls_head[-1])
+            else:
+                self.sigmoid_init(self.cls_head[-1])
+
+        else:
+            self.cls_layers = nn.ModuleList()
+            self.reg_layers = nn.ModuleList()
+
+            for i in range(len(self.in_channels)):
+                self.reg_layers += [nn.Conv2d(self.in_channels[i], self.num_anchors*4,
+                                                   kernel_size=3, padding=1, stride=1)]
+                self.cls_layers += [nn.Conv2d(self.in_channels[i], self.num_anchors*self.num_classes,
+                                                   kernel_size=3, padding=1, stride=1)]
+
+                for l in self.reg_layers:
+                    torch.nn.init.normal_(l.weight, std=0.01)
+                    torch.nn.init.constant_(l.bias, 0)
+
+                # Init for strong bias toward bg class for focal loss
+                if self.act == 'softmax':
+                    self.softmax_init(self.cls_layers[-1])
+                else:
+                    self.sigmoid_init(self.cls_layers[-1])
+
+
         self.box_coder = SSDBoxCoder(self, 0.4, 0.7)
         self.criterion = SSDLoss(num_classes=num_classes,
-                                 mode='ohem',
+                                 mode='focal',
                                  use_sigmoid=self.act=='sigmoid',
                                  use_iou=False)
 
-        for l in self.reg_layers:
-            torch.nn.init.normal_(l.weight, std=0.01)
-            torch.nn.init.constant_(l.bias, 0)
+        self._forward = [self._forward_unshared, self._forward_shared][shared]
 
-        # Init for strong bias toward bg class for focal loss
-        if self.act == 'softmax':
-            self.softmax_init()
-        else:
-            self.sigmoid_init()
 
     def resize(self, height, width):
         self.height, self.width = height, width
@@ -107,26 +119,38 @@ class SSD(nn.Module):
         self.box_coder.reset(self)
         self.extractor.reset()
 
-    def sigmoid_init(self):
+    def sigmoid_init(self, l):
         px = 0.99
         bias_bg = math.log(px / (1 - px))
-        for i, l in enumerate(self.cls_layers):
-            torch.nn.init.normal_(l.weight, std=0.01)
-            torch.nn.init.constant_(l.bias, 0)
-            l.bias.data = l.bias.data.reshape(self.num_anchors[i], self.num_classes)
-            l.bias.data[:, 0:] -= bias_bg
-            l.bias.data = l.bias.data.reshape(-1)
+        torch.nn.init.normal_(l.weight, std=0.01)
+        torch.nn.init.constant_(l.bias, 0)
+        l.bias.data = l.bias.data.reshape(self.num_anchors, self.num_classes)
+        l.bias.data[:, 0:] -= bias_bg
+        l.bias.data = l.bias.data.reshape(-1)
 
-    def softmax_init(self):
+    def softmax_init(self, l):
         px = 0.99
         K = self.num_classes - 1
         bias_bg = math.log(K * px / (1 - px))
-        for i, l in enumerate(self.cls_layers):
-            torch.nn.init.normal_(l.weight, std=0.01)
-            torch.nn.init.constant_(l.bias, 0)
-            l.bias.data = l.bias.data.reshape(self.num_anchors[i], self.num_classes)
-            l.bias.data[:, 0] += bias_bg
-            l.bias.data = l.bias.data.reshape(-1)
+        torch.nn.init.normal_(l.weight, std=0.01)
+        torch.nn.init.constant_(l.bias, 0)
+        l.bias.data = l.bias.data.reshape(self.num_anchors, self.num_classes)
+        l.bias.data[:, 0] += bias_bg
+        l.bias.data = l.bias.data.reshape(-1)
+
+    def _make_head(self, in_planes, out_planes):
+        layers = []
+        layers.append(nn.Conv2d(in_planes, 256, kernel_size=3, stride=1, padding=1))
+        layers.append(nn.ReLU(True))
+
+        for _ in range(0):
+            layers.append(nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1))
+            layers.append(nn.ReLU(True))
+
+        layers.append(nn.Conv2d(256, out_planes, kernel_size=3, stride=1, padding=1))
+
+        return nn.Sequential(*layers)
+
 
     def reset(self):
         self.extractor.reset()
@@ -138,17 +162,32 @@ class SSD(nn.Module):
         fg_score = scores[:, :, 1:].sum(dim=-1).mean().item()
         print('Average BG_Score: ', bg_score, 'Averag FG_Score: ', fg_score)
 
-    def forward(self, x):
+    def _forward_shared(self, xs):
         loc_preds = []
         cls_preds = []
-        xs = self.extractor(x)
         for i, x in enumerate(xs):
-            if self.shared:
-                loc_pred = self.reg_layers[0](x)
-                cls_pred = self.cls_layers[0](x)
+            loc_pred = self.loc_head(x)
+            cls_pred = self.cls_head(x)
+            loc_pred = loc_pred.permute(0, 2, 3, 1).contiguous()
+            cls_pred = cls_pred.permute(0, 2, 3, 1).contiguous()
+            loc_preds.append(loc_pred.view(loc_pred.size(0), -1, 4))
+            cls_preds.append(cls_pred.view(cls_pred.size(0), -1, self.num_classes))
+        loc_preds = torch.cat(loc_preds, 1)
+        cls_preds = torch.cat(cls_preds, 1)
+        if not self.training:
+            if self.act == 'softmax':
+                cls_preds = F.softmax(cls_preds, dim=2)
             else:
-                loc_pred = self.reg_layers[i](x)
-                cls_pred = self.cls_layers[i](x)
+                cls_preds = torch.sigmoid(cls_preds)
+
+        return loc_preds, cls_preds
+
+    def _forward_unshared(self, xs):
+        loc_preds = []
+        cls_preds = []
+        for i, x in enumerate(xs):
+            loc_pred = self.reg_layers[i](x)
+            cls_pred = self.cls_layers[i](x)
             loc_pred = loc_pred.permute(0, 2, 3, 1).contiguous()
             cls_pred = cls_pred.permute(0, 2, 3, 1).contiguous()
 
@@ -158,7 +197,6 @@ class SSD(nn.Module):
         loc_preds = torch.cat(loc_preds, 1)
         cls_preds = torch.cat(cls_preds, 1)
 
-        # self._print_average_scores_fg_bg(cls_preds)
         if not self.training:
             if self.act == 'softmax':
                 cls_preds = F.softmax(cls_preds, dim=2)
@@ -166,6 +204,10 @@ class SSD(nn.Module):
                 cls_preds = torch.sigmoid(cls_preds)
 
         return loc_preds, cls_preds
+
+    def forward(self, x):
+        xs = self.extractor(x)
+        return self._forward(xs)
 
     def compute_loss(self, x, targets):
         loc_preds, cls_preds = self(x)

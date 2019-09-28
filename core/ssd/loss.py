@@ -116,11 +116,8 @@ class SSDLoss(nn.Module):
             loc_loss = reduce(loc_loss, mode='sum')
         else:
             mask = pos.unsqueeze(2).expand_as(loc_preds)  # [N,#anchors,4]
-            #loc_loss = F.smooth_l1_loss(loc_preds[mask], loc_targets[mask], reduction='sum')
-            #found somewhere
-            regression_diff = torch.abs(loc_targets[mask] - loc_preds[mask])
-            loc_loss = self.where(torch.le(regression_diff, 1.0 / 9.0), 0.5 * 9.0 * torch.pow(regression_diff, 2),
-                                  regression_diff - 0.5 / 9.0).sum()
+            loc_loss = F.smooth_l1_loss(loc_preds[mask], loc_targets[mask], reduction='sum')
+
 
         #===============================================================
         # cls_loss
@@ -155,9 +152,8 @@ class SSDLoss(nn.Module):
         :return:
         """
         pred_scores_txn = batch_to_time(pred_scores, batchsize)
-        loss_asso = pred_scores_txn.std(dim=0)
-        import pdb
-        pdb.set_trace()
+
+        loss_asso = pred_scores_txn.sum(dim=-2).std(dim=0) #sum accross anchors per class
         return loss_asso
 
 
