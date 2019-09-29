@@ -1,13 +1,12 @@
-# torch_object_rnn
-ssd + convlstm
+# torch_det_rnn
+research for better temporal detectors
 
-some code is taken from from torch_cv: https://github.com/kuangliu/torchcv
+features:
 
-main differences:
-
-- rnn training (the moving_mnist dataloader is an example which streams temporally coherent batches
-- a simple simulator of moving digits to train the rnn detector
-- use of tensorboardX (install tf-nightly, tb-nightly, launch tensorboard --logdir runs)
+- a custom moving mnist
+- ap metric measure
+- recurrent retina-net
+- reports with tensorboard
 
 
 ![](data/moving_mnist_detection.gif)
