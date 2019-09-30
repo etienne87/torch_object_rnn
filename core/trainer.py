@@ -90,9 +90,10 @@ class DetTrainer(object):
                 dataset.reset()
                 self.net.reset()
 
-            start = time.time()
-            preds = self.net.get_boxes(inputs, score_thresh=0.1)
-            runtime_stats['network'] += time.time() - start
+            with torch.no_grad():
+                start = time.time()
+                preds = self.net.get_boxes(inputs, score_thresh=0.1)
+                runtime_stats['network'] += time.time() - start
 
             for t in range(len(targets)):
                 for i in range(len(targets[t])):
@@ -156,7 +157,8 @@ class DetTrainer(object):
             if args.cuda:
                 inputs = inputs.cuda()
 
-            targets = self.net.get_boxes(inputs)
+            with torch.no_grad():
+                targets = self.net.get_boxes(inputs)
 
             vis.draw_txn_boxes_on_images(images, targets, grid, self.make_image,
                                          period, time, ncols, dataset.labelmap)
