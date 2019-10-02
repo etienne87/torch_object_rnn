@@ -176,6 +176,7 @@ class DetTrainer(object):
         state = {
             'net': self.net.state_dict(),
             'epoch': epoch,
+            'optimizer': self.optimizer.state_dict()
         }
         ckpt_file = self.logdir + '/checkpoints/' + name + str(epoch) + '.pth'
         tbx.prepare_ckpt_dir(ckpt_file)

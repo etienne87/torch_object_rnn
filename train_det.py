@@ -80,13 +80,15 @@ def main():
         cudnn.benchmark = True
 
 
+
+    optimizer = optim.Adam(net.parameters(), lr=args.lr, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.0)
+
     start_epoch = 0  # start from epoch 0 or last epoch
     if args.resume:
         print('==> Resuming from checkpoint..')
-        start_epoch = opts.load_last_checkpoint(net, args.logdir)
+        start_epoch = opts.load_last_checkpoint(net, optimizer, args.logdir)
 
 
-    optimizer = optim.Adam(net.parameters(), lr=args.lr, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.0)
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.99)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min')
     trainer = DetTrainer(args.logdir, net, optimizer)

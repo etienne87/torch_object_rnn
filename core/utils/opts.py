@@ -19,13 +19,14 @@ def batch_to_time(x, n=32):
     x = x.view(time, n, *x.size()[1:])
     return x
 
-def load_last_checkpoint(net, logdir):
+def load_last_checkpoint(net, optimizer, logdir):
     checkpoints = glob.glob(logdir + '/checkpoints/' + '*.pth')
     checkpoints = sorted(checkpoints, key=lambda x: int(x.split('checkpoint#')[1].split('.pth')[0]))
     last_checkpoint = checkpoints[-1]
     checkpoint = torch.load(last_checkpoint)
     net.load_state_dict(checkpoint['net'])
     start_epoch = checkpoint['epoch']
+    optimizer.load_state_dict(checkpoint['optimizer'])
     return start_epoch
 
 
