@@ -67,9 +67,15 @@ class SSD(nn.Module):
         self.shared = shared
         self.act = act
 
+        self.use_embedding_loss = True
+
         if self.shared:
+            self.embedding_dims = 32
+
             self.loc_head = self._make_head(self.in_channels[0], self.num_anchors * 4)
             self.cls_head = self._make_head(self.in_channels[0], self.num_anchors * self.num_classes)
+            if self.use_embedding_loss:
+                self.emb_head = self._make_head(self.in_channels[0], self.num_anchors * self.embedding_dims)
 
             torch.nn.init.normal_(self.loc_head[-1].weight, std=0.01)
             torch.nn.init.constant_(self.loc_head[-1].bias, 0)
@@ -98,7 +104,6 @@ class SSD(nn.Module):
                     self.softmax_init(self.cls_layers[-1])
                 else:
                     self.sigmoid_init(self.cls_layers[-1])
-
 
         self.box_coder = SSDBoxCoder(self, 0.4, 0.7)
         self.criterion = SSDLoss(num_classes=num_classes,
@@ -162,25 +167,31 @@ class SSD(nn.Module):
         fg_score = scores[:, :, 1:].sum(dim=-1).mean().item()
         print('Average BG_Score: ', bg_score, 'Averag FG_Score: ', fg_score)
 
+    def _apply_head(self, layer, xs, ndims):
+        out = []
+        for x in xs:
+            y = layer(x).permute(0, 2, 3, 1).contiguous()
+            y = y.view(y.size(0), -1, ndims)
+            out.append(y)
+        out = torch.cat(out, 1)
+        return out
+
     def _forward_shared(self, xs):
-        loc_preds = []
-        cls_preds = []
-        for i, x in enumerate(xs):
-            loc_pred = self.loc_head(x)
-            cls_pred = self.cls_head(x)
-            loc_pred = loc_pred.permute(0, 2, 3, 1).contiguous()
-            cls_pred = cls_pred.permute(0, 2, 3, 1).contiguous()
-            loc_preds.append(loc_pred.view(loc_pred.size(0), -1, 4))
-            cls_preds.append(cls_pred.view(cls_pred.size(0), -1, self.num_classes))
-        loc_preds = torch.cat(loc_preds, 1)
-        cls_preds = torch.cat(cls_preds, 1)
+        loc_preds = self._apply_head(self.loc_head, xs, 4)
+        cls_preds = self._apply_head(self.cls_head, xs, self.num_classes)
+
         if not self.training:
             if self.act == 'softmax':
                 cls_preds = F.softmax(cls_preds, dim=2)
             else:
                 cls_preds = torch.sigmoid(cls_preds)
 
-        return loc_preds, cls_preds
+        out_dic = {'loc':loc_preds, 'cls': cls_preds}
+
+        if self.use_embedding_loss:
+            out_dic['emb'] = self._apply_head(self.emb_head, xs, self.embedding_dims)
+
+        return out_dic
 
     def _forward_unshared(self, xs):
         loc_preds = []
@@ -203,27 +214,41 @@ class SSD(nn.Module):
             else:
                 cls_preds = torch.sigmoid(cls_preds)
 
-        return loc_preds, cls_preds
+        return {'loc':loc_preds, 'cls': cls_preds}
 
     def forward(self, x):
         xs = self.extractor(x)
         return self._forward(xs)
 
     def compute_loss(self, x, targets):
-        loc_preds, cls_preds = self(x)
+        out_dic = self(x)
         loc_targets, cls_targets = self.box_coder.encode_txn_boxes(targets)
 
+        loc_preds, cls_preds = out_dic['loc'], out_dic['cls']
         if self.criterion.use_iou:
-            loc_preds = self.box_coder.decode_loc(loc_preds)
-            loc_targets = self.box_coder.decode_loc(loc_targets)
+            cls_preds = self.decode_loc(loc_preds)
+            cls_targets = self.decode_loc(cls_targets)
+
+        if cls_targets.dim() > 1:
+            cls_targets, ids = torch.split(cls_targets, 1, dim=-1)
+            cls_targets = cls_targets.squeeze()
+            ids = ids.squeeze()
 
         loc_loss, cls_loss = self.criterion(loc_preds, loc_targets, cls_preds, cls_targets)
 
         loss = loc_loss + cls_loss
-        return {'total':loss, 'loc': loc_loss, 'cls_loss': cls_loss}
+
+        loss_dict = {'total':loss, 'loc': loc_loss, 'cls_loss': cls_loss}
+
+        if ids is not None and 'emb' in out_dic:
+            loss_dict['total'] += self.criterion._embeddings_loss(out_dic['emb'], ids, cls_targets, x.size(1))
+
+
+        return loss_dict
 
     def get_boxes(self, x, score_thresh=0.4):
-        loc_preds, cls_preds = self(x)
+        out = self(x)
+        loc_preds, cls_preds = out['loc'], out['cls']
         targets = self.box_coder.decode_txn_boxes(loc_preds, cls_preds, x.size(1), score_thresh=score_thresh)
         return targets
 

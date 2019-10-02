@@ -152,19 +152,47 @@ class SSDLoss(nn.Module):
         :return:
         """
         pred_scores_txn = batch_to_time(pred_scores, batchsize)
-
         loss_asso = pred_scores_txn.sum(dim=-2).std(dim=0) #sum accross anchors per class
         return loss_asso
 
 
-    def _asso_embeddings_loss(self, pred_embeddings, ids, tubelet_ids, batchsize):
+    def _embeddings_loss(self, emb, ids, cls_targets, batchsize):
         """
-        In Time, promote similarity between embeddings of same tubelet
-        :param pred_embeddings:
-        :param ids:
+        In Time, promote similarity between targets with same id
+
+        :param pred_embeddings: [TN, #anchors, D]
+        :param ids: [TN, #nanchors]
         :return:
         """
-        pass
+        pos = (cls_targets > 0).view(-1)
+        emb = emb.view(-1, emb.size(-1))[pos]
+
+        ids = batch_to_time(ids, batchsize)
+        offsets = 100 * torch.arange(batchsize)[None,:,None].to(ids.device)
+        ids = ids + offsets
+        ids = time_to_batch(ids)[0]
+        ids = ids.view(-1)[pos]
+
+
+
+        #TODO:
+        #1. do this per frame not globally (benchmark this)
+        #2. weight id with iou loss = iou * id * (1-cos_mat) + (1-id) * max(0, cos_mat - margin)
+        # We do cos(x1, x2) between every vectors
+        # When they have same id = we use loss as 1 - cos (penalize for being far)
+        # When they have not same id = max(0, cos - margin) (penalize for not being close)
+        y = (ids[:, None] == ids[None, :])
+        norms = torch.norm(emb, dim=1)
+        norm_matrix = norms[:,None] * norms[None, :]
+        dot_matrix = torch.mm(emb, emb.t())
+        cos_matrix = dot_matrix / norm_matrix
+
+        margin = 0.5
+        loss = torch.where(y, 1 - cos_matrix, F.relu(cos_matrix - margin))
+
+
+        return loss.mean()
+
 
     def _iou_loss(self, pred, target):
         """

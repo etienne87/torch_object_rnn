@@ -92,10 +92,6 @@ def main():
     trainer = DetTrainer(args.logdir, net, optimizer)
 
     for epoch in range(start_epoch, args.epochs):
-
-
-
-
         trainer.train(epoch, dataloader, args)
         map = trainer.evaluate(epoch, test_dataset, args)
         trainer.test(epoch, test_dataset, nrows, args)
