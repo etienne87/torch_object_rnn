@@ -87,8 +87,6 @@ class Bottleneck(nn.Module):
         return out
 
 
-
-
 class ASPP(nn.Module):
     def __init__(self, in_channels, out_channels, atrous_rates=[3, 6, 12, 18]):
         super(ASPP, self).__init__()
@@ -131,6 +129,7 @@ class SequenceWise(nn.Module):
         tmpstr += self.module.__repr__()
         tmpstr += ')'
         return tmpstr
+
 
 class RNNCell(nn.Module):
     """
@@ -310,7 +309,7 @@ class ConvRNN(nn.Module):
     """
     def __init__(self, in_channels, out_channels,
                  kernel_size=5, stride=1, padding=2, dilation=1,
-                 cell='gru', hard=False):
+                 cell='lstm', hard=False):
         super(ConvRNN, self).__init__()
 
         self.in_channels = in_channels
@@ -339,219 +338,3 @@ class ConvRNN(nn.Module):
         self.timepool.reset()
 
 
-class BottleneckRNN(nn.Module):
-    def __init__(self, in_planes, planes, stride=1):
-        super(BottleneckRNN, self).__init__()
-        mid_planes = planes//4
-        self.conv1 = SequenceWise(
-            ConvBN(in_channels=in_planes, out_channels=mid_planes, kernel_size=1, padding=0, bias=False))
-
-        self.conv2 = ConvRNN(in_channels=mid_planes, out_channels=mid_planes, kernel_size=3, stride=stride, padding=1)
-        self.conv3 = SequenceWise(ConvBN(in_channels=mid_planes, out_channels=planes, kernel_size=1, padding=0, bias=False))
-
-        self.downsample = nn.Sequential()
-        if stride != 1 or in_planes != planes:
-            self.downsample = SequenceWise(ConvBN(in_channels=in_planes, out_channels=planes,
-                                     kernel_size=1, padding=0, stride=stride,
-                          bias=False, activation='Identity'))
-
-
-    def forward(self, x):
-        out = self.conv1(x)
-        out = self.conv2(out)
-        out = self.conv3(out)
-        out += self.downsample(x)
-        out = F.relu(out)
-        return out
-
-    def reset(self):
-        self.conv2.reset()
-
-
-class UpFuse(nn.Module):
-    r"""
-    Useful for UNet, upscale x1 and merge to x2 by concat or sum
-    """
-    def __init__(self, scale_factor=2, mode='sum'):
-        super(UpFuse, self).__init__()
-        self.mode = mode
-        self.scale_factor = scale_factor
-
-    def forward(self, x1, x2):
-        x1, n = time_to_batch(x1)
-        x1 = F.interpolate(x1, scale_factor=self.scale_factor, mode='nearest')
-        x1 = batch_to_time(x1, n)
-        if self.mode == 'cat':
-            return torch.cat([x1, x2], dim=1)
-        else:
-            return x1 + x2
-
-
-class UNet(nn.Module):
-    def __init__(self, in_channels, out_channels, channels_per_layer,
-                        mode='sum', scale_factor=2):
-        super(UNet, self).__init__()
-
-        base = channels_per_layer[0]
-        self.inc = SequenceWise(ConvBN(in_channels, base))
-
-        self.downs = []
-        self.ups = []
-
-        self.mode = mode
-        self.channels = [channels_per_layer[0]]
-        self.upfuse = UpFuse(scale_factor=scale_factor, mode=mode)
-
-        n_layers = len(channels_per_layer)
-
-        down = partial(ConvRNN, kernel_size=3, stride=2, padding=1, dilation=1)
-        up  = partial(ConvRNN, kernel_size=3, stride=1, padding=1, dilation=1)
-
-        # down = partial(BottleneckRNN, stride=2)
-        # up = partial(BottleneckRNN, stride=1)
-
-
-        for i in range(n_layers):
-            channels = channels_per_layer[i]
-            self.channels.append(channels)
-            self.downs.append(down(self.channels[-2], self.channels[-1]))
-
-        for i in range(n_layers):
-            in_ch, out_ch = self.channels[-i-1], self.channels[-i-2]
-            self.ups.append( up(in_ch, out_ch) )
-
-        self.outc = SequenceWise(nn.Conv2d(out_ch, out_channels, 1))
-
-        self.downs = nn.ModuleList(self.downs)
-        self.ups = nn.ModuleList(self.ups)
-
-    def forward(self, x):
-        encoded = [self.inc(x)]
-
-        for down_layer in self.downs:
-            encoded.append(down_layer(encoded[-1]))
-
-        x = encoded.pop()
-
-        self.decoded = []
-        for up_layer in self.ups:
-            x = up_layer(x)
-            x = self.upfuse(x, encoded.pop())
-            self.decoded.append(x)
-
-        x = self.outc(x)
-        self.decoded.append(x)
-
-        return x
-
-    def reset(self):
-        for module in self.downs:
-            if hasattr(module, "reset"):
-                module.reset()
-
-        for module in self.ups:
-            if hasattr(module, "reset"):
-                module.reset()
-
-    def __repr__(self):
-        repr = ''
-        for i, module in enumerate(self.downs):
-            repr += 'down#'+str(i)+': '+str(module.in_channels)+";"+str(module.out_channels)+'\n'
-        for i, module in enumerate(self.ups):
-            repr += 'up#'+str(i)+': '+str(module.in_channels)+";"+str(module.out_channels)+'\n'
-        return repr
-
-
-
-
-class FPN(nn.Module):
-    def __init__(self, cin=1, cout=128, nmaps=3):
-        super(FPN, self).__init__()
-        self.cin = cin
-        self.base = 8
-        self.cout = cout
-        self.nmaps = nmaps
-
-        self.conv1 = SequenceWise(nn.Sequential(
-            Bottleneck(cin, self.base, 2),
-            Bottleneck(self.base, self.base * 8, 2),
-            Bottleneck(self.base * 8, self.base * 8, 2)
-        ))
-
-        self.conv2 = UNet(self.base * 8,
-                               self.cout,
-                               channels_per_layer=[self.base * 16, self.base * 16, self.base * 16])
-
-    def forward(self, x):
-        x1 = self.conv1(x)
-        self.conv2(x1)
-
-        sources = [time_to_batch(item)[0] for item in self.conv2.decoded][::-1]
-
-        return sources
-
-    def reset(self):
-        for name, module in self._modules.items():
-            if hasattr(module, "reset"):
-                module.reset()
-
-
-class Trident(nn.Module):
-    def __init__(self, cin=1):
-        super(Trident, self).__init__()
-        self.cin = cin
-        base = 8
-        self.conv1 = SequenceWise(nn.Sequential(
-                ConvBN(cin, base, kernel_size=7, stride=2, padding=3),
-                ConvBN(base, base * 4, kernel_size=7, stride=2, padding=3),
-                ConvBN(base * 4, base * 8, kernel_size=7, stride=2, padding=3)
-        ))
-
-        self.conv3 = ConvRNN(base * 8, base * 8, kernel_size=7, stride=2, padding=3)
-        self.conv4 = ConvRNN(base * 8, base * 16, kernel_size=7, stride=1, dilation=1, padding=3)
-        self.conv5 = ConvRNN(base * 16, base * 16, kernel_size=7, stride=1, dilation=2, padding=3)
-        self.conv6 = ConvRNN(base * 16, base * 16, kernel_size=7, stride=1, dilation=3, padding=3 * 2)
-
-        self.end_point_channels = [self.conv3.out_channels,  # 8
-                                   self.conv4.out_channels,  # 16
-                                   self.conv5.out_channels,  # 32
-                                   self.conv6.out_channels]  # 64
-
-    def forward(self, x):
-        sources = list()
-
-        x2 = self.conv1(x)
-
-        x3 = self.conv3(x2)
-        x4 = self.conv4(x3)
-        x5 = self.conv5(x4)
-        x6 = self.conv6(x5)
-
-        sources = [time_to_batch(item)[0] for item in [x3, x4, x5, x6]]
-
-        return sources
-
-    def reset(self):
-        for name, module in self._modules.items():
-            if isinstance(module, ConvRNN):
-                module.timepool.reset()
-
-
-
-
-
-
-
-if __name__ == '__main__':
-    t, n, c, h, w = 10, 3, 3, 128, 128
-    x = torch.rand(t, n, c, h, w)
-    # net = UNet(c, 128, channels_per_layer=[128, 128, 128])
-    # out = net(x)
-
-    net = FPN(cin=c, cout=128, nmaps=3)
-    out = net(x)
-
-    # im = torch.rand(n, c, h, w)
-    # net = CosineConv2d(c, 16, kernel_size=3, stride=1, padding=1)
-    # y = net.forward(im)
-    # print(y.mean(), y.std())
