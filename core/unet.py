@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from core.utils.opts import time_to_batch, batch_to_time
-from core.modules import ConvBN, SequenceWise, ConvRNN
+from core.modules import ConvBN, SequenceWise, ConvRNN, Bottleneck
 from functools import partial
 
 
@@ -18,12 +18,16 @@ class UNet(nn.Module):
         :param in_channels:
         :param channel_list: odd list of channels for all layers
         :param mode: 'sum' or 'cat'
-        :param scale_factor: multiple of 2
+        :param stride: multiple of 2
+        :param down_func: down function
+        :param up_func: up function
+        :param skip_func: skip function
         """
         super(UNet, self).__init__()
 
         down = partial(down_func, kernel_size=3, stride=stride, padding=1, dilation=1)
         up = partial(up_func, kernel_size=3, stride=1, padding=1, dilation=1)
+        # up = lambda x, y: SequenceWise(Bottleneck(x, y))
         skip = lambda x, y: SequenceWise(nn.Conv2d(x, y, 1, 1, 0))
 
         self.downs = nn.ModuleList()
@@ -153,7 +157,8 @@ class LegacyUNet(nn.Module):
         n_layers = len(channels_per_layer)
 
         down = partial(ConvRNN, kernel_size=3, stride=2, padding=1, dilation=1)
-        up  = partial(ConvRNN, kernel_size=3, stride=1, padding=1, dilation=1)
+        # up  = partial(ConvRNN, kernel_size=3, stride=1, padding=1, dilation=1)
+        up = lambda x,y: SequenceWise(Bottleneck(x,y))
 
         for i in range(n_layers):
             channels = channels_per_layer[i]

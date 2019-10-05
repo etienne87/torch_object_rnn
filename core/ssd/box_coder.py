@@ -8,6 +8,47 @@ from core.utils.box import box_soft_nms, box_nms, change_box_order, assign_prior
 from core.utils import opts
 
 
+
+def get_box_params_variable_size(sources, h, w):
+    image_size = float(min(h, w))
+    steps = []
+    box_sizes = []
+    fm_sizes = []
+    s_min, s_max = 0.1, 0.9
+    m = float(len(sources))
+    for k, src in enumerate(sources):
+        # featuremap size
+        fm_sizes.append((src.size(2), src.size(3)))
+        # step is ratio image_size / featuremap_size
+        step_y, step_x = math.floor(float(h) / src.size(2)), math.floor(float(w) / src.size(3))
+        steps.append((step_y, step_x))
+        # compute scale
+        s_k = s_min + (s_max - s_min) * k / m
+        # box_size is scale * image_size
+        box_sizes.append(math.floor(s_k * image_size))
+        print("box size: ", box_sizes[-1])
+    s_k = s_min + (s_max - s_min)
+    box_sizes.append(s_k * image_size)
+    return fm_sizes, steps, box_sizes
+
+
+def get_box_params_fixed_size(sources, h, w):
+    steps = []
+    box_sizes = []
+    fm_sizes = []
+    for k, src in enumerate(sources):
+        # featuremap size
+        fm_sizes.append((src.size(2), src.size(3)))
+        # step is ratio image_size / featuremap_size
+        step_y, step_x = math.floor(float(h) / src.size(2)), math.floor(float(w) / src.size(3))
+        steps.append((step_y, step_x))
+        # compute scale
+        box_sizes.append(24 * 2**k)
+        print("box size: ", box_sizes[-1])
+    box_sizes.append(24 * 2**k)
+    return fm_sizes, steps, box_sizes
+
+
 class SSDBoxCoder(torch.nn.Module):
     def __init__(self, ssd_model, fg_iou_threshold=0.6, bg_iou_threshold=0.4, soft_nms=False):
         super(SSDBoxCoder, self).__init__()

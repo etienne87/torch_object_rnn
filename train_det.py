@@ -9,8 +9,6 @@ import torch.optim as optim
 import torch.backends.cudnn as cudnn
 
 from core.ssd.model import SSD
-# from core.ctdet.model import CenterNet
-# from core.rpn import WrapRPN
 from core.trainer import DetTrainer
 from core.utils import opts
 
@@ -72,13 +70,10 @@ def main():
     # Model
     print('==> Building model..')
     net = SSD(num_classes=classes, cin=cin, height=height, width=width, act="softmax")
-    # net = CenterNet(num_classes=classes, cin=cin, height=height, width=width)
-    # net = WrapRPN(num_classes=classes, in_channels=cin, height=height, width=width)
 
     if args.cuda:
         net.cuda()
         cudnn.benchmark = True
-
 
 
     optimizer = optim.Adam(net.parameters(), lr=args.lr, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.0)

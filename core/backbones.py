@@ -5,7 +5,7 @@ from __future__ import print_function
 import torch
 import torch.nn as nn
 from core.utils.opts import time_to_batch, batch_to_time
-from core.modules import ConvBN, SequenceWise, ConvRNN, Bottleneck
+from core.modules import ConvBN, SequenceWise, ConvRNN, Bottleneck, ASPP
 from core.unet import UNet
 
 
@@ -13,7 +13,7 @@ from core.unet import UNet
 
 
 class FPN(nn.Module):
-    def __init__(self, cin=1, cout=256, nmaps=3):
+    def __init__(self, cin=1, cout=128, nmaps=3):
         super(FPN, self).__init__()
         self.cin = cin
         self.base = 8
@@ -26,7 +26,7 @@ class FPN(nn.Module):
             Bottleneck(self.base * 8, self.base * 16, 2)
         ))
 
-        self.conv2 = UNet([self.base * 16, self.base * 16, self.base * 16, cout, cout, cout, cout], mode='sum')
+        self.conv2 = UNet([self.base * 16, self.base * 16, self.base * 32, cout, cout, cout, cout], mode='sum')
 
     def forward(self, x):
         x1 = self.conv1(x)

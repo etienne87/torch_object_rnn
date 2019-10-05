@@ -134,13 +134,15 @@ class SequenceWise(nn.Module):
 class RNNCell(nn.Module):
     """
     base class that has memory, each class with hidden state has to derive from basernn
+    TODO: add the saturation cost as a hook!!
+
     """
 
     def __init__(self, hard):
         super(RNNCell, self).__init__()
         self.saturation_cost = 0
-        self.saturation_limit = 0.9
-        self.saturation_weight = 1e-4
+        self.saturation_limit = 0.95
+        self.saturation_weight = 1e-1
         self.set_gates(hard)
 
     def set_gates(self, hard):
@@ -165,7 +167,8 @@ class RNNCell(nn.Module):
     def add_saturation_cost(self, var):
         """Calculate saturation cost."""
         sat_loss = F.relu(torch.abs(var) - self.saturation_limit)
-        cost = sat_loss.sum()
+        cost = sat_loss.mean()
+
         cost *= self.saturation_weight
         self.saturation_cost += cost
 

@@ -39,7 +39,7 @@ def single_frame_display(im):
     return make_single_channel_display(im[0], -1, 1)
 
 
-def draw_bboxes(img, bboxes, thickness=1, colormap=cv2.COLORMAP_HSV, colordefault=None):
+def draw_bboxes(img, bboxes, thickness=2, colormap=cv2.COLORMAP_HSV, colordefault=None):
     colors = cv2.applyColorMap(np.arange(0, 255).astype(np.uint8), colormap)
 
     colors = [tuple(*item) for item in colors.tolist()]

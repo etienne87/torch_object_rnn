@@ -169,7 +169,6 @@ if __name__ == '__main__':
         #     seq_boxes = [item[i] for item in y]
         #     viz_batch(video, seq_boxes)
 
-        time.sleep(0.5)
 
         start = time.time()
         print(start-end, ' time showing')
