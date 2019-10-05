@@ -9,6 +9,7 @@ import torch.nn.functional as F
 from core.ssd.box_coder import SSDBoxCoder
 from core.ssd.loss import SSDLoss
 from core.backbones import FPN
+from core.modules import ConvRNN
 import math
 
 
@@ -246,13 +247,18 @@ class SSD(nn.Module):
 
         loc_loss, cls_loss = self.criterion(loc_preds, loc_targets, cls_preds, cls_targets)
 
-        loss = loc_loss + cls_loss
+        loss_dict = {'loc': loc_loss, 'cls_loss': cls_loss}
 
-        loss_dict = {'total':loss, 'loc': loc_loss, 'cls_loss': cls_loss}
-
-        if ids is not None and 'emb' in out_dic:
-            loss_dict['total'] += self.criterion._embeddings_loss(out_dic['emb'], ids, cls_targets, x.size(1))
-
+        # sat_loss = 0
+        # for module in self.extractor.conv2.downs:
+        #     if isinstance(module, ConvRNN):
+        #         sat_loss += module.timepool.saturation_cost
+        # for module in self.extractor.conv2.ups:
+        #     if isinstance(module, ConvRNN):
+        #         sat_loss += module.timepool.saturation_cost
+        # loss_dict['sat_loss'] = sat_loss
+        # if ids is not None and 'emb' in out_dic:
+        #     loss_dict['emb'] = self.criterion._embeddings_loss(out_dic['emb'], ids, cls_targets, x.size(1))
 
         return loss_dict
 
