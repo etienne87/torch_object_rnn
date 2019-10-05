@@ -7,8 +7,6 @@ import cv2
 
 
 def boxarray_to_boxes(boxes, labels, labelmap):
-    boxes = boxes.cpu().numpy().astype(np.int32)
-    labels = labels.cpu().numpy().astype(np.int32)
     bboxes = []
     for label, box in zip(labels, boxes):
         class_name = labelmap[label]
@@ -41,15 +39,15 @@ def single_frame_display(im):
     return make_single_channel_display(im[0], -1, 1)
 
 
-def draw_bboxes(img, bboxes, colordefault=None):
-    colors = cv2.applyColorMap(np.arange(0, 255).astype(np.uint8), cv2.COLORMAP_HSV)
+def draw_bboxes(img, bboxes, thickness=1, colormap=cv2.COLORMAP_HSV, colordefault=None):
+    colors = cv2.applyColorMap(np.arange(0, 255).astype(np.uint8), colormap)
 
     colors = [tuple(*item) for item in colors.tolist()]
     for bbox in bboxes:
         class_name, class_id, pt1, pt2, _, _, _ = bbox
         center = (pt1[0] + pt2[0]) // 2, (pt1[1] + pt2[1]) // 2
-        color = colors[(class_id * 20)%255] if colordefault is None else colordefault
-        cv2.rectangle(img, pt1, pt2, color, 2)
+        color = colors[(class_id * 40)%255] if colordefault is None else colordefault
+        cv2.rectangle(img, pt1, pt2, color, thickness)
         cv2.putText(img, class_name, (center[0], max(0, pt2[1] - 1) ), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color)
     return img
 
@@ -79,6 +77,8 @@ def draw_txn_boxes_on_images(images, targets, grid, make_img_fun, period, time, 
             img = make_img_fun(images[t, i])
             boxes, labels, scores = targets[t][i]
             if boxes is not None:
+                boxes = boxes.cpu().numpy().astype(np.int32)
+                labels = labels.cpu().numpy().astype(np.int32)
                 bboxes = boxarray_to_boxes(boxes, labels, labelmap)
                 img = draw_bboxes(img, bboxes)
             grid[t + period * time, y, x] = img

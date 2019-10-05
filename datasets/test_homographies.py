@@ -6,168 +6,115 @@ import os
 import numpy as np
 import cv2
 from pycocotools.coco import COCO
+from core.utils import vis
+from core.utils import image as imutil
+from functools import partial
 
 
-
-def moving_average(item, alpha):
-    return (1-alpha)*item + alpha * np.random.randn(*item.shape)
-
-
-def computeC2MC1(R_0to1, tvec_0to1, R_0to2, tvec_0to2):
-    R_1to2 = R_0to2.dot(R_0to1.T)
-    tvec_1to2 = R_0to2.dot(-R_0to1.T.dot(tvec_0to1)) + tvec_0to2
-    return R_1to2, tvec_1to2
-
-def generate_homography(rvec1, tvec1, rvec2, tvec2, nt, K, Kinv, d):
-    R_0to1 = cv2.Rodrigues(rvec1)[0].transpose()
-    tvec_0to1 = np.dot(-R_0to1, tvec1.reshape(3, 1))
-
-    R_0to2 = cv2.Rodrigues(rvec2)[0].transpose()
-    tvec_0to2 = np.dot(-R_0to2, tvec2.reshape(3, 1))
-
-    #view 0to2
-    nt1 = R_0to1.dot(nt.T).reshape(1, 3)
-    H_0to2 = R_0to2 - np.dot(tvec_0to2.reshape(3, 1), nt1) / d
-    G_0to2 = np.dot(K, np.dot(H_0to2, Kinv))
+def mask_instance_to_boxes(gt, anns, class_lookup):
+    boxes = []
+    labels = []
+    for i in range(len(anns)):
+        y, x = np.where(gt == (i + 1))
+        if len(x) == 0 or len(y) == 0:
+            continue
+        x1, x2, y1, y2 = np.min(x), np.max(x), np.min(y), np.max(y)
+        labels.append(class_lookup[anns[i]['category_id']])
+        boxes.append(np.array([[x1, y1, x2, y2]]))
+    if len(boxes) == 0:
+        return np.array([[]]), []
+    boxes = np.concatenate(boxes, axis=0).astype(np.int32)
+    return boxes, labels
 
 
-    #view 1to2
-    # R_1to2, tvec_1to2 = computeC2MC1(R_0to1, tvec_0to1, R_0to2, tvec_0to2)
-    # H_1to2 = R_1to2 - np.dot(tvec_1to2.reshape(3, 1), nt1) / d
-    # G_1to2 = np.dot(K, np.dot(H_1to2, Kinv))
-    return G_0to2
+def wrap_boxes(boxes, labels, height, width):
+    allbox = [boxes]
+    alllbl = [labels]
+    for y in [-height, 0, height]:
+        for x in [-width, 0, width]:
+            if x == 0 and y == 0:
+                continue
+            shift = boxes.copy()
+            shift[:, [0, 2]] += x
+            shift[:, [1, 3]] += y
+            allbox.append(shift)
+            alllbl.append(labels)
+    return np.concatenate(allbox, 0), np.concatenate(alllbl, 0)
 
 
-def viz_diff(diff):
-    diff = diff.clip(diff.mean() - 3 * diff.std(), diff.mean() + 3 * diff.std())
-    diff = (diff - diff.min()) / (diff.max() - diff.min())
-    return diff
-
-def gradient(plane, k=3):
-    gx, gy = cv2.spatialGradient(plane, k, k)
-    return np.concatenate([gx[...,None], gy[...,None]], axis=2).astype(np.float32)/255.0
-
-def compute_timesurface(img, flow, diff):
-    if img.ndim == 3:
-        gxys = [gradient(img[...,i]) for i in range(3)]
-        gxy = np.maximum(np.maximum(gxys[0], gxys[1]), gxys[2])
-    else:
-        gxy = gradient(img)
-
-    if diff.ndim == 3:
-        diff = diff.mean(axis=2)
-
-    # normalize
-    gxy = (gxy - gxy.min()) / (gxy.max() - gxy.min())
-
-    gflow = (gxy * flow).sum(axis=2)
-    time = diff / (1e-7 + gflow)
-    return time
+def boxarray_to_boxes(boxes):
+    bboxes = []
+    for i, box in enumerate(boxes):
+        pt1 = (box[0], box[1])
+        pt2 = (box[2], box[3])
+        bb = ('', i, pt1, pt2, None, None, None)
+        bboxes.append(bb)
+    return bboxes
 
 
-def get_flow(homography, height, width):
-    x, y = np.meshgrid(np.linspace(-width/2, width/2, width), np.linspace(-height/2, height/2, height))
-    x, y = x[:, :, None], y[:, :, None]
-    o = np.ones_like(x)
-    xy1 = np.concatenate([x, y, o], axis=2)
-    xyn = xy1.reshape(height * width, 3)
-    xyn2 = xyn.dot(homography)
-    denom = (1e-7 + xyn2[:,2][:,None])
-    xy2 = xyn2[:,:2] / denom
-    xy2 = xy2.reshape(height, width, 2)
-    flow = xy2-xy1[...,:2]
-    flow[:,:,0] /= width
-    flow[:,:,1] /= height
-    return flow
+def clamp_boxes(boxes, height, width):
+    boxes[:, [0, 2]] = np.maximum(np.minimum(boxes[:, [0, 2]], width), 0)
+    boxes[:, [1, 3]] = np.maximum(np.minimum(boxes[:, [1, 3]], height), 0)
+    return boxes
+
+def discard_too_small(boxes, labels, min_size=30):
+    w = boxes[:, 2] - boxes[:, 0]
+    h = boxes[:, 3] - boxes[:, 1]
+    ids = np.where((w > min_size)*(h > min_size))
+    return boxes[ids], labels[ids]
 
 
-def filter_outliers(input_val, num_std=2):
-    val_range = num_std * input_val.std()
-    img_min = input_val.mean() - val_range
-    img_max = input_val.mean() + val_range
-    normed = np.clip(input_val, img_min, img_max)  # clamp
-    return normed
-
-def flow_viz(flow):
-    h, w, c = flow.shape
-    hsvImg = np.zeros((h, w, 3), dtype=np.uint8)
-    hsvImg[..., 1] = 255
-    _, ang = cv2.cartToPolar(flow[:,:,0], flow[:,:,1])
-    hsvImg[..., 0] = 0.5 * ang * 180 / np.pi
-    hsvImg[..., 1] = 255
-    hsvImg[..., 2] = 255
-    rgbImg = cv2.cvtColor(hsvImg, cv2.COLOR_HSV2BGR)
-    return rgbImg
-
-
-class PlanarVoyage(object):
-    def __init__(self, height, width):
-        self.K = np.array([[width / 2, 0, width / 2],
-                      [0, width / 2, height / 2],
-                      [0, 0, 1]], dtype=np.float32)
-        self.Kinv = np.linalg.inv(self.K)
-
-        self.rvec1 = np.array([0, 0, 0], dtype=np.float32)
-        self.tvec1 = np.array([0, 0, 0], dtype=np.float32)
-        self.nt = np.array([0, 0, -1], dtype=np.float32).reshape(1, 3)
-
-        self.rvec_amp = np.random.rand(3) * 0.25
-        self.tvec_amp  = np.random.rand(3) * 0.5
-
-        self.rvec_speed = np.random.choice([1e-1,1e-2,1e-3])
-        self.tvec_speed = np.random.choice([1e-1, 1e-2, 1e-3])
-
-        self.tshift = np.random.randn(3)
-        self.rshift = np.random.randn(3)
-        self.d = 1
-        self.time = 0
-
-    def __call__(self):
-        self.tshift = moving_average(self.tshift, 1e-4)
-        self.rshift = moving_average(self.rshift, 1e-4)
-        rvec2 = self.rvec_amp * np.sin(self.time * self.rvec_speed + self.rshift)
-        tvec2 = self.tvec_amp * np.sin(self.time * self.tvec_speed + self.tshift)
-        G_0to2 = generate_homography(self.rvec1, self.tvec1, rvec2, tvec2, self.nt, self.K, self.Kinv, self.d)
-        G_0to2 /= G_0to2[2,2]
-        self.time += 1
-        return G_0to2
-
-
-def show_voyage(img, anns):
+def show_voyage(img, anns, labelmap):
     height, width = img.shape[:2]
 
-    voyage = PlanarVoyage(height, width)
+    voyage = imutil.PlanarVoyage(height, width)
 
     prev_img = img.astype(np.float32)
 
 
     mask = coco.annToMask(anns[0])
     for i in range(len(anns)):
-        mask += coco.annToMask(anns[i])
+        mask = np.maximum(mask, coco.annToMask(anns[i]))
     mask_rgb = cv2.applyColorMap((mask * 30) % 255, cv2.COLORMAP_HSV) * (mask > 0)[:, :, None].repeat(3, 2)
     mask_rgb = mask_rgb.astype(np.float32)/255.0
 
 
-    d = 1
+    # mask_inst = np.zeros((height, width), dtype=np.uint8)
+    # for i in range(len(anns)):
+    #     im = coco.annToMask(anns[i])
+    #     mask_inst[im>0] = i+1
+
+    class_lookup = np.array([0, 0, 0, 1])
+    boxes = []
+    labels = []
+    for ann in anns:
+        x, y, w, h = ann['bbox']
+        label = ann['category_id']
+        labels.append(label)
+        boxes.append(np.array([[x, y, x + w, y + h]]))
+    boxes = np.concatenate(boxes, axis=0)
+    labels = class_lookup[np.array(labels)]
+
+    boxes, labels = wrap_boxes(boxes, labels, height, width)
+
+
+    img_warp = partial(cv2.warpPerspective, dsize=(width, height), borderMode=cv2.BORDER_WRAP)
     t = 0
 
     while 1:
 
         G_0to2 = voyage()
 
-        out = cv2.warpPerspective(img, G_0to2, (width, height),
-                                  flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP).astype(np.float32)
+        out = img_warp(img, G_0to2, flags=cv2.INTER_LINEAR).astype(np.float32)
+
         out = (out - out.min()) / (out.max() - out.min())
 
 
-        out_mask = cv2.warpPerspective(mask_rgb, G_0to2, (width, height),
-                                  flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP).astype(np.float32)
+        out_mask = img_warp(mask_rgb, G_0to2, flags=cv2.INTER_LINEAR).astype(np.float32)
 
         diff = out - prev_img
 
         # Remove some events
-
-
         # flow = get_flow(G_0to2, height, width)
         # flow = (flow-flow.min())/(flow.max()-flow.min())
         # viz_flow = flow_viz(flow)
@@ -179,20 +126,29 @@ def show_voyage(img, anns):
         # cv2.imshow('ts', ts)
 
 
+        # warp & show boxes
+        tboxes = imutil.cv2_apply_transform_boxes(boxes, G_0to2)
+        #tboxes = imutil.cv2_clamp_filter_boxes(tboxes, G_0to2, (height, width))
+        tboxes = clamp_boxes(tboxes, height, width)
+        tboxes, tlabels = discard_too_small(tboxes, labels, 10)
 
+
+        bboxes = vis.boxarray_to_boxes(tboxes.astype(np.int32), tlabels, labelmap)
+        img_ann = vis.draw_bboxes(out.copy(), bboxes, 2, colormap=cv2.COLORMAP_JET)
 
 
         # Salt-and-Pepper
         # diff += (np.random.rand(height, width)[:,:,None].repeat(3,2) < 0.00001)/2
         # diff -= (np.random.rand(height, width)[:,:,None].repeat(3,2) < 0.00001) / 2
+        #
+        # diff *= np.random.rand(height, width, 3) < 0.9
+        # diff = viz_diff(diff) + out_mask / 3
 
-        diff *= np.random.rand(height, width, 3) < 0.9
-        diff = viz_diff(diff) + out_mask / 3
+        img_ann = img_ann + out_mask/3
 
-
-        cv2.imshow("diff", diff)
-        cv2.imshow("out", out)
-        key = cv2.waitKey(0)
+        cv2.imshow("diff", img_ann)
+        #cv2.imshow("out", out)
+        key = cv2.waitKey(5)
         if key == 27:
             break
         prev_img = out
@@ -209,7 +165,8 @@ if __name__ == '__main__':
     annFile = '{}/annotations/instances_{}.json'.format(dataDir, dataType)
     coco = COCO(annFile)
 
-    catIds = coco.getCatIds(catNms=['person', 'car'])
+    catNms = ['person', 'car']
+    catIds = coco.getCatIds(catNms=catNms)
     imgIds = coco.getImgIds(catIds=catIds)
 
     while 1:
@@ -223,4 +180,4 @@ if __name__ == '__main__':
             mask += coco.annToMask(anns[i])
 
 
-        show_voyage(image, anns)
+        show_voyage(image, anns, catNms)
