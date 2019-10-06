@@ -11,9 +11,11 @@ from torch.utils.data import Dataset
 from pycocotools.coco import COCO
 
 from core.utils import image as imutil
+from core.utils import opts
 from core.utils import vis
 import cv2
 from functools import partial
+
 
 
 
@@ -52,10 +54,24 @@ def wrap_boxes(boxes, height, width):
     return np.concatenate(allbox, 0)
 
 
+def viz_batch(seq_im, seq_boxes):
+    video = seq_im.permute([0, 2, 3, 1]).cpu().numpy() * 127 + 127
+    video = np.split(video, 10)
+    seq_boxes = [item.cpu().numpy().copy().astype(np.int32) for item in seq_boxes]
+    for im, boxes in zip(video, seq_boxes):
+        im = im[0].astype(np.uint8).copy()
+        bboxes = vis.boxarray_to_boxes(boxes, boxes[:, -1], mcoco.catNms)
+        img_ann = vis.draw_bboxes(im, bboxes, 2, colormap=cv2.COLORMAP_JET)
+        cv2.imshow('im', img_ann)
+        cv2.waitKey(5)
+
 
 class MovingCOCODataset(Dataset):
-    def __init__(self, annFile, catNms=None, time=10, height=480, width=640):
-        self.coco = COCO(annFile)
+    def __init__(self, dataDir, dataType, catNms=None, time=10, height=480, width=640):
+        self.dataDir = dataDir
+        self.dataType = dataType
+        self.annFile = '{}/annotations/instances_{}.json'.format(self.dataDir, self.dataType)
+        self.coco = COCO(self.annFile)
         self.catNms = ['person',
                        'car',
                        'motorbike',
@@ -85,13 +101,13 @@ class MovingCOCODataset(Dataset):
             label = self.cat2label.get(ann['category_id'], -1)
             if label == -1:
                 continue
-            boxes.append(np.array([[x, y, x + w, y + h, label]]))
+            boxes.append(np.array([[x, y, x + w, y + h, label]], dtype=np.float32))
         boxes = np.concatenate(boxes, axis=0)
         return boxes
 
     def __getitem__(self, item):
         img = self.coco.loadImgs(self.imgIds[item])[0]
-        file_name = os.path.join(dataDir, 'images', dataType, img['file_name'])
+        file_name = os.path.join(self.dataDir, 'images', self.dataType, img['file_name'])
         image = cv2.imread(file_name)
         annIds = self.coco.getAnnIds(imgIds=img['id'], catIds=self.catIds, iscrowd=None)
         anns = self.coco.loadAnns(annIds)
@@ -111,6 +127,7 @@ class MovingCOCODataset(Dataset):
             boxes = wrap_boxes(boxes, height, width)
         imseq = []
         boxseq = []
+
         for _ in range(tbins):
             G_0to2 = voyage()
             out = self.img_warp(image, G_0to2, flags=cv2.INTER_LINEAR).astype(np.float32)/128 - 1
@@ -120,40 +137,21 @@ class MovingCOCODataset(Dataset):
             tboxes = np.concatenate([tboxes, labels], 1)
             tboxes = discard_too_small(tboxes, 10)
             out = torch.from_numpy(out).permute([2, 0, 1])
-            tboxes = torch.from_numpy(tboxes.astype(np.int32))
+            tboxes = torch.from_numpy(tboxes)
             imseq.append(out[None])
             boxseq.append(tboxes)
         imseq = torch.cat(imseq, 0)
+
         return imseq, boxseq
-
-def collate_fn(data_list):
-    videos, boxes = zip(*data_list)
-    videos = torch.stack(videos, 1)
-    t, n = videos.shape[:2]
-    boxes = [[boxes[i][t] for i in range(n)] for t in range(t)]
-    return videos, boxes
-
-
-def viz_batch(seq_im, seq_boxes):
-    video = seq_im.permute([0, 2, 3, 1]).cpu().numpy() * 127 + 127
-    video = np.split(video, 10)
-    seq_boxes = [item.cpu().numpy().copy() for item in seq_boxes]
-    for im, boxes in zip(video, seq_boxes):
-        im = im[0].astype(np.uint8).copy()
-        bboxes = vis.boxarray_to_boxes(boxes, boxes[:, -1], mcoco.catNms)
-        img_ann = vis.draw_bboxes(im, bboxes, 2, colormap=cv2.COLORMAP_JET)
-        cv2.imshow('im', img_ann)
-        cv2.waitKey(5)
 
 
 if __name__ == '__main__':
     dataDir = '/home/etienneperot/workspace/data/coco'
     dataType = 'val2017'
-    annFile = '{}/annotations/instances_{}.json'.format(dataDir, dataType)
 
-    mcoco = MovingCOCODataset(annFile, time=10)
+    mcoco = MovingCOCODataset(dataDir, dataType, time=10)
     loader = torch.utils.data.DataLoader(mcoco, batch_size=10, num_workers=3,
-                           shuffle=True, collate_fn=collate_fn, pin_memory=True)
+                           shuffle=True, collate_fn=opts.video_collate_fn, pin_memory=True)
 
     # while 1:
     #     seq_im, seq_boxes = mcoco[np.random.randint(0, len(mcoco))]
@@ -164,11 +162,10 @@ if __name__ == '__main__':
 
         end = time.time()
         print(end - start, ' time loading')
-        # for i in range(10):
-        #     video = x[:, i]
-        #     seq_boxes = [item[i] for item in y]
-        #     viz_batch(video, seq_boxes)
-
+        for i in range(10):
+            video = x[:, i]
+            seq_boxes = [item[i] for item in y]
+            viz_batch(video, seq_boxes)
 
         start = time.time()
         print(start-end, ' time showing')

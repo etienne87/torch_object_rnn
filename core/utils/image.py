@@ -368,7 +368,7 @@ def point_list_toboxes(pts):
     """
     if pts.shape[0] > 0 and pts.shape[0] % 4 != 0:
         raise ValueError('input must be a list of corners points ! (divisible by 4 !)')
-    boxes = np.empty((pts.shape[0] // 4, 4))
+    boxes = np.empty((pts.shape[0] // 4, 4), dtype=pts.dtype)
     points = np.concatenate((pts[:pts.shape[0] // 4], pts[pts.shape[0] // 4:pts.shape[0] // 2],
                              pts[pts.shape[0] // 2:-pts.shape[0] // 4], pts[-pts.shape[0] // 4:]), axis=1)
 

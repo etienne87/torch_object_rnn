@@ -11,6 +11,9 @@ from core.eval import mean_ap
 
 
 
+
+
+
 class DetTrainer(object):
     """
     class wrapping training/ validation/ testing
@@ -26,12 +29,26 @@ class DetTrainer(object):
     def __del__(self):
         self.writer.close()
 
+    def _progressive_resize(self, epoch, net, train_dataset, test_dataset):
+        if epoch < 4:
+            size = 128
+        elif epoch < 11:
+            size = 256
+        else:
+            size = 512
+
+        train_dataset.resize(size, size)
+        test_dataset.resize(size, size)
+        net.resize(size, size)
+        net.box_coder.cuda()
+        print('size: ', size)
+
     def train(self, epoch, dataset, args):
         print('\nEpoch: %d (train)' % epoch)
         self.net.train()
         self.net.reset()
         train_loss = 0
-        dataset.reset()
+        # dataset.reset()
         proba_reset = 1 * (0.9)**epoch
 
         start = 0
@@ -43,9 +60,11 @@ class DetTrainer(object):
             if args.cuda:
                 inputs = inputs.cuda()
 
-            if np.random.rand() < proba_reset:
-                dataset.reset()
-                self.net.reset()
+            # if np.random.rand() < proba_reset:
+            #     dataset.reset()
+            #     self.net.reset()
+
+            self.net.reset()
 
             start = time.time()
             self.optimizer.zero_grad()
@@ -88,10 +107,11 @@ class DetTrainer(object):
             if args.cuda:
                 inputs = inputs.cuda()
 
-            if batch_idx%10 == 0:
-                dataset.reset()
-                self.net.reset()
+            # if batch_idx%10 == 0:
+            #     dataset.reset()
+            #     self.net.reset()
 
+            self.net.reset()
             with torch.no_grad():
                 start = time.time()
                 preds = self.net.get_boxes(inputs, score_thresh=0.1)
@@ -142,7 +162,8 @@ class DetTrainer(object):
         self.net.reset()
         self.net.extractor.return_all = True
 
-        dataset.reset()
+        if hasattr(dataset, "reset"):
+            dataset.reset()
 
         periods = args.test_iter
         batchsize = dataset.batchsize

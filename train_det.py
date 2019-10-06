@@ -7,12 +7,14 @@ import os
 import torch
 import torch.optim as optim
 import torch.backends.cudnn as cudnn
+from functools import partial
 
 from core.ssd.model import SSD
 from core.trainer import DetTrainer
 from core.utils import opts
 
 from datasets.moving_mnist_detection import MovingMnistDataset
+from datasets.moving_coco_detection import MovingCOCODataset
 
 
 def parse_args():
@@ -31,23 +33,6 @@ def parse_args():
     return parser.parse_args()
 
 
-def progressive_resize(epoch, net, train_dataset, test_dataset):
-    if epoch < 3:
-        size = 64
-    elif epoch < 9:
-        size = 128
-    elif epoch < 12:
-        size = 256
-    else:
-        size = 512
-
-    train_dataset.resize(size, size)
-    test_dataset.resize(size, size)
-    net.resize(size, size)
-    net.box_coder.cuda()
-    print('size: ', size)
-
-
 def main():
     args = parse_args()
 
@@ -59,13 +44,22 @@ def main():
     # Dataset
     print('==> Preparing dataset..')
 
-    train_dataset = MovingMnistDataset(args.batchsize, time, height, width, cin, train=True)
-    test_dataset = MovingMnistDataset(args.batchsize, time, height, width, cin, train=False)
+    # Moving MNIST
+    # train_dataset = MovingMnistDataset(args.batchsize, time, height, width, cin, max_objects=10, train=True)
+    # test_dataset = MovingMnistDataset(args.batchsize, time, height, width, cin, max_objects=10, train=False)
+    # train_dataset.num_frames = args.train_iter
+    # test_dataset.num_frames = args.test_iter
+    # dataloader = train_dataset
 
-    train_dataset.num_frames = args.train_iter
-    test_dataset.num_frames = args.test_iter
-    dataloader = train_dataset
+    # Moving COCO
+    dataDir = '/home/etienneperot/workspace/data/coco'
+    datafunc = partial(torch.utils.data.DataLoader, batch_size=10, num_workers=3,
+                                         shuffle=True, collate_fn=opts.video_collate_fn, pin_memory=True)
 
+    train_dataset = MovingCOCODataset(dataDir, dataType='train2017', time=time, height=height, width=width)
+    test_dataset = MovingCOCODataset(dataDir, dataType='val2017', time=time, height=height, width=width)
+    train_dataset = datafunc(train_dataset)
+    test_dataset = datafunc(test_dataset)
 
     # Model
     print('==> Building model..')
@@ -89,9 +83,9 @@ def main():
     trainer = DetTrainer(args.logdir, net, optimizer)
 
     for epoch in range(start_epoch, args.epochs):
-        trainer.train(epoch, dataloader, args)
+        trainer.train(epoch, train_dataset, args)
         map = trainer.evaluate(epoch, test_dataset, args)
-        trainer.test(epoch, test_dataset, nrows, args)
+        # trainer.test(epoch, test_dataset, nrows, args)
         trainer.save_ckpt(epoch, args)
         trainer.writer.add_scalar('learning rate', optimizer.param_groups[0]['lr'], epoch)
         scheduler.step(map)

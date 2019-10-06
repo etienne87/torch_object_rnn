@@ -92,7 +92,7 @@ class SSD(nn.Module):
         self.extractor.reset()
         x = torch.randn(1, 1, self.cin, self.height, self.width).to(self.box_coder.default_boxes.device)
         sources = self.extractor(x)
-        self.fm_sizes, self.steps, self.box_sizes = get_box_params(sources, self.height, self.width)
+        self.fm_sizes, self.steps, self.box_sizes = get_box_params_fixed_size(sources, self.height, self.width)
         self.ary = float(width) / height
         self.box_coder.reset(self)
         self.extractor.reset()

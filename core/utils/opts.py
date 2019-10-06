@@ -30,6 +30,20 @@ def load_last_checkpoint(net, optimizer, logdir):
     return start_epoch
 
 
+def video_collate_fn(data_list):
+    videos, boxes = zip(*data_list)
+    videos = torch.stack(videos, 1)
+    t, n = videos.shape[:2]
+    boxes = [[boxes[i][t] for i in range(n)] for t in range(t)]
+    return videos, boxes
+
+
+def image_collate_fn(data_list):
+    images, boxes = zip(*data_list)
+    images = torch.stack(images, 0)
+    return images, boxes
+
+
 class BatchRenorm(nn.Module):
     r"""
     BatchRenorm
@@ -85,6 +99,7 @@ class BatchRenorm(nn.Module):
         return ('{name}({num_features}, eps={eps}, momentum={momentum},'
                 ' max_length={max_length}, affine={affine})'
             .format(name=self.__class__.__name__, **self.__dict__))
+
 
 class CosineConv2d(nn.Conv2d):
     """Drop-in Replace Conv+BN, but is quite costly"""

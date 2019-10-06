@@ -26,7 +26,7 @@ class FPN(nn.Module):
             Bottleneck(self.base * 8, self.base * 16, 2)
         ))
 
-        self.conv2 = UNet([self.base * 16, self.base * 16, self.base * 32, cout, cout, cout, cout], mode='sum')
+        self.conv2 = UNet([self.base * 16, self.base * 24, self.base * 32, cout, cout, cout, cout], mode='sum')
 
     def forward(self, x):
         x1 = self.conv1(x)
