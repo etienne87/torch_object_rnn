@@ -140,6 +140,48 @@ class UNet(nn.Module):
         return repr
 
 
+class OttoNet(nn.Module):
+    """
+    "Otto" for the shape of 8 in time (encoder & decoder are fed to each other)
+    """
+    def __init__(self, channel_list, mode='sum', stride=2):
+        super(OttoNet, self).__init__()
+        self.net = UNet(channel_list, mode, stride)
+
+        #feedback layers
+        self.feedbacks = nn.ModuleList()
+        for down, up in zip(self.downs, self.ups):
+            in_channels = up.out_channels
+            out_channels = down.in_channels
+            self.feedback.append(nn.Conv2d(in_channels, 2 * out_channels, 1, 1, 0))
+
+    def forward(self, xi):
+        xiseq = xi.split(1, 0)  # t,n,c,h,w
+        result = []
+        for t, xt in enumerate(xiseq):
+            # Run UNet Recurrent
+            outs = self.net(xt)
+
+            # Feed each Decoder to each Encoder
+            for down, up, fb in zip(self.downs, self.ups, self.feedbacks):
+                tmp = fb(up.prev_h)
+                i, g = torch.split(tmp, down.prev_h.shape[1])
+                down.prev_h += torch.sigmoid(i) * torch.tanh(g)
+
+            if len(result) == 0:
+                result = [[item] for item in outs]
+            else:
+                for sublist, item in zip(results, outs):
+                    sublist.append(item)
+
+        result = [torch.cat(item, 0) for item in result]
+        return result
+
+
+
+
+
+
 class LegacyUNet(nn.Module):
     def __init__(self, in_channels, out_channels, channels_per_layer,
                         mode='sum', scale_factor=2):
