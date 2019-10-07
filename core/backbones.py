@@ -13,24 +13,27 @@ from core.unet import UNet
 
 
 class FPN(nn.Module):
-    def __init__(self, cin=1, cout=128, nmaps=3):
+    def __init__(self, cin=1, cout=256, nmaps=3):
         super(FPN, self).__init__()
         self.cin = cin
-        self.base = 8
+        self.base = 32
         self.cout = cout
         self.nmaps = nmaps
 
         self.conv1 = SequenceWise(nn.Sequential(
-            Bottleneck(cin, self.base, 2),
-            Bottleneck(self.base, self.base * 8, 2),
-            Bottleneck(self.base * 8, self.base * 16, 2)
+            ConvBN(cin, self.base, stride=2),
+            Bottleneck(self.base, self.base * 2, 2),
+            Bottleneck(self.base * 2, self.base * 4, 2),
+            Bottleneck(self.base * 4, self.base * 8, 2)
         ))
 
-        self.conv2 = UNet([self.base * 16, self.base * 24, self.base * 32, cout, cout, cout, cout], mode='sum')
+        self.levels = 4
+        self.conv2 = UNet([self.base * 8] * (self.levels-1) + [cout] * self.levels)
+
 
     def forward(self, x):
         x1 = self.conv1(x)
-        outs = self.conv2(x1)[-4:]
+        outs = self.conv2(x1)[-self.levels:]
 
         sources = [time_to_batch(item)[0] for item in outs][::-1]
 

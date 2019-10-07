@@ -193,7 +193,10 @@ class SSDBoxCoder(torch.nn.Module):
 
         for t in range(len(targets)):
             for i in range(len(targets[t])):
-                boxes, labels = targets[t][i][:, :4], targets[t][i][:, 4:]
+                if len(targets[t][i]) == 0:
+                    targets[t][i] = torch.ones((1, 5), dtype=torch.float32)*-1
+
+                boxes, labels = targets[t][i][:, :4], targets[t][i][:, -1]
                 boxes, labels = boxes.to(device), labels.to(device)
 
                 loc_t, cls_t = self.encode(boxes, labels)

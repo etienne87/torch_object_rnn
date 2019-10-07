@@ -39,7 +39,6 @@ def main():
     os.environ['OMP_NUM_THREADS'] = '1'
 
     classes, cin, time, height, width = 11, 3, 10, 256, 256
-    nrows = 4
 
     # Dataset
     print('==> Preparing dataset..')
@@ -49,7 +48,7 @@ def main():
     # test_dataset = MovingMnistDataset(args.batchsize, time, height, width, cin, max_objects=10, train=False)
     # train_dataset.num_frames = args.train_iter
     # test_dataset.num_frames = args.test_iter
-    # dataloader = train_dataset
+
 
     # Moving COCO
     dataDir = '/home/etienneperot/workspace/data/coco'
@@ -60,6 +59,7 @@ def main():
     test_dataset = MovingCOCODataset(dataDir, dataType='val2017', time=time, height=height, width=width)
     train_dataset = datafunc(train_dataset)
     test_dataset = datafunc(test_dataset)
+    classes = len(train_dataset.dataset.catNms) + 1
 
     # Model
     print('==> Building model..')

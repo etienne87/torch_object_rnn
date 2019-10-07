@@ -202,10 +202,10 @@ class SSD(nn.Module):
             cls_preds = self.decode_loc(loc_preds)
             cls_targets = self.decode_loc(cls_targets)
 
-        if cls_targets.dim() > 1:
-            cls_targets, ids = torch.split(cls_targets, 1, dim=-1)
-            cls_targets = cls_targets.squeeze()
-            ids = ids.squeeze()
+        # if cls_targets.dim() > 1:
+        #     cls_targets, ids = torch.split(cls_targets, 1, dim=-1)
+        #     cls_targets = cls_targets.squeeze()
+        #     ids = ids.squeeze()
 
         loc_loss, cls_loss = self.criterion(loc_preds, loc_targets, cls_preds, cls_targets)
 
