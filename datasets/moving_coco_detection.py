@@ -145,6 +145,7 @@ class MovingCOCODataset(Dataset):
         return imseq, boxseq
 
 
+
 if __name__ == '__main__':
     dataDir = '/home/etienneperot/workspace/data/coco'
     dataType = 'val2017'

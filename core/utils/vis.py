@@ -81,4 +81,5 @@ def draw_txn_boxes_on_images(images, targets, grid, make_img_fun, period, time, 
                 labels = labels.cpu().numpy().astype(np.int32)
                 bboxes = boxarray_to_boxes(boxes, labels, labelmap)
                 img = draw_bboxes(img, bboxes)
+
             grid[t + period * time, y, x] = img

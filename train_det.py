@@ -40,6 +40,11 @@ def main():
 
     classes, cin, time, height, width = 11, 3, 10, 256, 256
 
+    args.time = time
+    args.cin = cin
+    args.height = height
+    args.width = width
+
     # Dataset
     print('==> Preparing dataset..')
 
@@ -52,7 +57,7 @@ def main():
 
     # Moving COCO
     dataDir = '/home/etienneperot/workspace/data/coco'
-    datafunc = partial(torch.utils.data.DataLoader, batch_size=10, num_workers=3,
+    datafunc = partial(torch.utils.data.DataLoader, batch_size=args.batchsize, num_workers=3,
                                          shuffle=True, collate_fn=opts.video_collate_fn, pin_memory=True)
 
     train_dataset = MovingCOCODataset(dataDir, dataType='train2017', time=time, height=height, width=width)
@@ -81,6 +86,9 @@ def main():
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.99)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min')
     trainer = DetTrainer(args.logdir, net, optimizer)
+
+    trainer.test(start_epoch, test_dataset, args)
+    exit()
 
     for epoch in range(start_epoch, args.epochs):
         trainer.train(epoch, train_dataset, args)

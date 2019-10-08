@@ -156,7 +156,7 @@ class DetTrainer(object):
         return map
 
 
-    def test(self, epoch, dataset, nrows, args):
+    def test(self, epoch, dataset, args):
         print('\nEpoch: %d (test)' % epoch)
         self.net.eval()
         self.net.reset()
@@ -165,28 +165,31 @@ class DetTrainer(object):
         if hasattr(dataset, "reset"):
             dataset.reset()
 
-        periods = args.test_iter
-        batchsize = dataset.batchsize
-        time = dataset.time
-
+        batchsize = args.batchsize
+        time = args.time
+        labelmap = dataset.dataset.catNms
+        nrows = 2 ** ((batchsize.bit_length() - 1) // 2)
         ncols = batchsize // nrows
-        grid = np.zeros((periods * time, nrows, ncols, dataset.height, dataset.width, 3), dtype=np.uint8)
+        grid = np.zeros((args.test_iter * time, nrows, ncols, args.height, args.width, 3), dtype=np.uint8)
 
-        for period in range(periods):
-            inputs, targets = dataset.next()
-
+        for period, (inputs, targets) in enumerate(dataset):
             images = inputs.clone().data.numpy()
 
             if args.cuda:
                 inputs = inputs.cuda()
 
+            self.net.reset()
             with torch.no_grad():
                 targets = self.net.get_boxes(inputs)
 
             vis.draw_txn_boxes_on_images(images, targets, grid, self.make_image,
-                                         period, time, ncols, dataset.labelmap)
+                                         period, time, ncols, labelmap)
 
-        grid = grid.swapaxes(2, 3).reshape(periods * time, nrows * dataset.height, ncols * dataset.width, 3)
+            if period >= (args.test_iter-1):
+                break
+
+        grid = grid.swapaxes(2, 3).reshape(args.test_iter * time, nrows * args.height, ncols * args.width, 3)
+        grid = grid[...,::-1]
         tbx.add_video(self.writer, 'test', grid, global_step=epoch, fps=30)
         self.net.extractor.return_all = False
 
