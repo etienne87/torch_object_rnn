@@ -32,7 +32,36 @@ def parse_args():
     parser.add_argument('--save_video', action='store_true')
     parser.add_argument('--test_every', default=5, help='test_every')
     parser.add_argument('--save_every', default=10, help='save_every')
+    parser.add_argument('--num_workers', default=2, help='save_every')
     return parser.parse_args()
+
+
+def make_moving_mnist(args):
+    datafunc = partial(torch.utils.data.DataLoader, batch_size=args.batchsize, num_workers=args.num_workers,
+                       shuffle=False, collate_fn=opts.video_collate_fn, pin_memory=True)
+    train_dataset = MovingMnistDataset(args.batchsize,
+                                       args.time, args.height, args.width, 3, max_objects=10, train=True)
+    test_dataset = MovingMnistDataset(args.batchsize,
+                                      args.time, args.height, args.width, 3, max_objects=10, train=False)
+    train_dataset.num_frames = args.train_iter // args.batchsize
+    test_dataset.num_frames = args.test_iter // args.batchsize
+    train_dataset = datafunc(train_dataset)
+    test_dataset = datafunc(test_dataset)
+    classes = 11
+    return train_dataset, test_dataset, classes
+
+
+def make_moving_coco(args):
+    dataDir = '/home/etienneperot/workspace/data/coco'
+    datafunc = partial(torch.utils.data.DataLoader, batch_size=batchsize, num_workers=args.num_workers,
+                                         shuffle=True, collate_fn=opts.video_collate_fn, pin_memory=True)
+
+    train_dataset = MovingCOCODataset(dataDir, dataType='train2017', time=time, height=height, width=width)
+    test_dataset = MovingCOCODataset(dataDir, dataType='val2017', time=time, height=height, width=width)
+    train_dataset = datafunc(train_dataset)
+    test_dataset = datafunc(test_dataset)
+    classes = len(train_dataset.dataset.catNms) + 1
+    return train_dataset, test_dataset, classes
 
 
 def main():
@@ -50,23 +79,11 @@ def main():
     # Dataset
     print('==> Preparing dataset..')
 
-    # Moving MNIST
-    # train_dataset = MovingMnistDataset(args.batchsize, time, height, width, cin, max_objects=10, train=True)
-    # test_dataset = MovingMnistDataset(args.batchsize, time, height, width, cin, max_objects=10, train=False)
-    # train_dataset.num_frames = args.train_iter
-    # test_dataset.num_frames = args.test_iter
+
+    train_dataset, test_dataset, classes = make_moving_mnist(args)
+    # train_dataset, test_dataset, classes = make_moving_coco(time, height, width, args)
 
 
-    # Moving COCO
-    dataDir = '/home/etienneperot/workspace/data/coco'
-    datafunc = partial(torch.utils.data.DataLoader, batch_size=args.batchsize, num_workers=3,
-                                         shuffle=True, collate_fn=opts.video_collate_fn, pin_memory=True)
-
-    train_dataset = MovingCOCODataset(dataDir, dataType='train2017', time=time, height=height, width=width)
-    test_dataset = MovingCOCODataset(dataDir, dataType='val2017', time=time, height=height, width=width)
-    train_dataset = datafunc(train_dataset)
-    test_dataset = datafunc(test_dataset)
-    classes = len(train_dataset.dataset.catNms) + 1
 
     # Model
     print('==> Building model..')
@@ -97,11 +114,11 @@ def main():
         trainer.writer.add_scalar('learning rate', optimizer.param_groups[0]['lr'], epoch)
         scheduler.step(map)
 
-        trainer.save_ckpt(args, name='last_checkpoint')
+        trainer.save_ckpt(epoch, name='last_checkpoint')
 
 
         if epoch%args.save_every == 0:
-            trainer.save_ckpt(args, name='checkpoint#'+str(epoch))
+            trainer.save_ckpt(epoch, 'checkpoint#'+str(epoch))
 
         if epoch%args.save_every == 0:
             trainer.test(epoch, test_dataset, args)

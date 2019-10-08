@@ -78,6 +78,7 @@ class MovingCOCODataset(Dataset):
                        'truck',
                        'bus',
                        'bicycle'] if catNms is None else catNms
+        self.labelmap = self.catNms
         self.catIds = self.coco.getCatIds(catNms=self.catNms)
         self.imgIds = self._getImgIdsUnion(self.catIds)
         self.time = time

@@ -294,7 +294,7 @@ class SquaresVideos(Dataset):
                            range(self.batchsize)]
 
     def __len__(self):
-        return self.num_frames
+        return self.num_frames * self.batchsize
 
 
     def __getitem__(self, item):

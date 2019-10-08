@@ -43,28 +43,29 @@ class DetTrainer(object):
         net.box_coder.cuda()
         print('size: ', size)
 
-    def train(self, epoch, dataset, args):
+    def train(self, epoch, dataloader, args):
         print('\nEpoch: %d (train)' % epoch)
         self.net.train()
         self.net.reset()
         train_loss = 0
-        # dataset.reset()
         proba_reset = 1 * (0.9)**epoch
 
         start = 0
         runtime_stats = {'dataloader': 0, 'network': 0}
-        for batch_idx, data in enumerate(dataset):
+        for batch_idx, data in enumerate(dataloader):
             if batch_idx > 0:
                 runtime_stats['dataloader'] += time.time() - start
             inputs, targets = data
             if args.cuda:
                 inputs = inputs.cuda()
 
-            # if np.random.rand() < proba_reset:
-            #     dataset.reset()
-            #     self.net.reset()
+            if np.random.rand() < proba_reset:
+                if hasattr(dataloader.dataset, "reset"):
+                    dataloader.dataset.reset()
+                self.net.reset()
 
-            self.net.reset()
+            # deal with permanent reset with a mask
+            # self.net.reset()
 
             start = time.time()
             self.optimizer.zero_grad()
@@ -80,18 +81,20 @@ class DetTrainer(object):
             train_loss += loss.item()
 
             for key, value in loss_dict.items():
-                self.writer.add_scalar('train_'+key, value.data.item(), batch_idx + epoch * len(dataset))
+                self.writer.add_scalar('train_'+key, value.data.item(),
+                                       batch_idx + epoch * len(dataloader.dataset) // args.batchsize )
 
             if batch_idx % args.log_every == 0:
                 print('\rtrain_loss: %.3f | avg_loss: %.3f [%d/%d] | @data: %.3f | @net: %.3f'
-                      % (loss.data.item(), train_loss / (batch_idx + 1), batch_idx + 1, len(dataset),
+                      % (loss.data.item(), train_loss / (batch_idx + 1),
+                         batch_idx + 1, len(dataloader.dataset) // args.batchsize,
                          runtime_stats['dataloader'] / (batch_idx + 1),
                          runtime_stats['network'] / (batch_idx + 1)
                          ), ' ')
 
             start = time.time()
 
-    def evaluate(self, epoch, dataset, args):
+    def evaluate(self, epoch, dataloader, args):
         print('\nEpoch: %d (val)' % epoch)
         self.net.eval()
         self.net.reset()
@@ -101,18 +104,20 @@ class DetTrainer(object):
         proposals = [] #list of K array of size 6
         start = 0
         runtime_stats = {'dataloader': 0, 'network': 0}
-        for batch_idx, data in enumerate(dataset):
+        for batch_idx, data in enumerate(dataloader):
             if batch_idx > 0:
                 runtime_stats['dataloader'] += time.time() - start
             inputs, targets = data
             if args.cuda:
                 inputs = inputs.cuda()
 
-            # if batch_idx%10 == 0:
-            #     dataset.reset()
-            #     self.net.reset()
+            if batch_idx%10 == 0:
+                if hasattr(dataloader.dataset, "reset"):
+                    dataloader.dataset.reset()
+                self.net.reset()
 
-            self.net.reset()
+            # self.net.reset()
+
             with torch.no_grad():
                 start = time.time()
                 preds = self.net.get_boxes(inputs, score_thresh=0.1)
@@ -157,22 +162,22 @@ class DetTrainer(object):
         return map
 
 
-    def test(self, epoch, dataset, args):
+    def test(self, epoch, dataloader, args):
         print('\nEpoch: %d (test)' % epoch)
         self.net.eval()
         self.net.reset()
 
-        if hasattr(dataset, "reset"):
-            dataset.reset()
+        if hasattr(dataloader.dataset, "reset"):
+            dataloader.dataset.reset()
 
         batchsize = args.batchsize
         time = args.time
-        labelmap = dataset.dataset.catNms
+        labelmap = dataloader.dataset.labelmap
         nrows = 2 ** ((batchsize.bit_length() - 1) // 2)
         ncols = batchsize // nrows
         grid = np.zeros((args.test_iter * time, nrows, ncols, args.height, args.width, 3), dtype=np.uint8)
 
-        for period, (inputs, targets) in enumerate(dataset):
+        for period, (inputs, targets) in enumerate(dataloader):
             images = inputs.clone().data.numpy()
 
             if args.cuda:
@@ -199,7 +204,7 @@ class DetTrainer(object):
             tbx.add_video(self.writer, 'test', grid[...,::-1], global_step=epoch, fps=30)
 
 
-    def save_ckpt(self, args, name='checkpoint#'):
+    def save_ckpt(self, epoch, name='checkpoint#'):
         state = {
             'net': self.net.state_dict(),
             'epoch': epoch,

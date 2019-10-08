@@ -107,28 +107,39 @@ class ASPP(nn.Module):
 
 
 class SequenceWise(nn.Module):
-    def __init__(self, module):
+    def __init__(self, module, parallel=False):
         """
         Collapses input of dim T*N*H to (T*N)*H, and applies to a module.
         Allows handling of variable sequence lengths and minibatch sizes.
         If RNN (has reset module), will bypass reshapes
         :param module: Module to apply input to.
+        :param parallel: Run in Parallel, or Sequentially. Not equivalent for BatchNorm for instance.
         """
         super(SequenceWise, self).__init__()
         self.module = module
+        self.forward = self.forward_parallel if parallel else self.forward_sequential
 
-    def forward(self, x):
+    def forward_parallel(self, x):
         t, n = x.size(0), x.size(1)
         x = time_to_batch(x)[0]
         x = self.module(x)
         x = batch_to_time(x, n)
         return x
 
+    def forward_sequential(self, x):
+        xiseq = x.split(1, 0)
+        res = []
+        for t, xt in enumerate(xiseq):
+            y = self.module(xt[0])
+            res.append(y.unsqueeze(0))
+        return torch.cat(res, dim=0)
+
     def __repr__(self):
         tmpstr = self.__class__.__name__ + ' (\n'
         tmpstr += self.module.__repr__()
         tmpstr += ')'
         return tmpstr
+
 
 
 class RNNCell(nn.Module):
