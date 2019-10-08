@@ -87,8 +87,6 @@ def main():
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min')
     trainer = DetTrainer(args.logdir, net, optimizer)
 
-    trainer.test(start_epoch, test_dataset, args)
-    exit()
 
     for epoch in range(start_epoch, args.epochs):
         trainer.train(epoch, train_dataset, args)

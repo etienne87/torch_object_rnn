@@ -160,7 +160,6 @@ class DetTrainer(object):
         print('\nEpoch: %d (test)' % epoch)
         self.net.eval()
         self.net.reset()
-        self.net.extractor.return_all = True
 
         if hasattr(dataset, "reset"):
             dataset.reset()
@@ -189,14 +188,15 @@ class DetTrainer(object):
                 break
 
         grid = grid.swapaxes(2, 3).reshape(args.test_iter * time, nrows * args.height, ncols * args.width, 3)
-        grid = grid[...,::-1]
-        tbx.add_video(self.writer, 'test', grid, global_step=epoch, fps=30)
-        self.net.extractor.return_all = False
+
 
         if args.save_video:
             video_name =  self.logdir + '/videos/' + 'video#' + str(epoch) + '.avi'
             tbx.prepare_ckpt_dir(video_name)
             vis.write_video_opencv(video_name, grid)
+        else:
+            tbx.add_video(self.writer, 'test', grid[...,::-1], global_step=epoch, fps=30)
+
 
     def save_ckpt(self, epoch, args, name='checkpoint#'):
         state = {
