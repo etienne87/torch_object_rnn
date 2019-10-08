@@ -72,6 +72,7 @@ class DetTrainer(object):
 
             loss = sum([value for key, value in loss_dict.items()])
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.net.parameters(), 0.1)
             self.optimizer.step()
 
             runtime_stats['network'] += time.time() - start
@@ -198,12 +199,12 @@ class DetTrainer(object):
             tbx.add_video(self.writer, 'test', grid[...,::-1], global_step=epoch, fps=30)
 
 
-    def save_ckpt(self, epoch, args, name='checkpoint#'):
+    def save_ckpt(self, args, name='checkpoint#'):
         state = {
             'net': self.net.state_dict(),
             'epoch': epoch,
             'optimizer': self.optimizer.state_dict()
         }
-        ckpt_file = self.logdir + '/checkpoints/' + name + str(epoch) + '.pth'
+        ckpt_file = self.logdir + '/checkpoints/' + name + '.pth'
         tbx.prepare_ckpt_dir(ckpt_file)
         torch.save(state, ckpt_file)

@@ -22,14 +22,16 @@ def parse_args():
     parser.add_argument('logdir', type=str, help='where to save')
     parser.add_argument('--path', type=str, default='', help='path to dataset')
     parser.add_argument('--batchsize', type=int, default=8, help='batchsize')
-    parser.add_argument('--lr', default=1e-3, type=float, help='learning rate')
+    parser.add_argument('--lr', default=1e-3, type=float, help='learning rate #1e-5 is advised')
     parser.add_argument('--resume', action='store_true', help='resume from checkpoint')
     parser.add_argument('--train_iter', type=int, default=100, help='#iter / train epoch')
     parser.add_argument('--test_iter', type=int, default=10, help='#iter / test epoch')
-    parser.add_argument('--epochs', type=int, default=50, help='num epochs to train')
+    parser.add_argument('--epochs', type=int, default=100, help='num epochs to train')
     parser.add_argument('--cuda', action='store_true', help='use cuda')
     parser.add_argument('--log_every', type=int, default=10, help='log every')
     parser.add_argument('--save_video', action='store_true')
+    parser.add_argument('--test_every', default=5, help='test_every')
+    parser.add_argument('--save_every', default=10, help='save_every')
     return parser.parse_args()
 
 
@@ -84,17 +86,25 @@ def main():
 
 
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.99)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min')
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3, verbose=True)
     trainer = DetTrainer(args.logdir, net, optimizer)
 
 
     for epoch in range(start_epoch, args.epochs):
         trainer.train(epoch, train_dataset, args)
         map = trainer.evaluate(epoch, test_dataset, args)
-        # trainer.test(epoch, test_dataset, nrows, args)
-        trainer.save_ckpt(epoch, args)
+
         trainer.writer.add_scalar('learning rate', optimizer.param_groups[0]['lr'], epoch)
         scheduler.step(map)
+
+        trainer.save_ckpt(args, name='last_checkpoint')
+
+
+        if epoch%args.save_every == 0:
+            trainer.save_ckpt(args, name='checkpoint#'+str(epoch))
+
+        if epoch%args.save_every == 0:
+            trainer.test(epoch, test_dataset, args)
 
 if __name__ == '__main__':
     main()

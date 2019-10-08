@@ -4,10 +4,25 @@ from __future__ import print_function
 
 
 import torch
+from torch.utils.data import Dataset
+from core.utils import opts
+
 import numpy as np
 import cv2
 import math
 cv2.setNumThreads(0)
+
+
+
+OK = 0
+TOOSMALL = 1
+TOOBIG = 2
+TOP = 3
+BOTTOM = 4
+LEFT = 5
+RIGHT = 6
+STOP_AT_BEGINNING = False
+
 
 def clamp_xyxy(x1, y1, x2, y2, width, height):
     x1 = np.minimum(np.maximum(x1, 0), width)
@@ -21,15 +36,6 @@ def rotate(x,y,xo,yo,theta):
     xr=math.cos(theta)*(x-xo)-math.sin(theta)*(y-yo) + xo
     yr=math.sin(theta)*(x-xo)+math.cos(theta)*(y-yo) + yo
     return [xr,yr]
-
-OK = 0
-TOOSMALL = 1
-TOOBIG = 2
-TOP = 3
-BOTTOM = 4
-LEFT = 5
-RIGHT = 6
-STOP_AT_BEGINNING = False
 
 
 def move_box(x1, y1, x2, y2, vx, vy, vs, width, height, min_width, min_height):
@@ -253,14 +259,14 @@ class Animation(object):
         return output, boxes
 
 
-class SquaresVideos(object):
+class SquaresVideos(Dataset):
     """
     Toy Detection DataBase for video detection.
     Move a Patch
     """
 
     def __init__(self, batchsize=32, t=10, h=300, w=300, c=3,
-                 normalize=False, max_stops=30, max_objects=1, max_classes=3, mode='diff', render=True):
+                 normalize=False, max_stops=30, max_objects=1, max_classes=1, mode='diff', render=True):
         self.batchsize = batchsize
         self.num_frames = 100000
         self.channels = c
@@ -291,78 +297,45 @@ class SquaresVideos(object):
         return self.num_frames
 
 
-    def next(self):
-        x = torch.zeros(self.time, self.batchsize, self.channels, self.height, self.width)
-        y = [[] for t in range(self.time)]
-
-        if not self.render:
-            x = None
-
-        for i, anim in enumerate(self.animations):
-            for t in range(self.time):
-                im, boxes = anim.run()
-                if self.render:
-                   x[t, i, :] = torch.from_numpy(im)
-                y[t].append(torch.from_numpy(boxes))
-
+    def __getitem__(self, item):
+        anim = self.animations[item%self.batchsize]
+        x = torch.zeros(self.time, self.channels, self.height, self.width)
+        y = []
+        for t in range(self.time):
+            im, boxes = anim.run()
+            if self.render:
+                x[t] = torch.from_numpy(im)
+            y.append(torch.from_numpy(boxes))
 
         return x, y
 
-    def __iter__(self):
-        for _ in range(len(self)):
-            yield self.next()
-
-
-#Returns batch shifted by 1 timestep + current
-class PrevNext:
-    def __init__(self):
-        self.prev_target = None
-        self.prev_image = None
-
-    def reset(self):
-        self.prev_target = None
-        self.prev_image = None
-
-    def __call__(self, x, y):
-        if self.prev_target is None:
-            nx = x[1:]
-            ny = y[1:]
-            px = x[:-1]
-            py = y[:-1]
-        else:
-            nx = x
-            ny = y
-            px = torch.cat([self.prev_image[None]] + [x[:-1]], dim=0)
-            py = [self.prev_target] + y[:-1]
-
-        self.prev_target = y[-1]
-        self.prev_image = x[-1]
-        return nx, px, ny, py
 
 
 if __name__ == '__main__':
-    from core.utils import boxarray_to_boxes, draw_bboxes, make_single_channel_display
+    from core.utils.vis import boxarray_to_boxes, draw_bboxes, make_single_channel_display
 
-    dataloader = SquaresVideos(t=10, c=1, h=256, w=256, batchsize=1, mode='diff', render=True)
-    prevnext = PrevNext()
+    dataset = SquaresVideos(t=10, c=1, h=256, w=256, batchsize=2, mode='diff', render=True)
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=2, num_workers=1,
+                           shuffle=False, collate_fn=opts.video_collate_fn, pin_memory=True)
+
     start = 0
 
-    for i, (x, y) in enumerate(dataloader):
+    for x, y in dataloader:
 
-        x, px, y, py = prevnext(x, y)
-
-        for j in range(1):
-            for t in range(len(y)):
+        for t in range(len(y)):
+            for j in range(dataset.batchsize):
                 boxes = y[t][j].cpu()
-                bboxes = boxarray_to_boxes(boxes[:, :4], boxes[:, 4], dataloader.labelmap)
 
-                if dataloader.render:
+                boxes = boxes.cpu().numpy().astype(np.int32)
+                bboxes = boxarray_to_boxes(boxes[:, :4], boxes[:, 4], dataset.labelmap)
+
+                if dataset.render:
                     img = x[t, j, :].numpy().astype(np.float32)
                     if img.shape[0] == 1:
                         img = make_single_channel_display(img[0], -1, 1)
                     else:
                         img = np.moveaxis(img, 0, 2)
-                        show = np.zeros((dataloader.height, dataloader.width, 3), dtype=np.float32)
+                        show = np.zeros((dataset.height, dataset.width, 3), dtype=np.float32)
                         show[...] = img
                         img = show
                 else:
@@ -370,12 +343,7 @@ if __name__ == '__main__':
 
                 img = draw_bboxes(img, bboxes)
 
-                #draw prev:
-                boxes = py[t][j].cpu()
-                bboxes = boxarray_to_boxes(boxes[:, :4], boxes[:, 4], dataloader.labelmap)
-                img = draw_bboxes(img, bboxes, (255,255,255))
-
-                cv2.imshow('example', img)
-                key = cv2.waitKey(0)
+                cv2.imshow('example'+str(j), img)
+                key = cv2.waitKey(5)
                 if key == 27:
                     exit()

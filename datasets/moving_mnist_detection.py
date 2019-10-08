@@ -2,11 +2,16 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-
 import numpy as np
-from torchvision import datasets, transforms
-import datasets.moving_box_detection as toy
 import cv2
+
+import torch
+from torch.utils.data import Dataset
+from torchvision import datasets, transforms
+
+from core.utils import opts
+import datasets.moving_box_detection as toy
+
 
 TRAIN_DATASET = datasets.MNIST('../data', train=True, download=True,
                                        transform=transforms.Compose([
@@ -83,40 +88,26 @@ if __name__ == '__main__':
     import torch
     from core.utils.vis import boxarray_to_boxes, draw_bboxes, make_single_channel_display
 
-    # anim = MovingMnistAnimation()
-    # labelmap = [str(i) for i in range(10)]
-    #
-    # while 1:
-    #     img, boxes = anim.run()
-    #
-    #     img = img[0][..., None]
-    #     img = np.concatenate([img, img, img], axis=2)
-    #
-    #     boxes = torch.from_numpy(boxes)
-    #     bboxes = boxarray_to_boxes(boxes[:, :4], boxes[:, 4], labelmap)
-    #
-    #     img = draw_bboxes(img, bboxes)
-    #
-    #     cv2.imshow('img', img)
-    #     cv2.waitKey(0)
 
-    dataloader = MovingMnistDataset(t=10, c=3, h=256, w=256, batchsize=32)
+    dataset = MovingMnistDataset(t=10, c=3, h=256, w=256, batchsize=4)
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=4, num_workers=1,
+                                             shuffle=False, collate_fn=opts.video_collate_fn, pin_memory=True)
 
     start = 0
-    for i, (x, y) in enumerate(dataloader):
-
-        for j in range(1):
-            for t in range(len(y)):
+    for (x, y) in dataloader:
+        for t in range(len(y)):
+            for j in range(dataset.batchsize):
                 boxes = y[t][j].cpu()
-                bboxes = boxarray_to_boxes(boxes[:, :4], boxes[:, 4], dataloader.labelmap)
+                boxes = boxes.cpu().numpy().astype(np.int32)
+                bboxes = boxarray_to_boxes(boxes[:, :4], boxes[:, 4], dataset.labelmap)
 
-                if dataloader.render:
+                if dataset.render:
                     img = x[t, j, :].numpy().astype(np.float32)
                     if img.shape[0] == 1:
                         img = make_single_channel_display(img[0], -1, 1)
                     else:
                         img = np.moveaxis(img, 0, 2)
-                        show = np.zeros((dataloader.height, dataloader.width, 3), dtype=np.float32)
+                        show = np.zeros((dataset.height, dataset.width, 3), dtype=np.float32)
                         show[...] = img
                         img = show
                 else:
@@ -124,7 +115,7 @@ if __name__ == '__main__':
 
                 img = draw_bboxes(img, bboxes)
 
-                cv2.imshow('example', img)
-                key = cv2.waitKey(0)
+                cv2.imshow('example'+str(j), img)
+                key = cv2.waitKey(5)
                 if key == 27:
                     exit()
