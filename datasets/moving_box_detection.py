@@ -293,21 +293,44 @@ class SquaresVideos(Dataset):
         self.animations = [Animation(self.time, height, width, self.channels, self.max_stops, self.mode) for i in
                            range(self.batchsize)]
 
+    # def __len__(self):
+    #     return self.num_frames * self.batchsize
+    #
+    # def __getitem__(self, item):
+    #     anim = self.animations[item%self.batchsize]
+    #     x = torch.zeros(self.time, self.channels, self.height, self.width)
+    #     y = []
+    #     for t in range(self.time):
+    #         im, boxes = anim.run()
+    #         if self.render:
+    #             x[t] = torch.from_numpy(im)
+    #         y.append(torch.from_numpy(boxes))
+    #
+    #     return x, y
+
+    # TEST 1
     def __len__(self):
-        return self.num_frames * self.batchsize
+        return self.num_frames
 
+    def next(self):
+        x = torch.zeros(self.time, self.batchsize, self.channels, self.height, self.width)
+        y = [[] for t in range(self.time)]
 
-    def __getitem__(self, item):
-        anim = self.animations[item%self.batchsize]
-        x = torch.zeros(self.time, self.channels, self.height, self.width)
-        y = []
-        for t in range(self.time):
-            im, boxes = anim.run()
-            if self.render:
-                x[t] = torch.from_numpy(im)
-            y.append(torch.from_numpy(boxes))
+        if not self.render:
+            x = None
+
+        for i, anim in enumerate(self.animations):
+            for t in range(self.time):
+                im, boxes = anim.run()
+                if self.render:
+                    x[t, i, :] = torch.from_numpy(im)
+                y[t].append(torch.from_numpy(boxes))
 
         return x, y
+
+    def __iter__(self):
+        for _ in range(len(self)):
+            yield self.next()
 
 
 
@@ -315,12 +338,12 @@ if __name__ == '__main__':
     from core.utils.vis import boxarray_to_boxes, draw_bboxes, make_single_channel_display
 
     dataset = SquaresVideos(t=10, c=1, h=256, w=256, batchsize=2, mode='diff', render=True)
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=2, num_workers=1,
-                           shuffle=False, collate_fn=opts.video_collate_fn, pin_memory=True)
+    # dataloader = torch.utils.data.DataLoader(dataset, batch_size=2, num_workers=1,
+    #                        shuffle=False, collate_fn=opts.video_collate_fn, pin_memory=True)
 
     start = 0
 
-    for x, y in dataloader:
+    for x, y in dataset:
 
         for t in range(len(y)):
             for j in range(dataset.batchsize):

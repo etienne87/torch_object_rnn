@@ -37,16 +37,16 @@ def parse_args():
 
 
 def make_moving_mnist(args):
-    datafunc = partial(torch.utils.data.DataLoader, batch_size=args.batchsize, num_workers=args.num_workers,
-                       shuffle=False, collate_fn=opts.video_collate_fn, pin_memory=True)
+    # datafunc = partial(torch.utils.data.DataLoader, batch_size=args.batchsize, num_workers=args.num_workers,
+    #                    shuffle=False, collate_fn=opts.video_collate_fn, pin_memory=True)
     train_dataset = MovingMnistDataset(args.batchsize,
-                                       args.time, args.height, args.width, 3, max_objects=10, train=True)
+                                       args.time, args.height, args.width, 3, train=True)
     test_dataset = MovingMnistDataset(args.batchsize,
-                                      args.time, args.height, args.width, 3, max_objects=10, train=False)
-    train_dataset.num_frames = args.train_iter // args.batchsize
-    test_dataset.num_frames = args.test_iter // args.batchsize
-    train_dataset = datafunc(train_dataset)
-    test_dataset = datafunc(test_dataset)
+                                      args.time, args.height, args.width, 3, train=False)
+    train_dataset.num_frames = args.train_iter
+    test_dataset.num_frames = args.test_iter
+    # train_dataset = datafunc(train_dataset)
+    # test_dataset = datafunc(test_dataset)
     classes = 11
     return train_dataset, test_dataset, classes
 
@@ -103,7 +103,7 @@ def main():
 
 
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.99)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3, verbose=True)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min') #patience=3, verbose=True)
     trainer = DetTrainer(args.logdir, net, optimizer)
 
 
@@ -111,17 +111,19 @@ def main():
         trainer.train(epoch, train_dataset, args)
         map = trainer.evaluate(epoch, test_dataset, args)
 
-        trainer.writer.add_scalar('learning rate', optimizer.param_groups[0]['lr'], epoch)
-        scheduler.step(map)
+        # trainer.writer.add_scalar('learning rate', optimizer.param_groups[0]['lr'], epoch)
+        # scheduler.step(map)
+        #
+        # trainer.save_ckpt(epoch, name='last_checkpoint')
+        #
+        #
+        # if epoch%args.save_every == 0:
+        #     trainer.save_ckpt(epoch, 'checkpoint#'+str(epoch))
+        #
+        # if epoch%args.save_every == 0:
+        #     trainer.test(epoch, test_dataset, args)
 
-        trainer.save_ckpt(epoch, name='last_checkpoint')
-
-
-        if epoch%args.save_every == 0:
-            trainer.save_ckpt(epoch, 'checkpoint#'+str(epoch))
-
-        if epoch%args.save_every == 0:
-            trainer.test(epoch, test_dataset, args)
+        trainer.test(epoch, test_dataset, args)
 
 if __name__ == '__main__':
     main()

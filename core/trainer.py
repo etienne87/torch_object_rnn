@@ -50,6 +50,10 @@ class DetTrainer(object):
         train_loss = 0
         proba_reset = 1 * (0.9)**epoch
 
+        #change this
+        dataset = dataloader
+        num_batches = len(dataset) # len(dataset) // batchsize
+
         start = 0
         runtime_stats = {'dataloader': 0, 'network': 0}
         for batch_idx, data in enumerate(dataloader):
@@ -60,8 +64,9 @@ class DetTrainer(object):
                 inputs = inputs.cuda()
 
             if np.random.rand() < proba_reset:
-                if hasattr(dataloader.dataset, "reset"):
-                    dataloader.dataset.reset()
+                # if hasattr(dataloader.dataset, "reset"):
+                #     dataloader.dataset.reset()
+                dataloader.reset()
                 self.net.reset()
 
             # deal with permanent reset with a mask
@@ -73,7 +78,7 @@ class DetTrainer(object):
 
             loss = sum([value for key, value in loss_dict.items()])
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.net.parameters(), 0.1)
+            # torch.nn.utils.clip_grad_norm_(self.net.parameters(), 0.1)
             self.optimizer.step()
 
             runtime_stats['network'] += time.time() - start
@@ -82,12 +87,12 @@ class DetTrainer(object):
 
             for key, value in loss_dict.items():
                 self.writer.add_scalar('train_'+key, value.data.item(),
-                                       batch_idx + epoch * len(dataloader.dataset) // args.batchsize )
+                                       batch_idx + epoch * num_batches )
 
             if batch_idx % args.log_every == 0:
                 print('\rtrain_loss: %.3f | avg_loss: %.3f [%d/%d] | @data: %.3f | @net: %.3f'
                       % (loss.data.item(), train_loss / (batch_idx + 1),
-                         batch_idx + 1, len(dataloader.dataset) // args.batchsize,
+                         batch_idx + 1, num_batches,
                          runtime_stats['dataloader'] / (batch_idx + 1),
                          runtime_stats['network'] / (batch_idx + 1)
                          ), ' ')
@@ -112,8 +117,9 @@ class DetTrainer(object):
                 inputs = inputs.cuda()
 
             if batch_idx%10 == 0:
-                if hasattr(dataloader.dataset, "reset"):
-                    dataloader.dataset.reset()
+                # if hasattr(dataloader.dataset, "reset"):
+                #     dataloader.dataset.reset()
+                dataloader.reset()
                 self.net.reset()
 
             # self.net.reset()
@@ -167,12 +173,15 @@ class DetTrainer(object):
         self.net.eval()
         self.net.reset()
 
-        if hasattr(dataloader.dataset, "reset"):
-            dataloader.dataset.reset()
+        # if hasattr(dataloader.dataset, "reset"):
+        #     dataloader.dataset.reset()
 
+        dataloader.reset()
+
+
+        labelmap = dataloader.labelmap # dataloader.dataset.labelmap
         batchsize = args.batchsize
         time = args.time
-        labelmap = dataloader.dataset.labelmap
         nrows = 2 ** ((batchsize.bit_length() - 1) // 2)
         ncols = batchsize // nrows
         grid = np.zeros((args.test_iter * time, nrows, ncols, args.height, args.width, 3), dtype=np.uint8)
@@ -183,7 +192,7 @@ class DetTrainer(object):
             if args.cuda:
                 inputs = inputs.cuda()
 
-            self.net.reset()
+            # self.net.reset()
             with torch.no_grad():
                 targets = self.net.get_boxes(inputs)
 

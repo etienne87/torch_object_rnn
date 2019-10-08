@@ -40,6 +40,7 @@ class MovingMnistAnimation(toy.Animation):
             x, y = self.dataset_[idx]
             self.objects[i].class_id = y
             img = x.numpy()[0]
+            img = (img-img.min())/(img.max()-img.min())
             abs_img = np.abs(img)
             y, x = np.where(abs_img > 0.45)
             x1, x2 = np.min(x), np.max(x)
@@ -49,10 +50,10 @@ class MovingMnistAnimation(toy.Animation):
     def run(self):
         self.img[...] = 0
 
-        boxes = np.zeros((len(self.objects), 6), dtype=np.float32)
+        boxes = np.zeros((len(self.objects), 5), dtype=np.float32)
         for i, object in enumerate(self.objects):
             x1, y1, x2, y2 = object.run()
-            boxes[i] = np.array([x1, y1, x2, y2, object.class_id, i])
+            boxes[i] = np.array([x1, y1, x2, y2, object.class_id])
             #draw in roi resized version of img
             thumbnail = cv2.resize(object.img, (x2-x1, y2-y1), cv2.INTER_LINEAR)
             self.img[y1:y2, x1:x2] = np.maximum(self.img[y1:y2, x1:x2], thumbnail)
@@ -65,10 +66,12 @@ class MovingMnistDataset(toy.SquaresVideos):
     def __init__(self, batchsize=32, t=10, h=300, w=300, c=3,
                  normalize=False, max_stops=30, max_objects=3,
                  max_classes=3, train=True):
+        self.train = train
         super(MovingMnistDataset, self).__init__(batchsize, t, h, w, c,
                                                 normalize, max_stops, max_objects,
                                                 max_classes, 'none', True)
         self.labelmap = [str(i) for i in range(10)]
+
 
     def resize(self, height, width):
         self.height, self.width = height, width
@@ -77,8 +80,7 @@ class MovingMnistDataset(toy.SquaresVideos):
     def reset(self):
         self.animations = [MovingMnistAnimation(self.time, self.height,
                                                 self.width, self.channels, self.max_stops,
-                                                 self.max_objects,
-                                                 self.max_classes)
+                                                 self.max_objects, self.train)
                            for _ in range(self.batchsize)]
 
 
@@ -89,17 +91,18 @@ if __name__ == '__main__':
     from core.utils.vis import boxarray_to_boxes, draw_bboxes, make_single_channel_display
 
 
-    dataset = MovingMnistDataset(t=10, c=3, h=256, w=256, batchsize=4)
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=4, num_workers=1,
-                                             shuffle=False, collate_fn=opts.video_collate_fn, pin_memory=True)
+    dataset = MovingMnistDataset(t=10, c=3, h=256, w=256, batchsize=1, train=False)
+    # dataloader = torch.utils.data.DataLoader(dataset, batch_size=4, num_workers=1,
+    #                                          shuffle=False, collate_fn=opts.video_collate_fn, pin_memory=True)
 
     start = 0
-    for (x, y) in dataloader:
+    for (x, y) in dataset:
+
         for t in range(len(y)):
             for j in range(dataset.batchsize):
                 boxes = y[t][j].cpu()
                 boxes = boxes.cpu().numpy().astype(np.int32)
-                bboxes = boxarray_to_boxes(boxes[:, :4], boxes[:, 4], dataset.labelmap)
+                bboxes = boxarray_to_boxes(boxes[:, :4], boxes[:, 4]-1, dataset.labelmap)
 
                 if dataset.render:
                     img = x[t, j, :].numpy().astype(np.float32)
