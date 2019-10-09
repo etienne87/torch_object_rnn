@@ -280,15 +280,16 @@ class SquaresVideos(Dataset):
         self.render = render
         self.max_objects = max_objects
         self.max_classes = max_classes
-        self.max_consecutive_batches = 10
+        self.max_consecutive_batches = 2**10
         self.build()
 
     def build(self):
+        num_sets = max(1, self.num_batches // self.max_consecutive_batches)
         self.animations = [[Animation(self.time, self.height, self.width, self.channels, self.max_stops, self.mode,
                                      max_objects=self.max_objects,
                                      max_classes=self.max_classes,
                                      render=self.render) for _ in range(self.batchsize)]
-                                                         for _ in range(self.num_batches // self.max_consecutive_batches)]
+                                                         for _ in range(num_sets)]
 
     #TO BE CALLED ONLY BETWEEN EPOCHS
     def reset(self):
@@ -306,7 +307,7 @@ class SquaresVideos(Dataset):
 
     def __getitem__(self, item):
         num_batch = (item // self.batchsize)
-        num_set = num_batch // self.max_consecutive_batches
+        num_set = min(num_batch // self.max_consecutive_batches, len(self.animations)-1)
         reset = num_batch%self.max_consecutive_batches == 0
         anim = self.animations[num_set][item%self.batchsize]
         x = torch.zeros(self.time, self.channels, self.height, self.width)
@@ -350,8 +351,8 @@ if __name__ == '__main__':
     from core.utils.vis import boxarray_to_boxes, draw_bboxes, make_single_channel_display
 
     dataset = SquaresVideos(t=10, c=1, h=256, w=256, batchsize=2, mode='diff', render=True)
-    # dataloader = torch.utils.data.DataLoader(dataset, batch_size=2, num_workers=3,
-    #                        shuffle=False, collate_fn=opts.video_collate_fn, pin_memory=True)
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=2, num_workers=0,
+                           shuffle=False, collate_fn=opts.video_collate_fn_with_reset_info, pin_memory=True)
 
 
     start = 0

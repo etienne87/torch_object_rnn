@@ -49,8 +49,8 @@ class DetTrainer(object):
         self.net.reset()
         train_loss = 0
         proba_reset = 1 * (0.9)**epoch
-        dataloader.dataset.max_consecutive_batches = (2 ** epoch)
-        dataloader.dataset.reset()
+        dataloader.dataset.max_consecutive_batches = 4 #(2 ** epoch)
+        dataloader.dataset.build()
 
         start = 0
         runtime_stats = {'dataloader': 0, 'network': 0}
@@ -97,7 +97,7 @@ class DetTrainer(object):
         self.net.reset()
         val_loss = 0
         dataloader.dataset.max_consecutive_batches = (2 ** epoch)
-        dataloader.dataset.reset()
+        dataloader.dataset.build()
 
         gts = [] #list of K array of size 5
         proposals = [] #list of K array of size 6

@@ -72,11 +72,12 @@ class MovingMnistDataset(toy.SquaresVideos):
         self.labelmap = [str(i) for i in range(10)]
 
     def build(self):
+        num_sets = max(1, self.num_batches // self.max_consecutive_batches)
         self.animations = [[MovingMnistAnimation(self.time, self.height,
                                                 self.width, self.channels, self.max_stops,
                                                  self.max_objects, self.train)
                            for _ in range(self.batchsize)]
-                           for _ in range(self.num_batches // self.max_consecutive_batches)]
+                           for _ in range(num_sets)]
 
 
 

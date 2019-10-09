@@ -31,7 +31,7 @@ def parse_args():
     parser.add_argument('--log_every', type=int, default=10, help='log every')
     parser.add_argument('--save_video', action='store_true')
     parser.add_argument('--test_every', default=1, help='test_every')
-    parser.add_argument('--save_every', default=10, help='save_every')
+    parser.add_argument('--save_every', default=2, help='save_every')
     parser.add_argument('--num_workers', default=2, help='save_every')
     return parser.parse_args()
 
