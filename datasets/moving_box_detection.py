@@ -268,7 +268,7 @@ class SquaresVideos(Dataset):
     def __init__(self, batchsize=32, t=10, h=300, w=300, c=3,
                  normalize=False, max_stops=30, max_objects=1, max_classes=1, mode='diff', render=True):
         self.batchsize = batchsize
-        self.num_frames = 100000
+        self.num_batches = 500
         self.channels = c
         self.time, self.height, self.width = t, h, w
         self.rate = 0
@@ -280,71 +280,85 @@ class SquaresVideos(Dataset):
         self.render = render
         self.max_objects = max_objects
         self.max_classes = max_classes
-        self.reset()
+        self.max_consecutive_batches = 10
+        self.build()
 
-    def reset(self):
-        self.animations = [Animation(self.time, self.height, self.width, self.channels, self.max_stops, self.mode,
+    def build(self):
+        self.animations = [[Animation(self.time, self.height, self.width, self.channels, self.max_stops, self.mode,
                                      max_objects=self.max_objects,
                                      max_classes=self.max_classes,
-                                     render=self.render) for i in range(self.batchsize)]
+                                     render=self.render) for _ in range(self.batchsize)]
+                                                         for _ in range(self.num_batches // self.max_consecutive_batches)]
 
+    #TO BE CALLED ONLY BETWEEN EPOCHS
+    def reset(self):
+        for j in range(len(self.animations)):
+            for i in range(len(self.animations[j])):
+                self.animations[j][i].reset()
+
+    # TO BE CALLED ONLY BETWEEN EPOCHS
     def reset_size(self, height, width):
         self.height, self.width = height, width
-        self.animations = [Animation(self.time, height, width, self.channels, self.max_stops, self.mode) for i in
-                           range(self.batchsize)]
+        self.build()
 
-    # def __len__(self):
-    #     return self.num_frames * self.batchsize
+    def __len__(self):
+        return self.num_batches * self.batchsize
+
+    def __getitem__(self, item):
+        num_batch = (item // self.batchsize)
+        num_set = num_batch // self.max_consecutive_batches
+        reset = num_batch%self.max_consecutive_batches == 0
+        anim = self.animations[num_set][item%self.batchsize]
+        x = torch.zeros(self.time, self.channels, self.height, self.width)
+        y = []
+        for t in range(self.time):
+            im, boxes = anim.run()
+            if self.render:
+                x[t] = torch.from_numpy(im)
+            y.append(torch.from_numpy(boxes))
+
+        return x, y, reset
+
+    # def next(self):
+    #     x = torch.zeros(self.time, self.batchsize, self.channels, self.height, self.width)
+    #     y = [[] for t in range(self.time)]
+    #     r = []
     #
-    # def __getitem__(self, item):
-    #     anim = self.animations[item%self.batchsize]
-    #     x = torch.zeros(self.time, self.channels, self.height, self.width)
-    #     y = []
-    #     for t in range(self.time):
-    #         im, boxes = anim.run()
-    #         if self.render:
-    #             x[t] = torch.from_numpy(im)
-    #         y.append(torch.from_numpy(boxes))
+    #     if not self.dataset.render:
+    #         x = None
+    #
+    #     for i, anim in enumerate(self.dataset.animations):
+    #         for t in range(self.time):
+    #             im, boxes = anim.run()
+    #             if self.render:
+    #                 x[t, i, :] = torch.from_numpy(im)
+    #             y[t].append(torch.from_numpy(boxes))
     #
     #     return x, y
 
-    # TEST 1
-    def __len__(self):
-        return self.num_frames
 
-    def next(self):
-        x = torch.zeros(self.time, self.batchsize, self.channels, self.height, self.width)
-        y = [[] for t in range(self.time)]
-
-        if not self.render:
-            x = None
-
-        for i, anim in enumerate(self.animations):
-            for t in range(self.time):
-                im, boxes = anim.run()
-                if self.render:
-                    x[t, i, :] = torch.from_numpy(im)
-                y[t].append(torch.from_numpy(boxes))
-
-        return x, y
-
-    def __iter__(self):
-        for _ in range(len(self)):
-            yield self.next()
-
+# class MovingAnimationLoader(object):
+#     def __init__(self, dataset):
+#         self.dataset = dataset
+#
+#     def __iter__(self):
+#         for _ in range(len(self)):
+#             yield self.next()
 
 
 if __name__ == '__main__':
     from core.utils.vis import boxarray_to_boxes, draw_bboxes, make_single_channel_display
 
     dataset = SquaresVideos(t=10, c=1, h=256, w=256, batchsize=2, mode='diff', render=True)
-    # dataloader = torch.utils.data.DataLoader(dataset, batch_size=2, num_workers=1,
+    # dataloader = torch.utils.data.DataLoader(dataset, batch_size=2, num_workers=3,
     #                        shuffle=False, collate_fn=opts.video_collate_fn, pin_memory=True)
+
 
     start = 0
 
-    for x, y in dataset:
-
+    for x, y, r in dataloader:
+        if r:
+            print('Reset !')
         for t in range(len(y)):
             for j in range(dataset.batchsize):
                 boxes = y[t][j].cpu()

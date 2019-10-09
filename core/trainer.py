@@ -49,28 +49,19 @@ class DetTrainer(object):
         self.net.reset()
         train_loss = 0
         proba_reset = 1 * (0.9)**epoch
-
-        #change this
-        dataset = dataloader
-        num_batches = len(dataset) # len(dataset) // batchsize
+        dataloader.dataset.reset()
 
         start = 0
         runtime_stats = {'dataloader': 0, 'network': 0}
         for batch_idx, data in enumerate(dataloader):
             if batch_idx > 0:
                 runtime_stats['dataloader'] += time.time() - start
-            inputs, targets = data
+            inputs, targets, reset = data
             if args.cuda:
                 inputs = inputs.cuda()
 
-            if np.random.rand() < proba_reset:
-                # if hasattr(dataloader.dataset, "reset"):
-                #     dataloader.dataset.reset()
-                dataloader.reset()
+            if reset:
                 self.net.reset()
-
-            # deal with permanent reset with a mask
-            # self.net.reset()
 
             start = time.time()
             self.optimizer.zero_grad()
@@ -87,12 +78,12 @@ class DetTrainer(object):
 
             for key, value in loss_dict.items():
                 self.writer.add_scalar('train_'+key, value.data.item(),
-                                       batch_idx + epoch * num_batches )
+                                       batch_idx + epoch * len(dataloader) )
 
             if batch_idx % args.log_every == 0:
                 print('\rtrain_loss: %.3f | avg_loss: %.3f [%d/%d] | @data: %.3f | @net: %.3f'
                       % (loss.data.item(), train_loss / (batch_idx + 1),
-                         batch_idx + 1, num_batches,
+                         batch_idx + 1, len(dataloader),
                          runtime_stats['dataloader'] / (batch_idx + 1),
                          runtime_stats['network'] / (batch_idx + 1)
                          ), ' ')
@@ -104,6 +95,7 @@ class DetTrainer(object):
         self.net.eval()
         self.net.reset()
         val_loss = 0
+        dataloader.dataset.reset()
 
         gts = [] #list of K array of size 5
         proposals = [] #list of K array of size 6
@@ -112,17 +104,12 @@ class DetTrainer(object):
         for batch_idx, data in enumerate(dataloader):
             if batch_idx > 0:
                 runtime_stats['dataloader'] += time.time() - start
-            inputs, targets = data
+            inputs, targets, reset = data
             if args.cuda:
                 inputs = inputs.cuda()
 
-            if batch_idx%10 == 0:
-                # if hasattr(dataloader.dataset, "reset"):
-                #     dataloader.dataset.reset()
-                dataloader.reset()
+            if reset:
                 self.net.reset()
-
-            # self.net.reset()
 
             with torch.no_grad():
                 start = time.time()
@@ -173,26 +160,24 @@ class DetTrainer(object):
         self.net.eval()
         self.net.reset()
 
-        # if hasattr(dataloader.dataset, "reset"):
-        #     dataloader.dataset.reset()
+        dataloader.dataset.reset()
 
-        dataloader.reset()
-
-
-        labelmap = dataloader.labelmap # dataloader.dataset.labelmap
+        labelmap = dataloader.dataset.labelmap
         batchsize = args.batchsize
         time = args.time
         nrows = 2 ** ((batchsize.bit_length() - 1) // 2)
         ncols = batchsize // nrows
         grid = np.zeros((args.test_iter * time, nrows, ncols, args.height, args.width, 3), dtype=np.uint8)
 
-        for period, (inputs, targets) in enumerate(dataloader):
+        for period, (inputs, targets, reset) in enumerate(dataloader):
             images = inputs.clone().data.numpy()
 
             if args.cuda:
                 inputs = inputs.cuda()
 
-            # self.net.reset()
+            if reset:
+                self.net.reset()
+
             with torch.no_grad():
                 targets = self.net.get_boxes(inputs)
 

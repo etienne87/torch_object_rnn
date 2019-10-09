@@ -16,13 +16,13 @@ class FPN(nn.Module):
     def __init__(self, cin=1, cout=256, nmaps=3):
         super(FPN, self).__init__()
         self.cin = cin
-        self.base = 32
+        self.base = 16
         self.cout = cout
         self.nmaps = nmaps
 
         self.conv1 = SequenceWise(nn.Sequential(
-            ConvBN(cin, self.base, stride=2),
-            Bottleneck(self.base, self.base * 2, 2),
+            #ConvBN(cin, self.base, stride=2),
+            Bottleneck(cin, self.base * 2, 2),
             Bottleneck(self.base * 2, self.base * 4, 2),
             Bottleneck(self.base * 4, self.base * 8, 2)
         ))

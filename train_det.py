@@ -24,40 +24,41 @@ def parse_args():
     parser.add_argument('--batchsize', type=int, default=8, help='batchsize')
     parser.add_argument('--lr', default=1e-3, type=float, help='learning rate #1e-5 is advised')
     parser.add_argument('--resume', action='store_true', help='resume from checkpoint')
-    parser.add_argument('--train_iter', type=int, default=100, help='#iter / train epoch')
-    parser.add_argument('--test_iter', type=int, default=10, help='#iter / test epoch')
+    parser.add_argument('--train_iter', type=int, default=500, help='#iter / train epoch')
+    parser.add_argument('--test_iter', type=int, default=50, help='#iter / test epoch')
     parser.add_argument('--epochs', type=int, default=100, help='num epochs to train')
     parser.add_argument('--cuda', action='store_true', help='use cuda')
     parser.add_argument('--log_every', type=int, default=10, help='log every')
     parser.add_argument('--save_video', action='store_true')
-    parser.add_argument('--test_every', default=5, help='test_every')
+    parser.add_argument('--test_every', default=1, help='test_every')
     parser.add_argument('--save_every', default=10, help='save_every')
     parser.add_argument('--num_workers', default=2, help='save_every')
     return parser.parse_args()
 
 
 def make_moving_mnist(args):
-    # datafunc = partial(torch.utils.data.DataLoader, batch_size=args.batchsize, num_workers=args.num_workers,
-    #                    shuffle=False, collate_fn=opts.video_collate_fn, pin_memory=True)
+    # won't work with several workers
+    datafunc = partial(torch.utils.data.DataLoader, batch_size=args.batchsize, num_workers=0,
+                       shuffle=False, collate_fn=opts.video_collate_fn_with_reset_info, pin_memory=True)
     train_dataset = MovingMnistDataset(args.batchsize,
                                        args.time, args.height, args.width, 3, train=True)
     test_dataset = MovingMnistDataset(args.batchsize,
                                       args.time, args.height, args.width, 3, train=False)
-    train_dataset.num_frames = args.train_iter
-    test_dataset.num_frames = args.test_iter
-    # train_dataset = datafunc(train_dataset)
-    # test_dataset = datafunc(test_dataset)
+    train_dataset.num_batches = args.train_iter
+    test_dataset.num_batches = args.test_iter
+    train_dataset = datafunc(train_dataset)
+    test_dataset = datafunc(test_dataset)
     classes = 11
     return train_dataset, test_dataset, classes
 
 
 def make_moving_coco(args):
     dataDir = '/home/etienneperot/workspace/data/coco'
-    datafunc = partial(torch.utils.data.DataLoader, batch_size=batchsize, num_workers=args.num_workers,
+    datafunc = partial(torch.utils.data.DataLoader, batch_size=args.batchsize, num_workers=args.num_workers,
                                          shuffle=True, collate_fn=opts.video_collate_fn, pin_memory=True)
 
-    train_dataset = MovingCOCODataset(dataDir, dataType='train2017', time=time, height=height, width=width)
-    test_dataset = MovingCOCODataset(dataDir, dataType='val2017', time=time, height=height, width=width)
+    train_dataset = MovingCOCODataset(dataDir, dataType='train2017', time=args.time, height=args.height, width=args.width)
+    test_dataset = MovingCOCODataset(dataDir, dataType='val2017', time=args.time, height=args.height, width=args.width)
     train_dataset = datafunc(train_dataset)
     test_dataset = datafunc(test_dataset)
     classes = len(train_dataset.dataset.catNms) + 1
@@ -111,19 +112,14 @@ def main():
         trainer.train(epoch, train_dataset, args)
         map = trainer.evaluate(epoch, test_dataset, args)
 
-        # trainer.writer.add_scalar('learning rate', optimizer.param_groups[0]['lr'], epoch)
-        # scheduler.step(map)
-        #
-        # trainer.save_ckpt(epoch, name='last_checkpoint')
-        #
-        #
-        # if epoch%args.save_every == 0:
-        #     trainer.save_ckpt(epoch, 'checkpoint#'+str(epoch))
-        #
-        # if epoch%args.save_every == 0:
-        #     trainer.test(epoch, test_dataset, args)
+        trainer.writer.add_scalar('learning rate', optimizer.param_groups[0]['lr'], epoch)
+        scheduler.step(map)
 
-        trainer.test(epoch, test_dataset, args)
+        if epoch%args.test_every == 0:
+            trainer.test(epoch, test_dataset, args)
+
+        if epoch%args.save_every == 0:
+            trainer.save_ckpt(epoch, 'checkpoint#'+str(epoch))
 
 if __name__ == '__main__':
     main()

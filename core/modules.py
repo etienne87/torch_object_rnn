@@ -107,7 +107,7 @@ class ASPP(nn.Module):
 
 
 class SequenceWise(nn.Module):
-    def __init__(self, module, parallel=False):
+    def __init__(self, module, parallel=True):
         """
         Collapses input of dim T*N*H to (T*N)*H, and applies to a module.
         Allows handling of variable sequence lengths and minibatch sizes.
@@ -342,6 +342,13 @@ class ConvRNN(nn.Module):
                                              dilation=dilation,
                                              padding=padding,
                                              activation='Identity'))
+
+        # TO TRY: no BN in RNN at all!!!
+        # self.conv_x2h = SequenceWise(nn.Conv2d(in_channels, factor * out_channels,
+        #                                     kernel_size=kernel_size,
+        #                                     stride=stride,
+        #                                     dilation=dilation,
+        #                                     padding=padding))
 
     def forward(self, x):
         y = self.conv_x2h(x)

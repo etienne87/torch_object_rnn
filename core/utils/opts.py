@@ -44,6 +44,14 @@ def image_collate_fn(data_list):
     return images, boxes
 
 
+def video_collate_fn_with_reset_info(data_list):
+    videos, boxes, resets = zip(*data_list)
+    videos = torch.stack(videos, 1)
+    t, n = videos.shape[:2]
+    boxes = [[boxes[i][t] for i in range(n)] for t in range(t)]
+    return videos, boxes, sum(resets)>0
+
+
 class BatchRenorm(nn.Module):
     r"""
     BatchRenorm

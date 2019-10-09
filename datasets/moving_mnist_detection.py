@@ -25,13 +25,11 @@ TEST_DATASET = datasets.MNIST('../data', train=False, download=True,
                                            transforms.Normalize((0.1307,), (0.3081,))
                                        ]))
 
-
 class MovingMnistAnimation(toy.Animation):
     def __init__(self, t=10, h=128, w=128, c=1, max_stop=15,
                 max_objects=3, train=True):
         self.dataset_ = TRAIN_DATASET if train else TEST_DATASET
         super(MovingMnistAnimation, self).__init__(t, h, w, c, max_stop, 'none', 10, max_objects, True)
-
 
     def reset(self):
         super(MovingMnistAnimation, self).reset()
@@ -39,6 +37,7 @@ class MovingMnistAnimation(toy.Animation):
             idx = np.random.randint(0, len(self.dataset_))
             x, y = self.dataset_[idx]
             self.objects[i].class_id = y
+            self.objects[i].idx = idx
             img = x.numpy()[0]
             img = (img-img.min())/(img.max()-img.min())
             abs_img = np.abs(img)
@@ -72,16 +71,12 @@ class MovingMnistDataset(toy.SquaresVideos):
                                                 max_classes, 'none', True)
         self.labelmap = [str(i) for i in range(10)]
 
-
-    def resize(self, height, width):
-        self.height, self.width = height, width
-        self.reset()
-
-    def reset(self):
-        self.animations = [MovingMnistAnimation(self.time, self.height,
+    def build(self):
+        self.animations = [[MovingMnistAnimation(self.time, self.height,
                                                 self.width, self.channels, self.max_stops,
                                                  self.max_objects, self.train)
                            for _ in range(self.batchsize)]
+                           for _ in range(self.num_batches // self.max_consecutive_batches)]
 
 
 
@@ -90,14 +85,16 @@ if __name__ == '__main__':
     import torch
     from core.utils.vis import boxarray_to_boxes, draw_bboxes, make_single_channel_display
 
+    batchsize = 4
+    dataset = MovingMnistDataset(t=10, c=3, h=256, w=256, batchsize=batchsize, train=False)
 
-    dataset = MovingMnistDataset(t=10, c=3, h=256, w=256, batchsize=1, train=False)
-    # dataloader = torch.utils.data.DataLoader(dataset, batch_size=4, num_workers=1,
-    #                                          shuffle=False, collate_fn=opts.video_collate_fn, pin_memory=True)
-
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=batchsize, num_workers=1,
+                                             shuffle=False, collate_fn=opts.video_collate_fn_with_reset_info, pin_memory=True)
+    dataloader.dataset.reset()
     start = 0
-    for (x, y) in dataset:
-
+    for (x, y, r) in dataloader:
+        if r:
+            print('Reset!')
         for t in range(len(y)):
             for j in range(dataset.batchsize):
                 boxes = y[t][j].cpu()
@@ -122,3 +119,5 @@ if __name__ == '__main__':
                 key = cv2.waitKey(5)
                 if key == 27:
                     exit()
+
+
