@@ -107,7 +107,7 @@ class ASPP(nn.Module):
 
 
 class SequenceWise(nn.Module):
-    def __init__(self, module, parallel=True):
+    def __init__(self, module, parallel=False):
         """
         Collapses input of dim T*N*H to (T*N)*H, and applies to a module.
         Allows handling of variable sequence lengths and minibatch sizes.
