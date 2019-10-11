@@ -48,55 +48,25 @@ class SequenceWise(nn.Module):
         return tmpstr
 
 
-# class SeqConvBN(nn.Sequential):
-#     # if BN is harmful when run in parallel accross time, since variance might be artificially too low
-#     def __init__(self, in_channels, out_channels,
-#                  kernel_size=3, stride=1, padding=1, dilation=1,
-#                  bias=True, activation='LeakyReLU'):
-#         conv_parallel = SequenceWise(nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, dilation=dilation,
-#                       padding=padding,
-#                       bias=bias), parallel=True)
-#
-#         bn_sequential = SequenceWise(nn.BatchNorm2d(out_channels), parallel=False)
-#         super(SeqConvBN, self).__init__(
-#             conv_parallel,
-#             bn_sequential,
-#             getattr(nn, activation)
-#         )
-#
-# class SeqBottleneck(nn.Module):
-#     def __init__(self, in_planes, planes, stride=1):
-#         super(SeqBottleneck, self).__init__()
-#         mid_planes = planes//4
-#         self.conv1 = SeqConvBN(in_channels=in_planes, out_channels=mid_planes, kernel_size=1, padding=0, bias=False)
-#         self.conv2 = SeqConvBN(in_channels=mid_planes, out_channels=mid_planes, kernel_size=3, stride=stride, padding=1,
-#                                bias=False)
-#         self.conv3 = SeqConvBN(in_channels=mid_planes, out_channels=planes, kernel_size=1, padding=0, bias=False)
-#
-#         self.downsample = nn.Sequential()
-#         if stride != 1 or in_planes != planes:
-#             self.downsample = SeqConvBN(in_channels=in_planes, out_channels=planes,
-#                                      kernel_size=1, padding=0, stride=stride,
-#                           bias=False, activation='Identity')
-#
-#
-#     def forward(self, x):
-#         out = self.conv1(x)
-#         out = self.conv2(out)
-#         out = self.conv3(out)
-#         out += self.downsample(x)
-#         out = F.relu(out)
-#         return out
+class SeparableConv2d(nn.Sequential):
+    def __init__(self, in_channels, out_channels, kernel_size=1, stride=1, padding=0, dilation=1, bias=False):
+        super(SeparableConv2d, self).__init__(
+            nn.Conv2d(in_channels, in_channels, kernel_size, stride, padding, dilation, groups=in_channels,
+                      bias=bias),
+            nn.Conv2d(in_channels, out_channels, 1, 1, 0, 1, 1, bias=bias)
+        )
+
 
 class ConvLayer(nn.Sequential):
 
     def __init__(self, in_channels, out_channels,
                  kernel_size=3, stride=1, padding=1, dilation=1,
-                 bias=True, norm='InstanceNorm2d', activation='LeakyReLU'):
+                 bias=True, norm='InstanceNorm2d', activation='LeakyReLU', separable=False):
+
+        conv_func = SeparableConv2d if separable else nn.Conv2d
         super(ConvLayer, self).__init__(
-            nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, dilation=dilation,
-                      padding=padding,
-                      bias=bias),
+            conv_func(in_channels, out_channels, kernel_size=kernel_size, stride=stride, dilation=dilation,
+                      padding=padding, bias=bias),
             nn.Identity() if norm == 'none' else getattr(nn, norm)(out_channels),
             getattr(nn, activation)()
         )
@@ -148,8 +118,6 @@ class ASPP(nn.Module):
 
 
 
-
-
 class RNNCell(nn.Module):
     """
     base class that has memory, each class with hidden state has to derive from basernn
@@ -160,7 +128,7 @@ class RNNCell(nn.Module):
     def __init__(self, hard):
         super(RNNCell, self).__init__()
         self.saturation_cost = 0
-        self.saturation_limit = 0.95
+        self.saturation_limit = 1.05
         self.saturation_weight = 1e-1
         self.set_gates(hard)
 
@@ -368,3 +336,66 @@ class ConvRNN(nn.Module):
         self.timepool.reset()
 
 
+
+class BottleneckLSTM(RNNCell):
+    # taken from https://github.com/tensorflow/models/blob/master/research/lstm_object_detection/lstm/lstm_cells.py
+    def __init__(self, in_channels, out_channels, stride, hard=False):
+        super(BottleneckLSTM, self).__init__(hard)
+
+        self.hidden_dim = out_channels
+        self.bottleneck = SeparableConv2d(in_channels + out_channels, out_channels, 3,stride,1,1)
+        self.gates = SeparableConv2d(out_channels, 4 * out_channels, 3, 1, 1)
+        self.reset()
+
+    def forward(self, xi):
+        self.saturation_cost = 0
+        inference = (len(xi.shape) == 4)  # inference for model conversion
+        xiseq = xi.split(1, 0)  # t,n,c,h,w
+
+        if self.prev_h is not None:
+            self.prev_h = self.prev_h.detach()
+            self.prev_c = self.prev_c.detach()
+        else:
+            self.prev_h = torch.zeros((xi.shape[1], self.hidden_dim, xi.shape[-2], xi.shape[-1]), dtype=torch.float32, device=xi.device)
+            self.prev_c = torch.zeros((xi.shape[1], self.hidden_dim, xi.shape[-2], xi.shape[-1]), dtype=torch.float32, device=xi.device)
+
+        result = []
+        for t, xt in enumerate(xiseq):
+            if not inference:  # for training/val (not inference)
+                xt = xt.squeeze(0)
+
+            xht = torch.cat([xt, self.prev_h], dim=1)
+
+            bottleneck = self.tanh(self.bottleneck(xht))
+
+            gates = self.gates(bottleneck)
+
+            cc_i, cc_f, cc_o, cc_g = torch.split(gates, self.hidden_dim, dim=1)
+            i = self.sigmoid(cc_i)
+            f = self.sigmoid(cc_f)
+            o = self.sigmoid(cc_o)
+            g = self.tanh(cc_g)
+            c = f * self.prev_c + i * g
+            h = o * self.tanh(c)
+
+            output = torch.cat([h, bottleneck], dim=1)
+            result.append(output.unsqueeze(0))
+            self.prev_h = h
+            self.prev_c = c
+
+        res = torch.cat(result, dim=0)
+        return res
+
+    def reset(self):
+        self.prev_h, self.prev_c = None, None
+
+if __name__ == '__main__':
+    x = torch.rand(3, 5, 128, 16, 16)
+
+    # sep = SeparableConv2d(128, 128, 3, 1, 1)
+    # z = sep(x[0])
+    # print(z.shape)
+
+    net = BottleneckLSTM(128, 128, 1)
+    y = net(x)
+    print(y.shape)
