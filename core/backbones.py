@@ -5,7 +5,7 @@ from __future__ import print_function
 import torch
 import torch.nn as nn
 from core.utils.opts import time_to_batch, batch_to_time
-from core.modules import ConvLayer, SequenceWise, ConvRNN, Bottleneck
+from core.modules import ConvLayer, SequenceWise, ConvRNN, Bottleneck, BottleneckLSTM
 from core.unet import UNet
 
 
@@ -27,7 +27,7 @@ class FPN(nn.Module):
         ))
 
         self.levels = 4
-        self.conv2 = UNet([self.base * 8] * (self.levels-1) + [cout] * self.levels)
+        self.conv2 = UNet([self.base * 8] * (self.levels-1) + [cout] * self.levels, down_func=BottleneckLSTM, up_func=BottleneckLSTM)
 
 
     def forward(self, x):

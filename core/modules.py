@@ -320,13 +320,6 @@ class ConvRNN(nn.Module):
                                              padding=padding,
                                              activation='Identity'))
 
-        # TO TRY: no BN in RNN at all!!!
-        # self.conv_x2h = SequenceWise(nn.Conv2d(in_channels, factor * out_channels,
-        #                                     kernel_size=kernel_size,
-        #                                     stride=stride,
-        #                                     dilation=dilation,
-        #                                     padding=padding))
-
     def forward(self, x):
         y = self.conv_x2h(x)
         h = self.timepool(y)
@@ -339,34 +332,33 @@ class ConvRNN(nn.Module):
 
 class BottleneckLSTM(RNNCell):
     # taken from https://github.com/tensorflow/models/blob/master/research/lstm_object_detection/lstm/lstm_cells.py
-    def __init__(self, in_channels, out_channels, stride, hard=False):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, hard=False):
         super(BottleneckLSTM, self).__init__(hard)
 
-        self.hidden_dim = out_channels
-        self.bottleneck = SeparableConv2d(in_channels + out_channels, out_channels, 3,stride,1,1)
-        self.gates = SeparableConv2d(out_channels, 4 * out_channels, 3, 1, 1)
+        self.hidden_dim = out_channels//2
+        self.bottleneck_x2h = SequenceWise(ConvLayer(in_channels, self.hidden_dim, kernel_size, stride, padding, dilation, separable=True))
+        self.bottleneck_h2h = SeparableConv2d(self.hidden_dim, self.hidden_dim, kernel_size, 1, padding, dilation)
+        self.gates = SeparableConv2d(self.hidden_dim, 4 * self.hidden_dim, 3, 1, 1)
         self.reset()
+        self.stride = stride
 
     def forward(self, xi):
         self.saturation_cost = 0
+        xi = self.bottleneck_x2h(xi)
         inference = (len(xi.shape) == 4)  # inference for model conversion
         xiseq = xi.split(1, 0)  # t,n,c,h,w
 
         if self.prev_h is not None:
             self.prev_h = self.prev_h.detach()
             self.prev_c = self.prev_c.detach()
-        else:
-            self.prev_h = torch.zeros((xi.shape[1], self.hidden_dim, xi.shape[-2], xi.shape[-1]), dtype=torch.float32, device=xi.device)
-            self.prev_c = torch.zeros((xi.shape[1], self.hidden_dim, xi.shape[-2], xi.shape[-1]), dtype=torch.float32, device=xi.device)
 
         result = []
         for t, xt in enumerate(xiseq):
             if not inference:  # for training/val (not inference)
                 xt = xt.squeeze(0)
 
-            xht = torch.cat([xt, self.prev_h], dim=1)
-
-            bottleneck = self.tanh(self.bottleneck(xht))
+            bottleneck = xt if self.prev_h is None else xt + self.bottleneck_h2h(self.prev_h)
+            bottleneck = torch.tanh(bottleneck)
 
             gates = self.gates(bottleneck)
 
@@ -375,7 +367,10 @@ class BottleneckLSTM(RNNCell):
             f = self.sigmoid(cc_f)
             o = self.sigmoid(cc_o)
             g = self.tanh(cc_g)
-            c = f * self.prev_c + i * g
+            if self.prev_c is None:
+                c = i * g
+            else:
+                c = f * self.prev_c + i * g
             h = o * self.tanh(c)
 
             output = torch.cat([h, bottleneck], dim=1)
@@ -396,6 +391,6 @@ if __name__ == '__main__':
     # z = sep(x[0])
     # print(z.shape)
 
-    net = BottleneckLSTM(128, 128, 1)
+    net = BottleneckLSTM(128, 256, 3, 1, 1, 1)
     y = net(x)
     print(y.shape)
