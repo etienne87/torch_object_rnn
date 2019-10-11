@@ -96,7 +96,8 @@ class DetTrainer(object):
         self.net.eval()
         self.net.reset()
         val_loss = 0
-        dataloader.dataset.max_consecutive_batches = (2 ** epoch)
+        #TODO: set this depending on curriculum argument
+        dataloader.dataset.max_consecutive_batches = 4 #(2 ** epoch)
         dataloader.dataset.build()
 
         gts = [] #list of K array of size 5

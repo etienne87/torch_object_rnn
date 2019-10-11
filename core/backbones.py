@@ -5,7 +5,7 @@ from __future__ import print_function
 import torch
 import torch.nn as nn
 from core.utils.opts import time_to_batch, batch_to_time
-from core.modules import ConvBN, SequenceWise, ConvRNN, Bottleneck, ASPP
+from core.modules import ConvLayer, SequenceWise, ConvRNN, Bottleneck
 from core.unet import UNet
 
 
@@ -21,7 +21,6 @@ class FPN(nn.Module):
         self.nmaps = nmaps
 
         self.conv1 = SequenceWise(nn.Sequential(
-            #ConvBN(cin, self.base, stride=2),
             Bottleneck(cin, self.base * 2, 2),
             Bottleneck(self.base * 2, self.base * 4, 2),
             Bottleneck(self.base * 4, self.base * 8, 2)
@@ -51,9 +50,9 @@ class Trident(nn.Module):
         self.cin = cin
         base = 8
         self.conv1 = SequenceWise(nn.Sequential(
-                ConvBN(cin, base, kernel_size=7, stride=2, padding=3),
-                ConvBN(base, base * 4, kernel_size=7, stride=2, padding=3),
-                ConvBN(base * 4, base * 8, kernel_size=7, stride=2, padding=3)
+            Bottleneck(cin, base, kernel_size=7, stride=2, padding=3),
+            Bottleneck(base, base * 4, kernel_size=7, stride=2, padding=3),
+            Bottleneck(base * 4, base * 8, kernel_size=7, stride=2, padding=3)
         ))
 
         self.conv3 = ConvRNN(base * 8, base * 8, kernel_size=7, stride=2, padding=3)

@@ -6,12 +6,6 @@ import torch.nn as nn
 from torch.nn import functional as F
 import torch
 from core.utils.opts import time_to_batch, batch_to_time
-from functools import partial
-
-try:
-    from inplace_abn import InPlaceABN
-except:
-    print('ibn not imported, module will use more memory')
 
 
 def get_padding(kernel, dilation):
@@ -19,95 +13,8 @@ def get_padding(kernel, dilation):
     return k2//2
 
 
-class DilateSharedConv2d(nn.Conv2d):
-    def __init__(self, *args, **kwargs):
-        super(DilateSharedConv2d, self).__init__(*args, **kwargs)
-
-    def forward(self, sources, rates):
-        outputs = []
-        for src, rate in zip(sources, rates):
-            pad = get_padding(self.kernel_size[0], rate)
-            y = F.conv2d(src, self.weight, self.bias, self.stride, pad, rate, self.groups)
-            outputs.append(y)
-        return outputs
-
-
-
-if hasattr(__file__, 'InPlaceABN'):
-    class ConvBN(nn.Sequential):
-
-        def __init__(self, in_channels, out_channels,
-                     kernel_size=3, stride=1, padding=1, dilation=1,
-                     bias=True, activation='leaky_relu'):
-            activation = 'identity' if activation=='Identity' else 'identity'
-            super(ConvBN, self).__init__(
-                nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, dilation=dilation,
-                          padding=padding,
-                          bias=bias),
-                InPlaceABN(out_channels, activation=activation)
-            )
-else:
-    class ConvBN(nn.Sequential):
-
-        def __init__(self, in_channels, out_channels,
-                     kernel_size=3, stride=1, padding=1, dilation=1,
-                     bias=True, activation='LeakyReLU'):
-            super(ConvBN, self).__init__(
-                nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, dilation=dilation,
-                          padding=padding,
-                          bias=bias),
-                nn.BatchNorm2d(out_channels),
-                getattr(nn, activation)()
-            )
-
-
-
-class Bottleneck(nn.Module):
-    def __init__(self, in_planes, planes, stride=1):
-        super(Bottleneck, self).__init__()
-        mid_planes = planes//4
-        self.conv1 = ConvBN(in_channels=in_planes, out_channels=mid_planes, kernel_size=1, padding=0, bias=False)
-        self.conv2 = ConvBN(in_channels=mid_planes, out_channels=mid_planes, kernel_size=3, stride=stride, padding=1,
-                               bias=False)
-        self.conv3 = ConvBN(in_channels=mid_planes, out_channels=planes, kernel_size=1, padding=0, bias=False)
-
-        self.downsample = nn.Sequential()
-        if stride != 1 or in_planes != planes:
-            self.downsample = ConvBN(in_channels=in_planes, out_channels=planes,
-                                     kernel_size=1, padding=0, stride=stride,
-                          bias=False, activation='Identity')
-
-
-    def forward(self, x):
-        out = self.conv1(x)
-        out = self.conv2(out)
-        out = self.conv3(out)
-        out += self.downsample(x)
-        out = F.relu(out)
-        return out
-
-
-class ASPP(nn.Module):
-    def __init__(self, in_channels, out_channels, atrous_rates=[3, 6, 12, 18]):
-        super(ASPP, self).__init__()
-        modules = []
-        for rate in atrous_rates:
-            modules.append(ConvBN(in_channels, out_channels, dilation=rate, padding=rate))
-
-        self.convs = nn.ModuleList(modules)
-        self.project = ConvBN(out_channels * len(self.convs), out_channels)
-
-    def forward(self, x):
-        res = []
-        for conv in self.convs:
-            res.append(conv(x))
-        res = torch.cat(res, dim=1)
-        res = self.project(res)
-        return res
-
-
 class SequenceWise(nn.Module):
-    def __init__(self, module, parallel=False):
+    def __init__(self, module, parallel=True):
         """
         Collapses input of dim T*N*H to (T*N)*H, and applies to a module.
         Allows handling of variable sequence lengths and minibatch sizes.
@@ -139,6 +46,107 @@ class SequenceWise(nn.Module):
         tmpstr += self.module.__repr__()
         tmpstr += ')'
         return tmpstr
+
+
+# class SeqConvBN(nn.Sequential):
+#     # if BN is harmful when run in parallel accross time, since variance might be artificially too low
+#     def __init__(self, in_channels, out_channels,
+#                  kernel_size=3, stride=1, padding=1, dilation=1,
+#                  bias=True, activation='LeakyReLU'):
+#         conv_parallel = SequenceWise(nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, dilation=dilation,
+#                       padding=padding,
+#                       bias=bias), parallel=True)
+#
+#         bn_sequential = SequenceWise(nn.BatchNorm2d(out_channels), parallel=False)
+#         super(SeqConvBN, self).__init__(
+#             conv_parallel,
+#             bn_sequential,
+#             getattr(nn, activation)
+#         )
+#
+# class SeqBottleneck(nn.Module):
+#     def __init__(self, in_planes, planes, stride=1):
+#         super(SeqBottleneck, self).__init__()
+#         mid_planes = planes//4
+#         self.conv1 = SeqConvBN(in_channels=in_planes, out_channels=mid_planes, kernel_size=1, padding=0, bias=False)
+#         self.conv2 = SeqConvBN(in_channels=mid_planes, out_channels=mid_planes, kernel_size=3, stride=stride, padding=1,
+#                                bias=False)
+#         self.conv3 = SeqConvBN(in_channels=mid_planes, out_channels=planes, kernel_size=1, padding=0, bias=False)
+#
+#         self.downsample = nn.Sequential()
+#         if stride != 1 or in_planes != planes:
+#             self.downsample = SeqConvBN(in_channels=in_planes, out_channels=planes,
+#                                      kernel_size=1, padding=0, stride=stride,
+#                           bias=False, activation='Identity')
+#
+#
+#     def forward(self, x):
+#         out = self.conv1(x)
+#         out = self.conv2(out)
+#         out = self.conv3(out)
+#         out += self.downsample(x)
+#         out = F.relu(out)
+#         return out
+
+class ConvLayer(nn.Sequential):
+
+    def __init__(self, in_channels, out_channels,
+                 kernel_size=3, stride=1, padding=1, dilation=1,
+                 bias=True, norm='InstanceNorm2d', activation='LeakyReLU'):
+        super(ConvLayer, self).__init__(
+            nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, dilation=dilation,
+                      padding=padding,
+                      bias=bias),
+            nn.Identity() if norm == 'none' else getattr(nn, norm)(out_channels),
+            getattr(nn, activation)()
+        )
+
+
+class Bottleneck(nn.Module):
+    def __init__(self, in_planes, planes, stride=1):
+        super(Bottleneck, self).__init__()
+        mid_planes = planes//4
+        self.conv1 = ConvLayer(in_channels=in_planes, out_channels=mid_planes, kernel_size=1, padding=0, bias=False)
+        self.conv2 = ConvLayer(in_channels=mid_planes, out_channels=mid_planes, kernel_size=3, stride=stride, padding=1,
+                               bias=False)
+        self.conv3 = ConvLayer(in_channels=mid_planes, out_channels=planes, kernel_size=1, padding=0, bias=False)
+
+        self.downsample = nn.Sequential()
+        if stride != 1 or in_planes != planes:
+            self.downsample = ConvLayer(in_channels=in_planes, out_channels=planes,
+                                     kernel_size=1, padding=0, stride=stride,
+                          bias=False, activation='Identity')
+
+
+    def forward(self, x):
+        out = self.conv1(x)
+        out = self.conv2(out)
+        out = self.conv3(out)
+        out += self.downsample(x)
+        out = F.relu(out)
+        return out
+
+
+class ASPP(nn.Module):
+    def __init__(self, in_channels, out_channels, atrous_rates=[3, 6, 12, 18]):
+        super(ASPP, self).__init__()
+        modules = []
+        for rate in atrous_rates:
+            modules.append(ConvLayer(in_channels, out_channels, dilation=rate, padding=rate))
+
+        self.convs = nn.ModuleList(modules)
+        self.project = ConvLayer(out_channels * len(self.convs), out_channels)
+
+    def forward(self, x):
+        res = []
+        for conv in self.convs:
+            res.append(conv(x))
+        res = torch.cat(res, dim=1)
+        res = self.project(res)
+        return res
+
+
+
 
 
 
@@ -336,7 +344,8 @@ class ConvRNN(nn.Module):
             factor = 4
 
 
-        self.conv_x2h = SequenceWise(ConvBN(in_channels, factor * out_channels,
+
+        self.conv_x2h = SequenceWise(ConvLayer(in_channels, factor * out_channels,
                                              kernel_size=kernel_size,
                                              stride=stride,
                                              dilation=dilation,

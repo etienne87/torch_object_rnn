@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from core.utils.opts import time_to_batch, batch_to_time
-from core.modules import ConvBN, SequenceWise, ConvRNN, Bottleneck
+from core.modules import ConvLayer, SequenceWise, ConvRNN, Bottleneck
 from functools import partial
 
 
@@ -171,7 +171,7 @@ class OttoNet(nn.Module):
             if len(result) == 0:
                 result = [[item] for item in outs]
             else:
-                for sublist, item in zip(results, outs):
+                for sublist, item in zip(result, outs):
                     sublist.append(item)
 
         result = [torch.cat(item, 0) for item in result]
@@ -188,7 +188,7 @@ class LegacyUNet(nn.Module):
         super(LegacyUNet, self).__init__()
 
         base = channels_per_layer[0]
-        self.inc = SequenceWise(ConvBN(in_channels, base))
+        self.inc = SequenceWise(ConvLayer(in_channels, base))
 
         self.downs = []
         self.ups = []
