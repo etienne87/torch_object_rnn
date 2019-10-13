@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from functools import partial
+from core.modules_v2 import *
 
 
 class UNet(nn.Module):
@@ -78,6 +79,15 @@ class UNet(nn.Module):
 
         return encoders, decoders, skips
 
+    def reset(self):
+        for module in self.downs:
+            if hasattr(module, "reset"):
+                module.reset()
+
+        for module in self.ups:
+            if hasattr(module, "reset"):
+                module.reset()
+
     def fuse(self, x, y):
         if self.mode == 'cat':
             return torch.cat([x, y], dim=2)
@@ -121,7 +131,10 @@ class UNet(nn.Module):
 
 
 class ONet(UNet):
-    def __init__(self, channel_list, down, up, skip, mode='sum', stride=2):
+    def __init__(self, channel_list, mode='sum', stride=2):
+        down, up = partial(ConvLSTM, stride=2), partial(ConvLSTM, stride=1)
+        skip = partial(nn.Conv2d, kernel_size=3, stride=1, padding=1)
+
         super(ONet, self).__init__(channel_list, down, up, skip, mode, stride)
 
         self.feedbacks = nn.ModuleList()
@@ -142,20 +155,13 @@ class ONet(UNet):
 
 
 
-
-
 if __name__ == '__main__':
-    from core.modules_v2 import *
 
     t, n, c, h, w = 10, 3, 3, 128, 128
     x = torch.rand(t, n, c, h, w)
 
-    down, up = partial(ConvLSTM, stride=2), partial(ConvLSTM, stride=1)
-    skip = partial(nn.Conv2d, kernel_size=3, stride=1, padding=1)
-
-
     # net = UNet([3, 32, 64, 128, 64, 32, 16], down, up, skip, mode='sum')
-    net = ONet([3, 32, 64, 128, 128, 64, 32], down, up, skip, mode='sum')
+    net = ONet([3, 32, 64, 128, 128, 64, 32], mode='sum')
     # out = net(x[0])
     # print([item.shape for item in out])
 

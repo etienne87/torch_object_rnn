@@ -10,6 +10,56 @@ from core.utils.opts import time_to_batch, batch_to_time
 
 
 
+class SeparableConv2d(nn.Sequential):
+    def __init__(self, in_channels, out_channels, kernel_size=1, stride=1, padding=0, dilation=1, bias=False):
+        super(SeparableConv2d, self).__init__(
+            nn.Conv2d(in_channels, in_channels, kernel_size, stride, padding, dilation, groups=in_channels,
+                      bias=bias),
+            nn.Conv2d(in_channels, out_channels, 1, 1, 0, 1, 1, bias=bias)
+        )
+
+
+class ConvLayer(nn.Sequential):
+
+    def __init__(self, in_channels, out_channels,
+                 kernel_size=3, stride=1, padding=1, dilation=1,
+                 bias=True, norm='InstanceNorm2d', activation='LeakyReLU', separable=False):
+
+        conv_func = SeparableConv2d if separable else nn.Conv2d
+        super(ConvLayer, self).__init__(
+            conv_func(in_channels, out_channels, kernel_size=kernel_size, stride=stride, dilation=dilation,
+                      padding=padding, bias=bias),
+            nn.Identity() if norm == 'none' else getattr(nn, norm)(out_channels),
+            getattr(nn, activation)()
+        )
+
+
+class Bottleneck(nn.Module):
+    def __init__(self, in_planes, planes, stride=1):
+        super(Bottleneck, self).__init__()
+        mid_planes = planes//4
+        self.conv1 = ConvLayer(in_channels=in_planes, out_channels=mid_planes, kernel_size=1, padding=0, bias=False)
+        self.conv2 = ConvLayer(in_channels=mid_planes, out_channels=mid_planes, kernel_size=3, stride=stride, padding=1,
+                               bias=False)
+        self.conv3 = ConvLayer(in_channels=mid_planes, out_channels=planes, kernel_size=1, padding=0, bias=False)
+
+        self.downsample = nn.Sequential()
+        if stride != 1 or in_planes != planes:
+            self.downsample = ConvLayer(in_channels=in_planes, out_channels=planes,
+                                     kernel_size=1, padding=0, stride=stride,
+                          bias=False, activation='Identity')
+
+
+    def forward(self, x):
+        out = self.conv1(x)
+        out = self.conv2(out)
+        out = self.conv3(out)
+        out += self.downsample(x)
+        out = F.relu(out)
+        return out
+
+
+
 class ParallelWise(nn.Sequential):
     def __init__(self, *args):
         super(ParallelWise, self).__init__(*args)
