@@ -25,23 +25,21 @@ class AnchorLayer(nn.Module):
         anchors[:, 1] = anchors[:, 0] * np.repeat(ratios, len(scales))
         return torch.from_numpy(anchors).float()
 
-    @staticmethod
-    def make_grid(fmap_height, fmap_width, height, width, num_anchors):
-        grid_h, grid_w = torch.meshgrid([torch.linspace(0.5, height + 0.5, fmap_height),
-                                         torch.linspace(0.5, width + 0.5, fmap_width)
+    def make_grid(self, height, width):
+        grid_h, grid_w = torch.meshgrid([torch.linspace(0.5 * self.stride, (height-1 + 0.5) * self.stride, height),
+                                         torch.linspace(0.5 * self.stride, (width-1 + 0.5) * self.stride, width)
                                          ])
         grid = torch.cat([grid_w[..., None], grid_h[..., None]], dim=-1)
 
-        grid = grid[:,:,None,:].expand(fmap_height, fmap_width, num_anchors, 2)
+        grid = grid[:,:,None,:].expand(height, width, self.num_anchors, 2)
         return grid
 
     def forward(self, x):
-        fmap_height, fmap_width = x.shape[-2:]
-        if self.anchors is None or self.anchors.shape[-2:] != (fmap_height, fmap_width) or self.anchors.device != x.device:
-            height, width = fmap_height * self.stride, fmap_width * self.stride
-            grid = AnchorLayer.make_grid(fmap_height, fmap_width, height, width, self.num_anchors).to(x.device)
-            wh = torch.zeros((self.num_anchors * 2, fmap_height, fmap_width), dtype=x.dtype, device=x.device) + self.box_sizes.view(self.num_anchors * 2, 1, 1)
-            wh = wh.permute([1, 2, 0]).view(fmap_height, fmap_width, self.num_anchors, 2)
+        height, width = x.shape[-2:]
+        if self.anchors is None or self.anchors.shape[-2:] != (height, width) or self.anchors.device != x.device:
+            grid = self.make_grid(height, width).to(x.device)
+            wh = torch.zeros((self.num_anchors * 2, height, width), dtype=x.dtype, device=x.device) + self.box_sizes.view(self.num_anchors * 2, 1, 1)
+            wh = wh.permute([1, 2, 0]).view(height, width, self.num_anchors, 2)
             self.anchors = torch.cat([grid, wh], dim=-1)
 
         return self.anchors.view(-1, 4)
@@ -181,11 +179,11 @@ class Anchors(nn.Module):
 
 
 if __name__ == '__main__':
-    x = torch.randn(3, 128, 4, 4)
+    x = torch.randn(3, 128, 8, 8)
 
     layer = AnchorLayer(32, 2**3, [1], [1])
     anchors = layer(x)
-    print(anchors.shape)
+    print('anchor shape: ', anchors.shape)
     print(anchors)
     #
     # anchors = layer(torch.randn(3, 128, 1, 1))
