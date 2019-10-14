@@ -9,13 +9,14 @@ import numpy as np
 
 
 class AnchorLayer(nn.Module):
-    def __init__(self, box_size=32, stride=3, ratios=[1], scales=[1]):
+    def __init__(self, box_size=32, stride=8, ratios=[1], scales=[1]):
         super(AnchorLayer, self).__init__()
         self.num_anchors = len(scales) * len(ratios)
         box_sizes = AnchorLayer.generate_anchors(box_size, ratios, scales)
         self.register_buffer("box_sizes", box_sizes.view(-1))
         self.anchors = None
         self.stride = stride
+        print('stride: ', self.stride)
 
     @staticmethod
     def generate_anchors(box_size, ratios, scales):
@@ -26,6 +27,7 @@ class AnchorLayer(nn.Module):
         return torch.from_numpy(anchors).float()
 
     def make_grid(self, height, width):
+
         grid_h, grid_w = torch.meshgrid([torch.linspace(0.5 * self.stride, (height-1 + 0.5) * self.stride, height),
                                          torch.linspace(0.5 * self.stride, (width-1 + 0.5) * self.stride, width)
                                          ])
@@ -36,6 +38,7 @@ class AnchorLayer(nn.Module):
 
     def forward(self, x):
         height, width = x.shape[-2:]
+        print(height, width)
         if self.anchors is None or self.anchors.shape[-2:] != (height, width) or self.anchors.device != x.device:
             grid = self.make_grid(height, width).to(x.device)
             wh = torch.zeros((self.num_anchors * 2, height, width), dtype=x.dtype, device=x.device) + self.box_sizes.view(self.num_anchors * 2, 1, 1)
@@ -50,7 +53,8 @@ class Anchors(nn.Module):
         super(Anchors, self).__init__()
         self.pyramid_levels = kwargs.get("pyramid_levels", [3, 4, 5, 6])
         self.strides = kwargs.get("strides", [2 ** x for x in self.pyramid_levels])
-        self.sizes = kwargs.get("sizes", [2 ** (x + 2) for x in self.pyramid_levels])
+        self.base_size = kwargs.get("base_size", 32)
+        self.sizes = kwargs.get("sizes", [self.base_size * 2 ** x for x in range(len(self.pyramid_levels))])
         self.ratios = kwargs.get("ratios", np.array([0.5, 1, 2]))
         self.scales = kwargs.get("scales", np.array([2 ** 0, 2 ** (1.0 / 3.0), 2 ** (2.0 / 3.0)]))
         self.fg_iou_threshold = kwargs.get("fg_iou_threshold", 0.5)
@@ -65,8 +69,8 @@ class Anchors(nn.Module):
         self.anchor_generators = nn.ModuleList()
         for i, (box_size, stride) in enumerate(zip(self.sizes, self.strides)):
             self.anchor_generators.append(AnchorLayer(box_size, stride, self.ratios, self.scales))
-            print('boxes for feature map #', i)
-            print(self.anchor_generators[-1].box_sizes.view(self.num_anchors, 2).numpy())
+            # print('boxes for feature map #', i)
+            # print(self.anchor_generators[-1].box_sizes.view(self.num_anchors, 2).numpy())
 
     def forward(self, features):
         default_boxes = []
@@ -104,16 +108,10 @@ class Anchors(nn.Module):
             box = box_preds[mask]
             score = score[mask]
 
-            if nms_thresh == 1.0:
-                boxes.append(box)
-                labels.append(torch.LongTensor(len(box)).fill_(i))
-                scores.append(score)
-            else:
-                keep = self.nms(box, score, nms_thresh)
-                boxes.append(box[keep])
-                labels.append(torch.LongTensor(len(box[keep])).fill_(i))
-                scores.append(score[keep])
-
+            keep = self.nms(box, score, nms_thresh)
+            boxes.append(box[keep])
+            labels.append(torch.LongTensor(len(box[keep])).fill_(i))
+            scores.append(score[keep])
 
         if len(boxes) > 0:
             boxes = torch.cat(boxes, 0)
@@ -180,7 +178,8 @@ class Anchors(nn.Module):
 
 
 if __name__ == '__main__':
-    x = torch.randn(3, 128, 8, 8)
+    from core.ssd.box_coder import SSDBoxCoder, get_box_params_fixed_size
+    # x = torch.randn(3, 128, 8, 8)
 
     # layer = AnchorLayer(32, 2**3, [1, 0.5, 2], [1])
     # anchors = layer(x)
@@ -191,9 +190,31 @@ if __name__ == '__main__':
     # print(anchors.shape)
     # print(anchors)
 
-    # layer = Anchors()
+    imsize = 256
+    sources = []
+    for level in [3,4,5,6]:
+        sources.append(torch.rand(3, 16, imsize>>level, imsize>>level))
+
+    box_coder = Anchors(ratios=[1], scales=[1, 1.5], base_size=24)
 
 
+    class FakeSSD:
+        def __init__(self, height=256, width=256):
+            self.height, self.width = height, width
+            self.fm_sizes, self.steps, self.box_sizes = get_box_params_fixed_size(sources, height, width)
+            self.aspect_ratios = [1]
+            self.scales = [1, 1.5]
+            self.num_anchors = len(self.aspect_ratios) * len(self.scales)
+
+    test = FakeSSD()
+    box_coder2 = SSDBoxCoder(test, 0.4, 0.7)
 
 
+    anchors = box_coder(sources)
 
+    print(anchors)
+    print(box_coder2.default_boxes)
+
+    diff = anchors - box_coder2.default_boxes
+
+    print(diff)
