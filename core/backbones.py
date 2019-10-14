@@ -27,7 +27,7 @@ class FPN(nn.Module):
         ))
 
         self.levels = 4
-        self.conv2 = UNet([self.base * 8] * (self.levels-1) + [cout] * self.levels, down_func=BottleneckLSTM, up_func=BottleneckLSTM)
+        self.conv2 = UNet([self.base * 8] * (self.levels-1) + [cout] * self.levels)
 
 
     def forward(self, x):

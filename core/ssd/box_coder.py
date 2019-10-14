@@ -56,16 +56,17 @@ class SSDBoxCoder(torch.nn.Module):
         self.steps = ssd_model.steps
         self.box_sizes = ssd_model.box_sizes
         self.aspect_ratios = ssd_model.aspect_ratios
+        self.scales = ssd_model.scales
         self.fm_sizes = ssd_model.fm_sizes
         self.height = ssd_model.height
         self.width = ssd_model.width
         self.fm_len = []
-        self.register_buffer('default_boxes', self._get_default_boxes())
+        self.register_buffer('default_boxes', self._get_default_boxes_v2())
         self.register_buffer('default_boxes_xyxy', change_box_order(self.default_boxes, 'xywh2xyxy'))
         self.fg_iou_threshold = fg_iou_threshold
         self.bg_iou_threshold = bg_iou_threshold
         self.use_cuda = False
-        self.variances = (0.1, 0.1)
+        self.variances = (0.1, 0.2)
         self.nms = box_soft_nms if soft_nms else box_nms
 
     def reset(self, ssd_model):
@@ -96,6 +97,30 @@ class SSDBoxCoder(torch.nn.Module):
         self.width = ssd_model.width
         self.default_boxes = self._get_default_boxes()
         self.default_boxes_xyxy =  change_box_order(self.default_boxes, 'xywh2xyxy')
+
+    def _get_default_boxes_v2(self):
+        boxes = []
+        num_anchors = len(self.aspect_ratios) * len(self.scales)
+
+        for i, fm_size in enumerate(self.fm_sizes):
+            f_y, f_x = fm_size
+            s_y, s_x = self.steps[i]
+            print('sy, sx: ', s_y, s_x)
+
+            self.fm_len.append(f_y * f_x * num_anchors)
+            base_size = self.box_sizes[i]
+            for h in range(f_y):
+                for w in range(f_x):
+                    cx = (w + 0.5) * s_x
+                    cy = (h + 0.5) * s_y
+                    for scale in self.scales:
+                        for aspect_ratio in self.aspect_ratios:
+                            w2 = base_size * scale * math.sqrt(aspect_ratio)
+                            h2 = base_size * scale / math.sqrt(aspect_ratio)
+                            boxes.append((cx, cy, w2, h2))
+
+        boxes = torch.Tensor(boxes)
+        return boxes
 
     def _get_default_boxes(self):
         boxes = []
