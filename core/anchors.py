@@ -58,6 +58,7 @@ class Anchors(nn.Module):
         self.num_anchors = len(self.scales) * len(self.ratios)
         self.label_offset = kwargs.get("label_offset", 0) #0 by default, has to be 1 if using softmax
 
+        self.variances = (0.1, 0.2)
         self.nms_type = kwargs.get("nms_type", "soft_nms")
         self.nms = box.box_soft_nms if self.nms_type == "soft_nms" else box.box_nms
 
@@ -79,14 +80,14 @@ class Anchors(nn.Module):
         boxes, cls_targets = box.assign_priors(gt_boxes, labels + self.label_offset, anchors_xyxy,
                                                self.fg_iou_threshold, self.bg_iou_threshold)
         boxes = box.change_box_order(boxes, 'xyxy2xywh')
-        loc_xy = (boxes[:, :2] - anchors[:, :2]) / anchors[:, 2:]
-        loc_wh = torch.log(boxes[:, 2:] / anchors[:, 2:])
+        loc_xy = (boxes[:, :2] - anchors[:, :2]) / anchors[:, 2:] / self.variances[0]
+        loc_wh = torch.log(boxes[:, 2:] / anchors[:, 2:])  / self.variances[1]
         loc_targets = torch.cat([loc_xy, loc_wh], 1)
         return loc_targets, cls_targets
 
     def decode_boxes_from_anchors(self, anchors, loc_preds, cls_preds, score_thresh=0.6, nms_thresh=0.45):
-        xy = loc_preds[:,:2] * anchors[:,2:] + anchors[:,:2]
-        wh = torch.exp(loc_preds[:,2:]) * anchors[:,2:]
+        xy = loc_preds[:,:2] * self.variances[0] * anchors[:,2:] + anchors[:,:2]
+        wh = torch.exp(loc_preds[:,2:]* self.variances[1]) * anchors[:,2:]
 
         box_preds = torch.cat([xy-wh/2, xy+wh/2], 1)
 
@@ -181,10 +182,10 @@ class Anchors(nn.Module):
 if __name__ == '__main__':
     x = torch.randn(3, 128, 8, 8)
 
-    layer = AnchorLayer(32, 2**3, [1], [1])
-    anchors = layer(x)
-    print('anchor shape: ', anchors.shape)
-    print(anchors)
+    # layer = AnchorLayer(32, 2**3, [1, 0.5, 2], [1])
+    # anchors = layer(x)
+    # print('anchor shape: ', anchors.shape)
+    # print(anchors)
     #
     # anchors = layer(torch.randn(3, 128, 1, 1))
     # print(anchors.shape)
