@@ -114,8 +114,9 @@ class SSDBoxCoder(torch.nn.Module):
                 for w in range(f_x):
                     cx = (w + 0.5) * s_x
                     cy = (h + 0.5) * s_y
-                    for scale in self.scales:
-                        for aspect_ratio in self.aspect_ratios:
+
+                    for aspect_ratio in self.aspect_ratios:
+                        for scale in self.scales:
                             w2 = base_size * scale * math.sqrt(aspect_ratio)
                             h2 = base_size * scale / math.sqrt(aspect_ratio)
                             boxes.append((cx, cy, w2, h2))

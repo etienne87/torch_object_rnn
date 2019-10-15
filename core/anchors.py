@@ -21,8 +21,8 @@ class AnchorLayer(nn.Module):
     def generate_anchors(box_size, ratios, scales):
         anchors = box_size * np.tile(scales, (2, len(ratios))).T
         areas = anchors[:, 0] * anchors[:, 1]
-        anchors[:, 0] = np.sqrt(areas / np.repeat(ratios, len(scales)))
-        anchors[:, 1] = anchors[:, 0] * np.repeat(ratios, len(scales))
+        anchors[:, 0] = np.sqrt(areas * np.repeat(ratios, len(scales)))
+        anchors[:, 1] = anchors[:, 0] / np.repeat(ratios, len(scales))
         return torch.from_numpy(anchors).float()
 
     def make_grid(self, height, width):
@@ -188,20 +188,20 @@ if __name__ == '__main__':
     # print(anchors.shape)
     # print(anchors)
 
-    imsize = 256
+    imsize = 512
     sources = []
     for level in [3,4,5,6]:
         sources.append(torch.rand(3, 16, imsize>>level, imsize>>level))
 
-    box_coder = Anchors(ratios=[1], scales=[1, 1.5], base_size=24)
+    box_coder = Anchors(ratios=[0.5, 1, 2], scales=[1, 2**(1./3), 2**(2./3)], base_size=24)
 
 
     class FakeSSD:
-        def __init__(self, height=256, width=256):
+        def __init__(self, height=imsize, width=imsize):
             self.height, self.width = height, width
             self.fm_sizes, self.steps, self.box_sizes = get_box_params_fixed_size(sources, height, width)
-            self.aspect_ratios = [1]
-            self.scales = [1, 1.5]
+            self.aspect_ratios = box_coder.ratios
+            self.scales = box_coder.scales
             self.num_anchors = len(self.aspect_ratios) * len(self.scales)
 
     test = FakeSSD()
@@ -210,9 +210,8 @@ if __name__ == '__main__':
 
     anchors = box_coder(sources)
 
-    print(anchors)
-    print(box_coder2.default_boxes)
 
     diff = anchors - box_coder2.default_boxes
 
-    print(diff)
+    print('diff: ', diff.abs().max().item())
+
