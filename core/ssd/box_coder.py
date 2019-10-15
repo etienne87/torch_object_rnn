@@ -4,7 +4,7 @@ from __future__ import print_function
 
 import math
 import torch
-from core.utils.box import box_soft_nms, box_nms, change_box_order, assign_priors, box_iou
+from core.utils.box import box_soft_nms, box_nms, np_box_nms, change_box_order, assign_priors, box_iou
 from core.utils import opts
 
 
@@ -68,7 +68,7 @@ class SSDBoxCoder(torch.nn.Module):
         self.use_cuda = False
         self.variances = (0.1, 0.2)
         self.nms = box_soft_nms if soft_nms else box_nms
-        self.encode = self.encode_philippe
+        self.encode = self.encode_alt
 
     def reset(self, ssd_model):
         self.steps = ssd_model.steps
@@ -151,7 +151,7 @@ class SSDBoxCoder(torch.nn.Module):
         boxes = torch.Tensor(boxes)
         return boxes
 
-    def encode_philippe(self, boxes, gt_labels):
+    def encode_alt(self, boxes, gt_labels):
         labels = gt_labels + 1
         default_boxes = self.default_boxes_xyxy
         ious = box_iou(default_boxes, boxes)  # [#anchors, #obj]
@@ -204,17 +204,11 @@ class SSDBoxCoder(torch.nn.Module):
         box_preds = torch.cat([xy - wh / 2, xy + wh / 2], -1)
         return box_preds
 
-    def decode(self, loc_preds, cls_preds, score_thresh=0.6, nms_thresh=0.45):
-        xy = loc_preds[:,:2] * self.variances[0] * self.default_boxes[:,2:] + self.default_boxes[:,:2]
-        wh = torch.exp(loc_preds[:,2:] * self.variances[1]) * self.default_boxes[:,2:]
-
-        box_preds = torch.cat([xy-wh/2, xy+wh/2], 1)
-
+    def multiclass_nms(self, box_preds, cls_preds, score_thresh=0.5, nms_thresh=0.45):
         boxes = []
         labels = []
         scores = []
-        num_classes = cls_preds.size(1)
-
+        num_classes = cls_preds.shape[1]
 
         for i in range(num_classes-1):
             score = cls_preds[:,i+1]  # class i corresponds to (i+1) column
@@ -225,15 +219,10 @@ class SSDBoxCoder(torch.nn.Module):
             box = box_preds[mask]
             score = score[mask]
 
-            if nms_thresh == 1.0:
-                boxes.append(box)
-                labels.append(torch.LongTensor(len(box)).fill_(i))
-                scores.append(score)
-            else:
-                keep = self.nms(box, score, nms_thresh)
-                boxes.append(box[keep])
-                labels.append(torch.LongTensor(len(box[keep])).fill_(i))
-                scores.append(score[keep])
+            keep = self.nms(box, score, nms_thresh)
+            boxes.append(box[keep])
+            labels.append(torch.LongTensor(len(box[keep])).fill_(i))
+            scores.append(score[keep])
 
 
         if len(boxes) > 0:
@@ -271,14 +260,27 @@ class SSDBoxCoder(torch.nn.Module):
         return loc_targets, cls_targets
 
     def decode_txn_boxes(self, loc_preds, cls_preds, batchsize, score_thresh):
-        loc_preds = opts.batch_to_time(loc_preds, batchsize)
-        cls_preds = opts.batch_to_time(cls_preds, batchsize)
+        box_preds = self.decode_loc(loc_preds)
+
+        box_preds = opts.batch_to_time(box_preds, batchsize).data
+        cls_preds = opts.batch_to_time(cls_preds, batchsize).data
+
+        tbins, batchsize = box_preds.shape[:2]
+
+
+        box_preds = box_preds.cpu()
+        cls_preds = cls_preds.cpu()
+
+        if self.nms == np_box_nms:
+            box_preds = box_preds.cpu().numpy()
+            cls_preds = cls_preds.cpu().numpy()
+
         targets = []
-        for t in range(loc_preds.size(0)):
+        for t in range(tbins):
             targets_t = []
-            for i in range(loc_preds.size(1)):
-                boxes, labels, scores = self.decode(loc_preds[t, i].data,
-                                                                cls_preds[t, i].data,
+            for i in range(batchsize):
+                boxes, labels, scores = self.multiclass_nms(box_preds[t, i],
+                                                                cls_preds[t, i],
                                                                 score_thresh=score_thresh,
                                                                 nms_thresh=0.6)
                 targets_t.append((boxes, labels, scores))

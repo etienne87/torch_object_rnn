@@ -1,4 +1,6 @@
 import torch
+import numpy as np
+from numba import jit
 
 
 def change_box_order(boxes, order):
@@ -136,7 +138,6 @@ def box_nms(bboxes, scores, threshold=0.5):
         order = order[ids+1]
     return torch.tensor(keep, dtype=torch.long)
 
-
 def box_soft_nms(boxes, scores, nms_threshold=0.3,
                                  soft_threshold=0.3,
                                  sigma=0.5,
@@ -206,6 +207,47 @@ def box_soft_nms(boxes, scores, nms_threshold=0.3,
 
     return torch.tensor(keep, dtype=torch.long)
 
+@jit(nopython=True)
+def np_box_nms(bboxes, scores, threshold=0.5):
+    '''Non maximum suppression.
+
+    Args:
+      bboxes: (tensor) bounding boxes, sized [N,4].
+      scores: (tensor) confidence scores, sized [N,].
+      threshold: (float) overlap threshold.
+
+    Returns:
+      keep: (tensor) selected indices.
+
+    Reference:
+      https://github.com/rbgirshick/py-faster-rcnn/blob/master/lib/nms/py_cpu_nms.py
+    '''
+    x1 = bboxes[:, 0]
+    y1 = bboxes[:, 1]
+    x2 = bboxes[:, 2]
+    y2 = bboxes[:, 3]
+
+    areas = (x2 - x1) * (y2 - y1)
+    order = scores.argsort()[::-1]
+
+    keep = []
+    while order.size > 0:
+        i = order[0]
+        keep.append(i)
+        xx1 = np.maximum(x1[i], x1[order[1:]])
+        yy1 = np.maximum(y1[i], y1[order[1:]])
+        xx2 = np.minimum(x2[i], x2[order[1:]])
+        yy2 = np.minimum(y2[i], y2[order[1:]])
+
+        w = np.maximum(0.0, xx2 - xx1)
+        h = np.maximum(0.0, yy2 - yy1)
+        inter = w * h
+        ovr = inter / (areas[i] + areas[order[1:]] - inter)
+
+        inds = np.where(ovr <= threshold)[0]
+        order = order[inds + 1]
+    return torch.tensor(keep, dtype=torch.long)
+
 
 def assign_priors(gt_boxes, gt_labels, corner_form_priors,
                   fg_iou_threshold, bg_iou_threshold):
@@ -236,12 +278,35 @@ def assign_priors(gt_boxes, gt_labels, corner_form_priors,
     mask = (best_target_per_prior > bg_iou_threshold) * (best_target_per_prior < fg_iou_threshold)
 
 
-    # assigned_ids = torch.unique(best_target_per_prior_index)
-    # assert len(assigned_ids) == len(gt_boxes)
-
     labels[mask] = -1
     labels[best_target_per_prior < bg_iou_threshold] = 0  # the background id
     boxes = gt_boxes[best_target_per_prior_index]
 
+
+    return boxes, labels
+
+def assign_priors_v2(gt_boxes, gt_labels, corner_form_priors,
+                  fg_iou_threshold, bg_iou_threshold, min_pos_threshold=0.2):
+    ious = box_iou(corner_form_priors, gt_boxes)
+    # size: num_priors
+    best_target_per_prior, best_target_per_prior_index = ious.max(1)
+
+    for target_index in range(len(gt_boxes)):
+        best_prior_per_target_index = torch.argmax(ious[:, target_index])
+        if ious[best_prior_per_target_index, target_index] >= min_pos_threshold:
+            #lock the anchor for this gt
+            best_target_per_prior_index[best_prior_per_target_index] = target_index
+            ious[best_prior_per_target_index, :] = 0
+
+    # 2.0 is used to make sure every target has a prior assigned
+    best_target_per_prior.index_fill_(0, best_prior_per_target_index, 2)
+    # size: num_priors
+    labels = gt_labels[best_target_per_prior_index]
+
+    mask = (best_target_per_prior > bg_iou_threshold) * (best_target_per_prior < fg_iou_threshold)
+
+    labels[mask] = -1
+    labels[best_target_per_prior < bg_iou_threshold] = 0  # the background id
+    boxes = gt_boxes[best_target_per_prior_index]
 
     return boxes, labels
