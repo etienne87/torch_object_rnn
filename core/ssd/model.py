@@ -16,7 +16,7 @@ import math
 
 
 
-
+USE_ANCHOR_MODULE = False
 
 class SSD(nn.Module):
     def __init__(self, feature_extractor=FPN,
@@ -31,15 +31,21 @@ class SSD(nn.Module):
         x = torch.randn(1, 1, self.cin, self.height, self.width)
         sources = self.extractor(x)
 
-        self.box_coder = Anchors(pyramid_levels=[i for i in range(3,3+len(sources))], scales=[1.0, 1.5], ratios=[1], label_offset=1, fg_iou_threshold=0.7, bg_iou_threshold=0.4)
-        self.num_anchors = self.box_coder.num_anchors
+        if USE_ANCHOR_MODULE:
+            self.box_coder = Anchors(pyramid_levels=[i for i in range(3,3+len(sources))],
+                                     scales=[1.0, 1.5],
+                                     ratios=[1],
+                                     label_offset=1,
+                                     fg_iou_threshold=0.7, bg_iou_threshold=0.4)
 
-        # self.fm_sizes, self.steps, self.box_sizes = get_box_params_fixed_size(sources, height, width)
-        # self.ary = float(width) / height
-        # self.aspect_ratios = [1]
-        # self.scales = [1, 1.5]
-        # self.num_anchors = len(self.aspect_ratios) * len(self.scales) # self.num_anchors = 2 * len(self.aspect_ratios) + 2
-        # self.box_coder = SSDBoxCoder(self, 0.4, 0.7)
+            self.num_anchors = self.box_coder.num_anchors
+        else:
+            self.fm_sizes, self.steps, self.box_sizes = get_box_params_fixed_size(sources, height, width)
+            self.ary = float(width) / height
+            self.aspect_ratios = [1]
+            self.scales = [1, 1.5]
+            self.num_anchors = len(self.aspect_ratios) * len(self.scales) # self.num_anchors = 2 * len(self.aspect_ratios) + 2
+            self.box_coder = SSDBoxCoder(self, 0.4, 0.7)
 
         self.aspect_ratios = []
         self.in_channels = [item.size(1) for item in sources]
@@ -203,9 +209,11 @@ class SSD(nn.Module):
     def compute_loss(self, x, targets):
         xs = self.extractor(x)
         out_dic = self._forward(xs)
-        loc_targets, cls_targets = self.box_coder.encode_txn_boxes(xs, targets)
 
-        #loc_targets, cls_targets = self.box_coder.encode_txn_boxes(targets)
+        if USE_ANCHOR_MODULE:
+            loc_targets, cls_targets = self.box_coder.encode_txn_boxes(xs, targets)
+        else:
+            loc_targets, cls_targets = self.box_coder.encode_txn_boxes(targets)
 
         loc_preds, cls_preds = out_dic['loc'], out_dic['cls']
 
@@ -220,8 +228,10 @@ class SSD(nn.Module):
         xs = self.extractor(x)
         out_dic = self._forward(xs)
         loc_preds, cls_preds = out_dic['loc'], out_dic['cls']
-        targets = self.box_coder.decode_txn_boxes(xs, loc_preds, cls_preds, x.size(1), score_thresh=score_thresh)
-        # targets = self.box_coder.decode_txn_boxes(loc_preds, cls_preds, x.size(1), score_thresh=score_thresh)
+        if USE_ANCHOR_MODULE:
+            targets = self.box_coder.decode_txn_boxes(xs, loc_preds, cls_preds, x.size(1), score_thresh=score_thresh)
+        else:
+            targets = self.box_coder.decode_txn_boxes(loc_preds, cls_preds, x.size(1), score_thresh=score_thresh)
         return targets
 
 

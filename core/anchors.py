@@ -16,7 +16,6 @@ class AnchorLayer(nn.Module):
         self.register_buffer("box_sizes", box_sizes.view(-1))
         self.anchors = None
         self.stride = stride
-        print('stride: ', self.stride)
 
     @staticmethod
     def generate_anchors(box_size, ratios, scales):
@@ -38,7 +37,6 @@ class AnchorLayer(nn.Module):
 
     def forward(self, x):
         height, width = x.shape[-2:]
-        print(height, width)
         if self.anchors is None or self.anchors.shape[-2:] != (height, width) or self.anchors.device != x.device:
             grid = self.make_grid(height, width).to(x.device)
             wh = torch.zeros((self.num_anchors * 2, height, width), dtype=x.dtype, device=x.device) + self.box_sizes.view(self.num_anchors * 2, 1, 1)

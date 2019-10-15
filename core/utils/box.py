@@ -236,6 +236,9 @@ def assign_priors(gt_boxes, gt_labels, corner_form_priors,
     mask = (best_target_per_prior > bg_iou_threshold) * (best_target_per_prior < fg_iou_threshold)
 
 
+    # assigned_ids = torch.unique(best_target_per_prior_index)
+    # assert len(assigned_ids) == len(gt_boxes)
+
     labels[mask] = -1
     labels[best_target_per_prior < bg_iou_threshold] = 0  # the background id
     boxes = gt_boxes[best_target_per_prior_index]

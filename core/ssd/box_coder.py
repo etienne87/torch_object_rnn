@@ -4,7 +4,7 @@ from __future__ import print_function
 
 import math
 import torch
-from core.utils.box import box_soft_nms, box_nms, change_box_order, assign_priors
+from core.utils.box import box_soft_nms, box_nms, change_box_order, assign_priors, box_iou
 from core.utils import opts
 
 
@@ -68,6 +68,7 @@ class SSDBoxCoder(torch.nn.Module):
         self.use_cuda = False
         self.variances = (0.1, 0.2)
         self.nms = box_soft_nms if soft_nms else box_nms
+        self.encode = self.encode_philippe
 
     def reset(self, ssd_model):
         self.steps = ssd_model.steps
@@ -150,7 +151,39 @@ class SSDBoxCoder(torch.nn.Module):
         boxes = torch.Tensor(boxes)
         return boxes
 
-    def encode(self, gt_boxes, labels):
+    def encode_philippe(self, boxes, gt_labels):
+        labels = gt_labels + 1
+        default_boxes = self.default_boxes_xyxy
+        ious = box_iou(default_boxes, boxes)  # [#anchors, #obj]
+        index = torch.zeros(len(default_boxes), dtype=torch.int64, device=boxes.device).fill_(-1)
+
+        # We match every ground truth with higher than iou_threshold iou with an anchor
+        max_iou_anchors, arg_max_iou_anchors = torch.max(ious, dim=1)
+        mask_greater_than_threshold = max_iou_anchors >= self.fg_iou_threshold
+        mask_ambiguous = (max_iou_anchors >= self.bg_iou_threshold) * (max_iou_anchors < self.fg_iou_threshold)
+        index[mask_greater_than_threshold] = arg_max_iou_anchors[mask_greater_than_threshold]
+        index[mask_ambiguous] = -1
+
+        # We match every ground truth to an anchor the maximum iou iteratively (avoid two gt matched with same anchor)
+        for index_gt in range(len(boxes)):
+            arg_max_iou_gt = torch.argmax(ious[:, index_gt])
+            if ious[arg_max_iou_gt, index_gt] >= 0.2:
+                index[arg_max_iou_gt] = index_gt
+                ious[arg_max_iou_gt, :] = 0
+
+        boxes = boxes[index.clamp(min=0)]  # negative index not supported
+        boxes = change_box_order(boxes, 'xyxy2xywh')
+        default_boxes = self.default_boxes  # change_box_order(default_boxes, 'xyxy2xywh')
+
+        variances = (0.1, 0.2)
+        loc_xy = (boxes[:, :2] - default_boxes[:, :2]) / default_boxes[:, 2:] / variances[0]
+        loc_wh = torch.log(boxes[:, 2:] / default_boxes[:, 2:]) / variances[1]
+        loc_targets = torch.cat([loc_xy, loc_wh], 1)
+        cls_targets = labels[index.clamp(min=0)]
+        cls_targets[index < 0] = 0
+        return loc_targets, cls_targets
+
+    def encode_fast(self, gt_boxes, labels):
         boxes, cls_targets = assign_priors(gt_boxes, labels + 1, self.default_boxes_xyxy,
                                             self.fg_iou_threshold, self.bg_iou_threshold)
         boxes = change_box_order(boxes, 'xyxy2xywh')
@@ -212,6 +245,8 @@ class SSDBoxCoder(torch.nn.Module):
             return None, None, None
 
     def encode_txn_boxes(self, targets):
+        # import time
+        # start = time.time()
         loc_targets, cls_targets = [], []
 
         device = self.default_boxes.device
@@ -230,6 +265,8 @@ class SSDBoxCoder(torch.nn.Module):
 
         loc_targets = torch.cat(loc_targets, dim=0)  # (N,#anchors,4)
         cls_targets = torch.cat(cls_targets, dim=0)  # (N,#anchors,C)
+
+        # print((time.time()-start), ' s for encoding')
 
         return loc_targets, cls_targets
 
