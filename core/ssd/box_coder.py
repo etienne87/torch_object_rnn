@@ -68,7 +68,7 @@ class SSDBoxCoder(torch.nn.Module):
         self.use_cuda = False
         self.variances = (0.1, 0.2)
         self.nms = box_soft_nms if soft_nms else box_nms
-        self.encode = self.encode_alt
+        self.encode = self.encode_fast
 
     def reset(self, ssd_model):
         self.steps = ssd_model.steps
@@ -187,6 +187,7 @@ class SSDBoxCoder(torch.nn.Module):
     def encode_fast(self, gt_boxes, labels):
         boxes, cls_targets = assign_priors(gt_boxes, labels + 1, self.default_boxes_xyxy,
                                             self.fg_iou_threshold, self.bg_iou_threshold)
+
         boxes = change_box_order(boxes, 'xyxy2xywh')
         default_boxes = self.default_boxes
         loc_xy = (boxes[:, :2] - default_boxes[:, :2]) / default_boxes[:, 2:] / self.variances[0]
@@ -233,6 +234,26 @@ class SSDBoxCoder(torch.nn.Module):
             return boxes, labels, scores
         else:
             return None, None, None
+
+    def encode_boxes(self, targets):
+        loc_targets, cls_targets = [], []
+
+        device = self.default_boxes.device
+
+        for t in range(len(targets)):
+            if len(targets[t]) == 0:
+                targets[t] = torch.ones((1, 5), dtype=torch.float32)*-1
+
+            boxes, labels = targets[t][:, :4], targets[t][:, -1]
+            boxes, labels = boxes.to(device), labels.to(device)
+
+            loc_t, cls_t = self.encode(boxes, labels)
+            loc_targets.append(loc_t.unsqueeze(0))
+            cls_targets.append(cls_t.unsqueeze(0).long())
+
+        loc_targets = torch.cat(loc_targets, dim=0)  # (N,#anchors,4)
+        cls_targets = torch.cat(cls_targets, dim=0)  # (N,#anchors,C)
+        return loc_targets, cls_targets
 
     def encode_txn_boxes(self, targets):
         # import time

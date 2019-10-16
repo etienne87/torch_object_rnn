@@ -79,9 +79,9 @@ class Anchors(nn.Module):
 
     def encode_boxes_from_anchors(self, anchors, gt_boxes, labels):
         anchors_xyxy = box.change_box_order(anchors, "xywh2xyxy")
-        boxes, cls_targets = box.assign_priors(gt_boxes, labels + self.label_offset, anchors_xyxy,
+        boxes, cls_targets = box.assign_priors(gt_boxes, labels + 1, anchors_xyxy,
                                                self.fg_iou_threshold, self.bg_iou_threshold)
-        boxes = box.change_box_order(boxes, 'xyxy2xywh')
+        boxes = box.change_box_order(boxes, "xyxy2xywh")
         loc_xy = (boxes[:, :2] - anchors[:, :2]) / anchors[:, 2:] / self.variances[0]
         loc_wh = torch.log(boxes[:, 2:] / anchors[:, 2:])  / self.variances[1]
         loc_targets = torch.cat([loc_xy, loc_wh], 1)
@@ -121,7 +121,7 @@ class Anchors(nn.Module):
 
     def encode_boxes(self, features, targets):
         loc_targets, cls_targets = [], []
-        device = features.device
+        device = features[0].device
         anchors = self(features) #1,A,4
 
         for i in range(len(targets)):
@@ -193,7 +193,8 @@ if __name__ == '__main__':
     for level in [3,4,5,6]:
         sources.append(torch.rand(3, 16, imsize>>level, imsize>>level))
 
-    box_coder = Anchors(ratios=[0.5, 1, 2], scales=[1, 2**(1./3), 2**(2./3)], base_size=24)
+    box_coder = Anchors(ratios=[0.5, 1, 2], scales=[1, 2**(1./3), 2**(2./3)], base_size=24,
+                        label_offset=1, fg_iou_threshold=0.7, bg_iou_threshold=0.4)
 
 
     class FakeSSD:
@@ -205,13 +206,55 @@ if __name__ == '__main__':
             self.num_anchors = len(self.aspect_ratios) * len(self.scales)
 
     test = FakeSSD()
-    box_coder2 = SSDBoxCoder(test, 0.4, 0.7)
+    box_coder2 = SSDBoxCoder(test, 0.7, 0.4)
 
 
     anchors = box_coder(sources)
+    anchors_xyxy = box.change_box_order(anchors, "xywh2xyxy")
 
 
     diff = anchors - box_coder2.default_boxes
+    diff2 = anchors_xyxy - box_coder2.default_boxes_xyxy
 
-    print('diff: ', diff.abs().max().item())
+    print('diff default boxes: ', diff.abs().max().item(), diff.sum().item())
+    print('diff default boxesxyxy: ', diff2.abs().max().item(), diff2.sum().item())
 
+    #take some boxes & check if same default boxes come out
+    from datasets.moving_box_detection import SquaresVideos
+
+    dataset = SquaresVideos(t=10, c=1, h=256, w=256, batchsize=2, mode='diff', max_objects=20, render=False)
+    _, targets, _ = dataset[0]
+    #boxes = boxes[0]
+    # print('boxes: ', boxes)
+
+    # loc_t, cls_t = box_coder.encode_boxes(sources, boxes)
+    #
+    # print(loc_t.shape, cls_t.shape)
+    #
+    # loc_t2, cls_t2 = box_coder2.encode_boxes(boxes)
+
+    boxes, labels = targets[0][:, :4], targets[0][:, -1]
+    # loc_t, cls_t = box_coder.encode_boxes_from_anchors(anchors, boxes.clone(), labels.clone())
+
+    import pdb
+    pdb.set_trace()
+    #
+    # loc_t2, cls_t2 = box_coder2.encode(boxes, labels)
+    print('box coder1: ', box_coder.fg_iou_threshold, box_coder.bg_iou_threshold)
+    loc_t, cls_t = box.assign_priors(boxes, labels + 1, anchors_xyxy,
+                                               box_coder.fg_iou_threshold, box_coder.bg_iou_threshold)
+
+    print('box coder2 : ', box_coder2.fg_iou_threshold, box_coder2.bg_iou_threshold)
+    loc_t2, cls_t2 = box.assign_priors(boxes, labels + 1, anchors_xyxy,
+                                       box_coder2.fg_iou_threshold, box_coder2.bg_iou_threshold)
+
+    diff_loc = loc_t - loc_t2
+    diff_cls = cls_t - cls_t2
+
+    # print(diff_cls[diff_cls != 0])
+    #
+    # import pdb
+    # pdb.set_trace()
+    #
+    # print('diff loc encoding: ', diff_loc.abs().max())
+    print('diff cls encoding: ', diff_cls.abs().max())

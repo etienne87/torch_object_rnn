@@ -16,7 +16,7 @@ import math
 
 
 
-USE_ANCHOR_MODULE = False
+USE_ANCHOR_MODULE = True
 
 class SSD(nn.Module):
     def __init__(self, feature_extractor=FPN,
@@ -36,7 +36,7 @@ class SSD(nn.Module):
                                      scales=[1.0, 1.5],
                                      ratios=[1],
                                      label_offset=1,
-                                     fg_iou_threshold=0.7, bg_iou_threshold=0.4)
+                                     fg_iou_threshold=0.5, bg_iou_threshold=0.4)
 
             self.num_anchors = self.box_coder.num_anchors
         else:
@@ -45,7 +45,7 @@ class SSD(nn.Module):
             self.aspect_ratios = [1]
             self.scales = [1, 1.5]
             self.num_anchors = len(self.aspect_ratios) * len(self.scales) # self.num_anchors = 2 * len(self.aspect_ratios) + 2
-            self.box_coder = SSDBoxCoder(self, 0.4, 0.7)
+            self.box_coder = SSDBoxCoder(self, 0.7, 0.4)
 
         self.aspect_ratios = []
         self.in_channels = [item.size(1) for item in sources]
@@ -141,7 +141,6 @@ class SSD(nn.Module):
         layers.append(nn.Conv2d(256, out_planes, kernel_size=3, stride=1, padding=1))
 
         return nn.Sequential(*layers)
-
 
     def reset(self):
         self.extractor.reset()
