@@ -79,7 +79,7 @@ class Anchors(nn.Module):
 
     def encode_boxes_from_anchors(self, anchors, gt_boxes, labels):
         anchors_xyxy = box.change_box_order(anchors, "xywh2xyxy")
-        boxes, cls_targets = box.assign_priors(gt_boxes, labels + 1, anchors_xyxy,
+        boxes, cls_targets = box.assign_priors_v2(gt_boxes, labels + 1, anchors_xyxy,
                                                self.fg_iou_threshold, self.bg_iou_threshold)
         boxes = box.change_box_order(boxes, "xyxy2xywh")
         loc_xy = (boxes[:, :2] - anchors[:, :2]) / anchors[:, 2:] / self.variances[0]
