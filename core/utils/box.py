@@ -74,9 +74,6 @@ def box_iou(box1, box2):
     Reference:
       https://github.com/chainer/chainercv/blob/master/chainercv/utils/bbox/bbox_iou.py
     '''
-    N = box1.size(0)
-    M = box2.size(0)
-
     lt = torch.max(box1[:,None,:2], box2[:,:2])  # [N,M,2]
     rb = torch.min(box1[:,None,2:], box2[:,2:])  # [N,M,2]
 
@@ -86,6 +83,33 @@ def box_iou(box1, box2):
     area1 = (box1[:,2]-box1[:,0]) * (box1[:,3]-box1[:,1])  # [N,]
     area2 = (box2[:,2]-box2[:,0]) * (box2[:,3]-box2[:,1])  # [M,]
     iou = inter / (area1[:,None] + area2 - inter)
+    return iou
+
+
+def batch_box_iou(box1, box2):
+    '''Compute the intersection over union of two set of boxes.
+
+    The box order must be (xmin, ymin, xmax, ymax).
+
+    Args:
+      box1: (tensor) bounding boxes, sized [N,4].
+      box2: (tensor) bounding boxes, sized [B,M,4].
+
+    Return:
+      (tensor) iou, sized [N,M].
+
+    Reference:
+      https://github.com/chainer/chainercv/blob/master/chainercv/utils/bbox/bbox_iou.py
+    '''
+    lt = torch.max(box1[None,:,None,:2], box2[:,None,:,:2])  # [B,N,M,2]
+    rb = torch.min(box1[None,:,None,2:], box2[:,None,:,2:])  # [B,N,M,2]
+
+    wh = (rb-lt).clamp(min=0)      # [B,N,M,2]
+    inter = wh[...,0] * wh[...,1]  # [B,N,M]
+
+    area1 = (box1[...,2]-box1[...,0]) * (box1[:,3]-box1[:,1])  # [N,]
+    area2 = (box2[...,2]-box2[...,0]) * (box2[...,3]-box2[...,1])  # [B,M,]
+    iou = inter / (area1[None,:,None] + area2[:,None,:] - inter) # [B,N,M]
     return iou
 
 
@@ -313,7 +337,9 @@ def assign_priors_v2(gt_boxes, gt_labels, corner_form_priors,
 
     return boxes, labels
 
-def assign_priors_with_iou(ious, gt_boxes, gt_labels, corner_form_priors,
+
+#TODO: remove this, this is a study of optimization for batch encoding of boxes
+def assign_priors_with_iou(ious, gt_boxes, gt_labels,
                   fg_iou_threshold, bg_iou_threshold):
     """Assign ground truth boxes and targets to priors.
     Args:
@@ -343,5 +369,39 @@ def assign_priors_with_iou(ious, gt_boxes, gt_labels, corner_form_priors,
     labels[best_target_per_prior < bg_iou_threshold] = 0  # the background id
     boxes = gt_boxes[best_target_per_prior_index]
 
+    return boxes, labels
+
+
+def assign_prior_with_best_overlaps(best_target_per_prior, best_target_per_prior_index,
+                                     best_prior_per_target_index,
+                                     gt_boxes, gt_labels, fg_iou_threshold, bg_iou_threshold):
+    for target_index, prior_index in enumerate(best_prior_per_target_index):
+        best_target_per_prior_index[prior_index] = target_index
+
+    # 2.0 is used to make sure every target has a prior assigned
+    best_target_per_prior.index_fill_(0, best_prior_per_target_index, 2)
+
+    # size: num_priors
+    labels = gt_labels[best_target_per_prior_index.clamp_(0)].clone()
+
+    mask_bg = best_target_per_prior < bg_iou_threshold
+    mask_ign = (best_target_per_prior > bg_iou_threshold) * (best_target_per_prior < fg_iou_threshold)
+
+    labels[mask_ign] = -1
+    labels[mask_bg] = 0  # the background id
+    boxes = gt_boxes[best_target_per_prior_index]
+
+    return boxes, labels
+
+def assign_prior_with_best_overlaps_no_for_loop(best_target_per_prior, best_target_per_prior_index,
+                                     gt_boxes, gt_labels, fg_iou_threshold, bg_iou_threshold):
+    labels = gt_labels[best_target_per_prior_index.clamp_(0)].clone()
+
+    mask_bg = best_target_per_prior < bg_iou_threshold
+    mask_ign = (best_target_per_prior > bg_iou_threshold) * (best_target_per_prior < fg_iou_threshold)
+
+    labels[mask_ign] = -1
+    labels[mask_bg] = 0  # the background id
+    boxes = gt_boxes[best_target_per_prior_index]
 
     return boxes, labels

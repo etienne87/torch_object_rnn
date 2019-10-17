@@ -209,10 +209,11 @@ class SSD(nn.Module):
         xs = self.extractor(x)
         out_dic = self._forward(xs)
 
-        if USE_ANCHOR_MODULE:
-            loc_targets, cls_targets = self.box_coder.encode_txn_boxes(xs, targets)
-        else:
-            loc_targets, cls_targets = self.box_coder.encode_txn_boxes(targets)
+        with torch.no_grad():
+            if USE_ANCHOR_MODULE:
+                loc_targets, cls_targets = self.box_coder.encode_txn_boxes(xs, targets)
+            else:
+                loc_targets, cls_targets = self.box_coder.encode_txn_boxes(targets)
 
         loc_preds, cls_preds = out_dic['loc'], out_dic['cls']
 

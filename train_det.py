@@ -21,7 +21,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description='PyTorch SSD Training')
     parser.add_argument('logdir', type=str, help='where to save')
     parser.add_argument('--path', type=str, default='', help='path to dataset')
-    parser.add_argument('--batchsize', type=int, default=8, help='batchsize')
+    parser.add_argument('--batchsize', type=int, default=1, help='batchsize')
+    parser.add_argument('--time', type=int, default=1, help='timesteps')
+
     parser.add_argument('--lr', default=1e-3, type=float, help='learning rate #1e-5 is advised')
     parser.add_argument('--resume', action='store_true', help='resume from checkpoint')
     parser.add_argument('--train_iter', type=int, default=500, help='#iter / train epoch')
@@ -42,9 +44,9 @@ def make_moving_mnist(args):
     datafunc = partial(torch.utils.data.DataLoader, batch_size=args.batchsize, num_workers=0,
                        shuffle=False, collate_fn=opts.video_collate_fn_with_reset_info, pin_memory=True)
     train_dataset = MovingMnistDataset(args.batchsize,
-                                       args.time, args.height, args.width, 3, train=True, max_objects=15)
+                                       args.time, args.height, args.width, 3, train=True, max_objects=5)
     test_dataset = MovingMnistDataset(args.batchsize,
-                                      args.time, args.height, args.width, 3, train=False, max_objects=15)
+                                      args.time, args.height, args.width, 3, train=False, max_objects=5)
     train_dataset.num_batches = args.train_iter
     test_dataset.num_batches = args.test_iter
     train_dataset = datafunc(train_dataset)
@@ -71,9 +73,8 @@ def main():
 
     os.environ['OMP_NUM_THREADS'] = '1'
 
-    classes, cin, time, height, width = 11, 3, 1, 256, 256
+    classes, cin, height, width = 11, 3, 256, 256
 
-    args.time = time
     args.cin = cin
     args.height = height
     args.width = width
