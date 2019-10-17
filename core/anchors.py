@@ -171,66 +171,80 @@ class Anchors(nn.Module):
         # because this is padded, it is now easier to do things in parallel!
         ious = ious.reshape(total, max_size, len(anchors)).permute(0, 2, 1)
 
-        # ious = ious[0]
-        # loc_targets_v2, cls_targets_v2 = self.encode_boxes_from_anchors(anchors, gt_boxes, gt_labels)
+        ious = ious[0]
 
+        #loc_targets_v2, cls_targets_v2 = self.encode_boxes_from_anchors(anchors, gt_boxes, gt_labels)
 
-        best_target_per_prior, best_target_per_prior_index = ious.max(2)
-        best_prior_per_target, best_prior_per_target_index = ious.max(1)
-
-        for target_index in range(max_size):
-            best_target_per_prior_index[:, best_prior_per_target_index[:, target_index]] = target_index
-            best_target_per_prior[:, best_prior_per_target_index[:, target_index]] = 2.0
-
-        # size: num_priors
-        labels = gt_labels[best_target_per_prior_index]
-
-        mask = (best_target_per_prior > self.bg_iou_threshold) * (best_target_per_prior < self.fg_iou_threshold)
-
-        labels[mask] = -1
-        labels[best_target_per_prior < self.bg_iou_threshold] = 0  # the background id
-        boxes = gt_boxes[best_target_per_prior_index]
-
-
-        default_boxes = anchors[None]
+        boxes, cls_targets_v2 = box.assign_priors_v2(gt_boxes, gt_labels, anchors_xyxy,
+                                                  self.fg_iou_threshold, self.bg_iou_threshold)
         boxes = box.change_box_order(boxes, "xyxy2xywh")
-        boxes[...,:2] = boxes[...,:2].clamp_(1, int(1e3))
+        boxes[..., :2] = boxes[..., :2].clamp_(1, int(1e3))
 
-        loc_xy = (boxes[..., :2] - default_boxes[..., :2]) / default_boxes[..., 2:] / self.variances[0]
-        loc_wh = torch.log(boxes[..., 2:] / default_boxes[..., 2:]) / self.variances[1]
-        loc_targets_v2 = torch.cat([loc_xy, loc_wh], 2)
-        cls_targets_v2 = labels.long()
+        loc_xy = (boxes[..., :2] - anchors[..., :2]) / anchors[..., 2:] / self.variances[0]
+        loc_wh = torch.log(boxes[..., 2:] / anchors[..., 2:]) / self.variances[1]
+        loc_targets_v2 = torch.cat([loc_xy, loc_wh], 1)
+
+        loc_targets_v2 = loc_targets_v2[None]
+        cls_targets_v2 = cls_targets_v2[None].long()
+
+
+
+        # best_target_per_prior, best_target_per_prior_index = ious.max(2)
+        # best_prior_per_target, best_prior_per_target_index = ious.max(1)
+        #
+        # for target_index in range(max_size):
+        #     best_target_per_prior_index[:, best_prior_per_target_index[:, target_index]] = target_index
+        #     best_target_per_prior[:, best_prior_per_target_index[:, target_index]] = 2.0
+        #
+        # # size: num_priors
+        # labels = gt_labels[best_target_per_prior_index]
+        #
+        # mask = (best_target_per_prior > self.bg_iou_threshold) * (best_target_per_prior < self.fg_iou_threshold)
+        #
+        # labels[mask] = -1
+        # labels[best_target_per_prior < self.bg_iou_threshold] = 0  # the background id
+        # boxes = gt_boxes[best_target_per_prior_index]
+        #
+        #
+        # default_boxes = anchors[None]
+        # boxes = box.change_box_order(boxes, "xyxy2xywh")
+        # boxes[...,:2] = boxes[...,:2].clamp_(1, int(1e3))
+        #
+        # loc_xy = (boxes[..., :2] - default_boxes[..., :2]) / default_boxes[..., 2:] / self.variances[0]
+        # loc_wh = torch.log(boxes[..., 2:] / default_boxes[..., 2:]) / self.variances[1]
+        # loc_targets_v2 = torch.cat([loc_xy, loc_wh], 2)
+        # cls_targets_v2 = labels.long()
+        #
+        # torch.cuda.synchronize()
+        # print('iou: ', time.time() - start)
+
+
+        start = time.time()
+        loc_targets, cls_targets = [], []
+        for t in range(len(targets)):
+            for i in range(len(targets[t])):
+                if len(targets[t][i]) == 0:
+                    targets[t][i] = torch.ones((1, 5), dtype=torch.float32) * -1
+
+                boxes, labels = targets[t][i][:, :4], targets[t][i][:, -1]
+                boxes, labels = boxes.to(device), labels.to(device)
+                loc_t, cls_t = self.encode_boxes_from_anchors(anchors, boxes, labels)
+                loc_targets.append(loc_t.unsqueeze(0))
+                cls_targets.append(cls_t.unsqueeze(0).long())
+
+        loc_targets = torch.cat(loc_targets, dim=0)  # (N,#anchors,4)
+        cls_targets = torch.cat(cls_targets, dim=0)  # (N,#anchors,C)
 
         torch.cuda.synchronize()
-        print('iou: ', time.time() - start)
+        print('current encoding: ', time.time() - start)
 
 
-        # start = time.time()
-        # loc_targets, cls_targets = [], []
-        # for t in range(len(targets)):
-        #     for i in range(len(targets[t])):
-        #         if len(targets[t][i]) == 0:
-        #             targets[t][i] = torch.ones((1, 5), dtype=torch.float32) * -1
-        #
-        #         boxes, labels = targets[t][i][:, :4], targets[t][i][:, -1]
-        #         boxes, labels = boxes.to(device), labels.to(device)
-        #         loc_t, cls_t = self.encode_boxes_from_anchors(anchors, boxes, labels)
-        #         loc_targets.append(loc_t.unsqueeze(0))
-        #         cls_targets.append(cls_t.unsqueeze(0).long())
-        #
-        # loc_targets = torch.cat(loc_targets, dim=0)  # (N,#anchors,4)
-        # cls_targets = torch.cat(cls_targets, dim=0)  # (N,#anchors,C)
+        diff = cls_targets - cls_targets_v2
+        print('diff: ', diff.abs().max().item())
 
-        # torch.cuda.synchronize()
-        # print('current encoding: ', time.time() - start)
-        #
-        #
-        # diff = cls_targets - cls_targets_v2
-        # print('diff: ', diff.abs().max().item())
-        #
-        #
-        # import pdb
-        # pdb.set_trace()
+
+        import pdb
+        pdb.set_trace()
 
         return loc_targets_v2, cls_targets_v2
 
