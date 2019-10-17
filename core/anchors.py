@@ -67,15 +67,19 @@ class Anchors(nn.Module):
         self.anchor_generators = nn.ModuleList()
         for i, (box_size, stride) in enumerate(zip(self.sizes, self.strides)):
             self.anchor_generators.append(AnchorLayer(box_size, stride, self.ratios, self.scales))
-            # print('boxes for feature map #', i)
-            # print(self.anchor_generators[-1].box_sizes.view(self.num_anchors, 2).numpy())
+        self.anchors = None
+
 
     def forward(self, features):
-        default_boxes = []
-        for feature_map, anchor_layer in zip(features, self.anchor_generators):
-            anchors = anchor_layer(feature_map)
-            default_boxes.append(anchors)
-        return torch.cat(default_boxes, dim=0)
+        size = sum([(item.shape[-2]*item.shape[-1]*self.num_anchors) for item in features])
+        if self.anchors is None or len(self.anchors) != size:
+            default_boxes = []
+            for feature_map, anchor_layer in zip(features, self.anchor_generators):
+                anchors = anchor_layer(feature_map)
+                default_boxes.append(anchors)
+            self.anchors = torch.cat(default_boxes, dim=0)
+
+        return self.anchors
 
     def encode_boxes_from_anchors(self, anchors, gt_boxes, labels):
         anchors_xyxy = box.change_box_order(anchors, "xywh2xyxy")
@@ -137,10 +141,67 @@ class Anchors(nn.Module):
         return loc_targets, cls_targets
 
     def encode_txn_boxes(self, features, targets):
-        loc_targets, cls_targets = [], []
-        device = features[0].device
-        anchors = self(features)
+        # import time
 
+        torch.cuda.synchronize()
+        # start = time.time()
+        anchors = self(features)
+        device = features[0].device
+
+
+        # tbins, batchsize = len(targets), len(targets[0])
+        # total = tbins * batchsize
+        # max_size = max([max([len(frame) for frame in time]) for time in targets])
+        # gt_padded = torch.ones((total, max_size, 5), dtype=torch.float32) * -1
+        #
+        # for t in range(len(targets)):
+        #     for i in range(len(targets[t])):
+        #         frame = targets[t][i]
+        #         frame[:, 4] += self.label_offset
+        #         gt_padded[t * batchsize + i, :len(frame)] = frame
+        #
+        # gt_padded = gt_padded.to(device).view(-1, 5)
+        #
+        # gt_boxes = gt_padded[:, :4]
+        # gt_labels = gt_padded[:, 4]
+        #
+        # ious = box.box_iou(gt_boxes, anchors)
+        #
+        # # because this is padded, it is now easier to do things in parallel!
+        # ious = ious.reshape(total, max_size, len(anchors)).permute(0, 2, 1)
+        #
+        # best_target_per_prior, best_target_per_prior_index = ious.max(2)
+        # best_prior_per_target, best_prior_per_target_index = ious.max(1)
+        #
+        # for target_index in range(max_size):
+        #     best_target_per_prior_index[:, best_prior_per_target_index[:, target_index]] = target_index
+        #     best_target_per_prior[:, best_prior_per_target_index[:, target_index]] = 2.0
+        #
+        # # size: num_priors
+        # labels = gt_labels[best_target_per_prior_index]
+        #
+        # mask = (best_target_per_prior > self.bg_iou_threshold) * (best_target_per_prior < self.fg_iou_threshold)
+        #
+        # labels[mask] = -1
+        # labels[best_target_per_prior < self.bg_iou_threshold] = 0  # the background id
+        # boxes = gt_boxes[best_target_per_prior_index]
+        #
+        #
+        # default_boxes = anchors[None]
+        # boxes = box.change_box_order(boxes, "xyxy2xywh")
+        # boxes[...,:2] = boxes[...,:2].clamp_(1, int(1e3))
+        #
+        # loc_xy = (boxes[..., :2] - default_boxes[..., :2]) / default_boxes[..., 2:] / self.variances[0]
+        # loc_wh = torch.log(boxes[..., 2:] / default_boxes[..., 2:]) / self.variances[1]
+        # loc_targets_v2 = torch.cat([loc_xy, loc_wh], 2)
+        # cls_targets_v2 = labels.long()
+        #
+        # torch.cuda.synchronize()
+        # print('iou: ', time.time() - start)
+
+
+        start = time.time()
+        loc_targets, cls_targets = [], []
         for t in range(len(targets)):
             for i in range(len(targets[t])):
                 if len(targets[t][i]) == 0:
@@ -155,7 +216,18 @@ class Anchors(nn.Module):
         loc_targets = torch.cat(loc_targets, dim=0)  # (N,#anchors,4)
         cls_targets = torch.cat(cls_targets, dim=0)  # (N,#anchors,C)
 
-        return loc_targets, cls_targets
+        # torch.cuda.synchronize()
+        # print('current encoding: ', time.time() - start)
+        #
+        #
+        # diff = cls_targets - cls_targets_v2
+        # print('diff: ', diff.abs().max().item())
+        #
+        #
+        # import pdb
+        # pdb.set_trace()
+
+        return loc_targets_v2, cls_targets_v2
 
     def decode_txn_boxes(self, features, loc_preds, cls_preds, batchsize, score_thresh):
         anchors = self(features)

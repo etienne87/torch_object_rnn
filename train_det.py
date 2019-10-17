@@ -42,9 +42,9 @@ def make_moving_mnist(args):
     datafunc = partial(torch.utils.data.DataLoader, batch_size=args.batchsize, num_workers=0,
                        shuffle=False, collate_fn=opts.video_collate_fn_with_reset_info, pin_memory=True)
     train_dataset = MovingMnistDataset(args.batchsize,
-                                       args.time, args.height, args.width, 3, train=True)
+                                       args.time, args.height, args.width, 3, train=True, max_objects=15)
     test_dataset = MovingMnistDataset(args.batchsize,
-                                      args.time, args.height, args.width, 3, train=False)
+                                      args.time, args.height, args.width, 3, train=False, max_objects=15)
     train_dataset.num_batches = args.train_iter
     test_dataset.num_batches = args.test_iter
     train_dataset = datafunc(train_dataset)
@@ -71,7 +71,7 @@ def main():
 
     os.environ['OMP_NUM_THREADS'] = '1'
 
-    classes, cin, time, height, width = 11, 3, 10, 256, 256
+    classes, cin, time, height, width = 11, 3, 1, 256, 256
 
     args.time = time
     args.cin = cin

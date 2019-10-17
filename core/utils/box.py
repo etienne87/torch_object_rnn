@@ -14,11 +14,12 @@ def change_box_order(boxes, order):
       (tensor) converted bounding boxes, sized [N,4].
     '''
     assert order in ['xyxy2xywh','xywh2xyxy']
-    a = boxes[:,:2]
-    b = boxes[:,2:]
+    a = boxes[...,:2]
+    b = boxes[...,2:]
     if order == 'xyxy2xywh':
-        return torch.cat([(a+b)/2,b-a], 1)
-    return torch.cat([a-b/2,a+b/2], 1)
+        return torch.cat([(a+b)/2,b-a], -1)
+    return torch.cat([a-b/2,a+b/2], -1)
+
 
 def box_clamp(boxes, xmin, ymin, xmax, ymax):
     '''Clamp boxes.
@@ -86,6 +87,7 @@ def box_iou(box1, box2):
     area2 = (box2[:,2]-box2[:,0]) * (box2[:,3]-box2[:,1])  # [M,]
     iou = inter / (area1[:,None] + area2 - inter)
     return iou
+
 
 
 def box_nms(bboxes, scores, threshold=0.5):
@@ -249,6 +251,7 @@ def np_box_nms(bboxes, scores, threshold=0.5):
     return torch.tensor(keep, dtype=torch.long)
 
 
+
 def assign_priors(gt_boxes, gt_labels, corner_form_priors,
                   fg_iou_threshold, bg_iou_threshold):
     """Assign ground truth boxes and targets to priors.
@@ -261,7 +264,6 @@ def assign_priors(gt_boxes, gt_labels, corner_form_priors,
         labels (num_priors): labels for priors.
     """
     # size: num_priors x num_targets
-    #ious = box_iou(gt_boxes.unsqueeze(0), corner_form_priors.unsqueeze(1))
     ious = box_iou(corner_form_priors, gt_boxes)
     # size: num_priors
     best_target_per_prior, best_target_per_prior_index = ious.max(1)
@@ -270,6 +272,7 @@ def assign_priors(gt_boxes, gt_labels, corner_form_priors,
 
     for target_index, prior_index in enumerate(best_prior_per_target_index):
         best_target_per_prior_index[prior_index] = target_index
+
     # 2.0 is used to make sure every target has a prior assigned
     best_target_per_prior.index_fill_(0, best_prior_per_target_index, 2)
     # size: num_priors
@@ -307,5 +310,38 @@ def assign_priors_v2(gt_boxes, gt_labels, corner_form_priors,
     labels[mask] = -1
     labels[best_target_per_prior < bg_iou_threshold] = 0  # the background id
     boxes = gt_boxes[best_target_per_prior_index]
+
+    return boxes, labels
+
+def assign_priors_with_iou(ious, gt_boxes, gt_labels, corner_form_priors,
+                  fg_iou_threshold, bg_iou_threshold):
+    """Assign ground truth boxes and targets to priors.
+    Args:
+        gt_boxes (num_targets, 4): ground truth boxes.
+        gt_labels (num_targets): labels of targets.
+        priors (num_priors, 4): corner form priors
+    Returns:
+        boxes (num_priors, 4): real values for priors.
+        labels (num_priors): labels for priors.
+    """
+    # size: num_priors
+    best_target_per_prior, best_target_per_prior_index = ious.max(1)
+    # size: num_targets
+    best_prior_per_target, best_prior_per_target_index = ious.max(0)
+
+    for target_index, prior_index in enumerate(best_prior_per_target_index):
+        best_target_per_prior_index[prior_index] = target_index
+
+    # 2.0 is used to make sure every target has a prior assigned
+    best_target_per_prior.index_fill_(0, best_prior_per_target_index, 2)
+    # size: num_priors
+    labels = gt_labels[best_target_per_prior_index]
+
+    mask = (best_target_per_prior > bg_iou_threshold) * (best_target_per_prior < fg_iou_threshold)
+
+    labels[mask] = -1
+    labels[best_target_per_prior < bg_iou_threshold] = 0  # the background id
+    boxes = gt_boxes[best_target_per_prior_index]
+
 
     return boxes, labels
