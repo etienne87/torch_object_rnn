@@ -275,6 +275,21 @@ def np_box_nms(bboxes, scores, threshold=0.5):
     return torch.tensor(keep, dtype=torch.long)
 
 
+def bbox_to_deltas(boxes, default_boxes, variances=[0.1, 0.2], max_width=10000):
+    boxes = change_box_order(boxes, "xyxy2xywh")
+    boxes[..., 2:] = boxes[..., 2:].clamp_(2, max_width)
+    loc_xy = (boxes[..., :2] - default_boxes[..., :2]) / default_boxes[..., 2:] / variances[0]
+    loc_wh = torch.log(boxes[..., 2:] / default_boxes[..., 2:]) /variances[1]
+    deltas = torch.cat([loc_xy, loc_wh], -1)
+    return deltas
+
+
+def deltas_to_bbox(loc_preds, default_boxes, variances=[0.1, 0.2]):
+    xy = loc_preds[..., :2] * variances[0] * default_boxes[..., 2:] + default_boxes[..., :2]
+    wh = torch.exp(loc_preds[..., 2:] * variances[1]) * default_boxes[..., 2:]
+    box_preds = torch.cat([xy - wh / 2, xy + wh / 2], -1)
+    return box_preds
+
 
 def assign_priors(gt_boxes, gt_labels, corner_form_priors,
                   fg_iou_threshold, bg_iou_threshold):

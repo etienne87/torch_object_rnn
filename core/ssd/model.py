@@ -210,6 +210,18 @@ class SSD(nn.Module):
         out_dic = self._forward(xs)
 
         with torch.no_grad():
+            # loc_targets_v2, cls_targets_v2 = self.box_coder.encode_txn_boxes(xs, targets)
+            #
+            # loc_targets, cls_targets = self.box_coder.encode_txn_boxes_old(xs, targets)
+            #
+            # diff_loc = loc_targets_v2 - loc_targets
+            # diff_cls = cls_targets_v2 - cls_targets
+            #
+            # print(loc_targets_v2.abs().max(), loc_targets_v2.abs().min())
+            #
+            # print('diff loc: ', diff_loc.abs().max())
+            # print('diff cls: ', diff_cls.abs().max())
+
             if USE_ANCHOR_MODULE:
                 loc_targets, cls_targets = self.box_coder.encode_txn_boxes(xs, targets)
             else:
