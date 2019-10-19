@@ -13,24 +13,18 @@ from core.anchors import Anchors
 import math
 
 
-
-
+#TODO: add a "RPN" module with class BoxHead(num_anchors, num_classes, act)
 
 class SingleStageDetector(nn.Module):
     def __init__(self, feature_extractor=FPN,
-                 num_classes=2, cin=2, height=300, width=300, act='sigmoid'):
+                 num_classes=2, cin=2, act='sigmoid'):
         super(SingleStageDetector, self).__init__()
         self.num_classes = num_classes
-        self.height, self.width = height, width
         self.cin = cin
 
         self.feature_extractor = feature_extractor(cin)
 
-        x = torch.randn(1, 1, self.cin, self.height, self.width)
-        sources = self.feature_extractor(x)
-
-
-        self.box_coder = Anchors(pyramid_levels=[i for i in range(3,3+len(sources))],
+        self.box_coder = Anchors(pyramid_levels=[i for i in range(3,3+self.feature_extractor.levels)],
                                  scales=[1.0, 1.5],
                                  ratios=[1],
                                  label_offset=1,
@@ -39,13 +33,10 @@ class SingleStageDetector(nn.Module):
         self.num_anchors = self.box_coder.num_anchors
 
         self.aspect_ratios = []
-        self.in_channels = [item.size(1) for item in sources]
-
         self.act = act
 
-
-        self.loc_head = self._make_head(self.in_channels[0], self.num_anchors * 4)
-        self.cls_head = self._make_head(self.in_channels[0], self.num_anchors * self.num_classes)
+        self.loc_head = self._make_head(self.feature_extractor.cout, self.num_anchors * 4)
+        self.cls_head = self._make_head(self.feature_extractor.cout, self.num_anchors * self.num_classes)
 
         torch.nn.init.normal_(self.loc_head[-1].weight, std=0.01)
         torch.nn.init.constant_(self.loc_head[-1].bias, 0)
@@ -59,7 +50,6 @@ class SingleStageDetector(nn.Module):
                                  mode='focal',
                                  use_sigmoid=self.act=='sigmoid',
                                  use_iou=False)
-
 
     def sigmoid_init(self, l):
         px = 0.99
@@ -129,7 +119,6 @@ class SingleStageDetector(nn.Module):
         with torch.no_grad():
             loc_targets, cls_targets = self.box_coder.encode(xs, targets)
 
-
         loc_loss, cls_loss = self.criterion(loc_preds, loc_targets, cls_preds, cls_targets)
         loss_dict = {'loc': loc_loss, 'cls_loss': cls_loss}
 
@@ -137,6 +126,6 @@ class SingleStageDetector(nn.Module):
 
     def get_boxes(self, x, score_thresh=0.4):
         xs = self.feature_extractor(x)
-        loc_preds, cls_preds = self._forward(xs)
+        loc_preds, cls_preds = self._forward_shared(xs)
         targets = self.box_coder.decode(xs, loc_preds, cls_preds, x.size(1), score_thresh=score_thresh)
         return targets

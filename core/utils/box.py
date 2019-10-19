@@ -291,6 +291,31 @@ def deltas_to_bbox(loc_preds, default_boxes, variances=[0.1, 0.2]):
     return box_preds
 
 
+def pack_boxes_list_of_list(targets, label_offset):
+    tbins, batchsize = len(targets), len(targets[0])
+    max_size = max([max([len(frame) for frame in time]) for time in targets])
+    max_size = max(2, max_size)
+    gt_padded = torch.ones((tbins, batchsize, max_size, 5), dtype=torch.float32) * -1
+    for t in range(len(targets)):
+        for i in range(len(targets[t])):
+            frame = targets[t][i]
+            gt_padded[t, i, :len(frame)] = frame
+            gt_padded[t, i, :len(frame), 4] += label_offset
+    return gt_padded.view(-1, max_size, 5)
+
+
+def pack_boxes_list(targets, label_offset):
+    batchsize = len(targets)
+    max_size = max([len(frame) for frame in time])
+    max_size = max(2, max_size)
+    gt_padded = torch.ones((batchsize, max_size, 5), dtype=torch.float32) * -1
+    for t in range(len(targets)):
+        frame = targets[t][i]
+        gt_padded[t, :len(frame)] = frame
+        gt_padded[t, :len(frame), 4] += label_offset
+    return gt_padded.view(-1, max_size, 5)
+
+
 def assign_priors(gt_boxes, gt_labels, corner_form_priors,
                   fg_iou_threshold, bg_iou_threshold):
     """Assign ground truth boxes and targets to priors.
@@ -348,75 +373,6 @@ def assign_priors_v2(gt_boxes, gt_labels, corner_form_priors,
 
     labels[mask] = -1
     labels[best_target_per_prior < bg_iou_threshold] = 0  # the background id
-    boxes = gt_boxes[best_target_per_prior_index]
-
-    return boxes, labels
-
-
-#TODO: remove this, this is a study of optimization for batch encoding of boxes
-def assign_priors_with_iou(ious, gt_boxes, gt_labels,
-                  fg_iou_threshold, bg_iou_threshold):
-    """Assign ground truth boxes and targets to priors.
-    Args:
-        gt_boxes (num_targets, 4): ground truth boxes.
-        gt_labels (num_targets): labels of targets.
-        priors (num_priors, 4): corner form priors
-    Returns:
-        boxes (num_priors, 4): real values for priors.
-        labels (num_priors): labels for priors.
-    """
-    # size: num_priors
-    best_target_per_prior, best_target_per_prior_index = ious.max(1)
-    # size: num_targets
-    best_prior_per_target, best_prior_per_target_index = ious.max(0)
-
-    for target_index, prior_index in enumerate(best_prior_per_target_index):
-        best_target_per_prior_index[prior_index] = target_index
-
-    # 2.0 is used to make sure every target has a prior assigned
-    best_target_per_prior.index_fill_(0, best_prior_per_target_index, 2)
-    # size: num_priors
-    labels = gt_labels[best_target_per_prior_index]
-
-    mask = (best_target_per_prior > bg_iou_threshold) * (best_target_per_prior < fg_iou_threshold)
-
-    labels[mask] = -1
-    labels[best_target_per_prior < bg_iou_threshold] = 0  # the background id
-    boxes = gt_boxes[best_target_per_prior_index]
-
-    return boxes, labels
-
-
-def assign_prior_with_best_overlaps(best_target_per_prior, best_target_per_prior_index,
-                                     best_prior_per_target_index,
-                                     gt_boxes, gt_labels, fg_iou_threshold, bg_iou_threshold):
-    for target_index, prior_index in enumerate(best_prior_per_target_index):
-        best_target_per_prior_index[prior_index] = target_index
-
-    # 2.0 is used to make sure every target has a prior assigned
-    best_target_per_prior.index_fill_(0, best_prior_per_target_index, 2)
-
-    # size: num_priors
-    labels = gt_labels[best_target_per_prior_index.clamp_(0)].clone()
-
-    mask_bg = best_target_per_prior < bg_iou_threshold
-    mask_ign = (best_target_per_prior > bg_iou_threshold) * (best_target_per_prior < fg_iou_threshold)
-
-    labels[mask_ign] = -1
-    labels[mask_bg] = 0  # the background id
-    boxes = gt_boxes[best_target_per_prior_index]
-
-    return boxes, labels
-
-def assign_prior_with_best_overlaps_no_for_loop(best_target_per_prior, best_target_per_prior_index,
-                                     gt_boxes, gt_labels, fg_iou_threshold, bg_iou_threshold):
-    labels = gt_labels[best_target_per_prior_index.clamp_(0)].clone()
-
-    mask_bg = best_target_per_prior < bg_iou_threshold
-    mask_ign = (best_target_per_prior > bg_iou_threshold) * (best_target_per_prior < fg_iou_threshold)
-
-    labels[mask_ign] = -1
-    labels[mask_bg] = 0  # the background id
     boxes = gt_boxes[best_target_per_prior_index]
 
     return boxes, labels

@@ -73,7 +73,6 @@ class Anchors(nn.Module):
         self.anchors = None
         self.anchors_xyxy = None
 
-
     def forward(self, features):
         size = sum([(item.shape[-2]*item.shape[-1]*self.num_anchors) for item in features])
         if self.anchors is None or len(self.anchors) != size:
@@ -86,21 +85,133 @@ class Anchors(nn.Module):
 
         return self.anchors, self.anchors_xyxy
 
-    def decode_boxes_from_anchors(self, anchors, loc_preds, cls_preds, score_thresh=0.6, nms_thresh=0.45):
-        xy = loc_preds[:,:2] * self.variances[0] * anchors[:,2:] + anchors[:,:2]
-        wh = torch.exp(loc_preds[:,2:]* self.variances[1]) * anchors[:,2:]
 
-        box_preds = torch.cat([xy-wh/2, xy+wh/2], 1)
+    def encode(self, features, targets):
+        # Strategy: We pad box frames to enable gpu optimization (from 300 ms -> 1 ms)
 
+        anchors, anchors_xyxy = self(features)
+        device = features[0].device
+
+        if isinstance(targets[0], list):
+            gt_padded = box.pack_boxes_list_of_list(targets, self.label_offset).to(device)
+        else:
+            gt_padded = box.pack_boxes_list(targets, self.label_offset).to(device)
+
+        total = len(gt_padded)
+        max_size = gt_padded.shape[1]
+        gt_boxes = gt_padded[..., :4]
+        gt_labels = gt_padded[..., 4].long()
+
+
+        ious = box.batch_box_iou(anchors_xyxy, gt_boxes) # [N, A, M]
+
+        batch_best_target_per_prior, batch_best_target_per_prior_index = ious.max(-1) # [N, A]
+        _, batch_best_prior_per_target_index = ious.max(-2) # [N, M]
+
+        #V1 (fast, but no guarantee of uniqueness for low quality matches)
+        for target_index in range(max_size):
+            index = batch_best_prior_per_target_index[..., target_index:target_index+1]
+            batch_best_target_per_prior_index.scatter_(-1, index, target_index)
+            batch_best_target_per_prior.scatter_(-1, index, 2.0)
+
+        mask_bg = batch_best_target_per_prior < self.bg_iou_threshold
+        mask_ign = (batch_best_target_per_prior > self.bg_iou_threshold) * (batch_best_target_per_prior < self.fg_iou_threshold)
+        labels = torch.gather(gt_labels, 1, batch_best_target_per_prior_index)
+        labels[mask_ign] = -1
+        labels[mask_bg] = 0
+        index = batch_best_target_per_prior_index[...,None].expand(total, len(anchors), 4)
+        boxes = torch.gather(gt_boxes, 1, index)
+
+
+        loc_targets = box.bbox_to_deltas(boxes, anchors[None])#.view(-1, len(anchors), 4)
+        cls_targets = labels.view(-1, len(anchors))
+
+
+        return loc_targets, cls_targets
+
+
+    def decode(self, features, loc_preds, cls_preds, batchsize, score_thresh, nms_thresh=0.6):
+        # torch.cuda.synchronize()
+        # start = time.time()
+        anchors, _ = self(features)
+        box_preds = box.deltas_to_bbox(loc_preds, anchors)
+
+        # batched
+        # boxes, scores, labels, batch_index = self.batch_decode(box_preds, cls_preds, score_thresh, nms_thresh)
+        # targets = []
+        # for t in range(loc_preds.size(0)):
+        #     targets_t = []
+        #     for i in range(loc_preds.size(1)):
+        #
+        #         targets_t.append((None, None, None))
+        #     targets.append(targets_t)
+
+        box_preds = opts.batch_to_time(box_preds, batchsize)
+        cls_preds = opts.batch_to_time(cls_preds, batchsize)
+        targets = []
+        for t in range(box_preds.size(0)):
+            targets_t = []
+            for i in range(box_preds.size(1)):
+                boxes, labels, scores = self.decode_boxes_from_anchors(box_preds[t, i].data,
+                                                                        cls_preds[t, i].data,
+                                                                        score_thresh=score_thresh,
+                                                                        nms_thresh=nms_thresh)
+                targets_t.append((boxes, labels, scores))
+            targets.append(targets_t)
+
+        # torch.cuda.synchronize()
+        # print(time.time()-start, ' s decoding')
+        return targets
+
+    def batch_decode(self, box_preds, cls_preds, score_thresh, nms_thresh):
+
+        num_classes = cls_preds.shape[-1] - self.label_offset
+        num_anchors = box_preds.shape[1]
+        boxes = box_preds.unsqueeze(2).expand(-1, num_anchors, num_classes, 4).contiguous()
+
+        scores = cls_preds[..., self.label_offset:].contiguous()
+        boxes = boxes.view(-1, 4)
+        scores = scores.view(-1)
+        rows = torch.arange(len(box_preds), dtype=torch.long)[:,None]
+        cols = torch.arange(num_classes, dtype=torch.long)[None,:]
+        idxs = rows + cols
+        idxs = idxs.unsqueeze(1).expand(len(box_preds), num_anchors, num_classes)
+        idxs = idxs.to(scores).view(-1)
+
+
+        mask = scores >= 0.001 #score_thresh
+        boxes = boxes[mask].contiguous()
+        scores = scores[mask].contiguous()
+        idxs = idxs[mask].contiguous()
+
+
+        max_coordinate = boxes.max()
+        offsets = idxs.to(boxes) * (max_coordinate + 1)
+        boxes_for_nms = boxes + offsets[:, None]
+        keep = self.nms(boxes_for_nms, scores, nms_thresh)
+
+
+        if len(keep) == 0:
+            return None, None, None
+
+        boxes = boxes[keep]
+        scores = scores[keep]
+        labels = idxs[keep] % num_classes
+        batch_index = idxs[keep] // num_classes
+        return boxes, scores, labels, batch_index
+
+
+    def decode_boxes_from_anchors(self, box_preds, cls_preds, score_thresh=0.6, nms_thresh=0.45):
+        num_classes = cls_preds.shape[1]-self.label_offset
         boxes = []
         labels = []
         scores = []
-        num_classes = cls_preds.size(1)
-        for i in range(num_classes-1):
-            score = cls_preds[:,i+1]  # class i corresponds to (i+1) column
+        for i in range(self.label_offset, self.label_offset + num_classes):
+            score = cls_preds[:,i]
             mask = score > score_thresh
             if not mask.any():
                 continue
+
 
             box = box_preds[mask]
             score = score[mask]
@@ -117,131 +228,6 @@ class Anchors(nn.Module):
             return boxes, labels, scores
         else:
             return None, None, None
-
-
-    def encode_txn_boxes(self, features, targets):
-        # Strategy: We pad box frames to enable batch optimization (from 300 ms to: 1 ms)
-
-        anchors, anchors_xyxy = self(features)
-        device = features[0].device
-
-        tbins, batchsize = len(targets), len(targets[0])
-        total = tbins * batchsize
-        max_size = max([max([len(frame) for frame in time]) for time in targets])
-        max_size = max(2, max_size)
-        gt_padded = torch.ones((tbins, batchsize, max_size, 5), dtype=torch.float32) * -1
-        for t in range(len(targets)):
-            for i in range(len(targets[t])):
-                frame = targets[t][i]
-                gt_padded[t, i, :len(frame)] = frame
-                gt_padded[t, i, :len(frame), 4] += self.label_offset
-        gt_padded = gt_padded.to(device)
-
-
-        gt_boxes = gt_padded[..., :4]
-        gt_labels = gt_padded[..., 4].long()
-
-
-        ious = box.batch_box_iou(anchors_xyxy, gt_boxes.view(total, max_size, 4))
-        ious = ious.view(tbins, batchsize, len(anchors_xyxy), max_size)
-
-        batch_best_target_per_prior, batch_best_target_per_prior_index = ious.max(-1) # [T, N, A]
-        _, batch_best_prior_per_target_index = ious.max(-2) # [T, N, M]
-
-        for target_index in range(max_size):
-            index = batch_best_prior_per_target_index[..., target_index:target_index+1]
-            batch_best_target_per_prior_index.scatter_(2, index, target_index)
-            batch_best_target_per_prior.scatter_(2, index, 2.0)
-
-
-        mask_bg = batch_best_target_per_prior < self.bg_iou_threshold
-        mask_ign = (batch_best_target_per_prior > self.bg_iou_threshold) * (batch_best_target_per_prior < self.fg_iou_threshold)
-        labels = torch.gather(gt_labels, 2, batch_best_target_per_prior_index)
-        labels[mask_ign] = -1
-        labels[mask_bg] = 0
-        index = batch_best_target_per_prior_index[...,None].expand(tbins, batchsize, len(anchors), 4)
-        boxes = torch.gather(gt_boxes, 2, index)
-
-
-        loc_targets = box.bbox_to_deltas(boxes, anchors[None]).view(-1, len(anchors), 4)
-        cls_targets = labels.view(-1, len(anchors))
-
-
-        return loc_targets, cls_targets
-
-
-    def decode_txn_boxes(self, features, loc_preds, cls_preds, batchsize, score_thresh):
-        #TODO: apply "batched nms and decoding" idea!
-        anchors, _ = self(features)
-
-        loc_preds = opts.batch_to_time(loc_preds, batchsize)
-        cls_preds = opts.batch_to_time(cls_preds, batchsize)
-        targets = []
-        for t in range(loc_preds.size(0)):
-            targets_t = []
-            for i in range(loc_preds.size(1)):
-                boxes, labels, scores = self.decode_boxes_from_anchors(anchors,    loc_preds[t, i].data,
-                                                                                    cls_preds[t, i].data,
-                                                                                    score_thresh=score_thresh,
-                                                                                    nms_thresh=0.6)
-                targets_t.append((boxes, labels, scores))
-            targets.append(targets_t)
-        return targets
-
-    # def encode_boxes(self, features, targets):
-    #     loc_targets, cls_targets = [], []
-    #     device = features[0].device
-    #     anchors = self(features) #1,A,4
-    #
-    #     for i in range(len(targets)):
-    #         boxes, labels = targets[i][:, :4], targets[i][:, -1]
-    #         boxes, labels = boxes.to(device), labels.to(device) + self.label_offset
-    #         loc_t, cls_t = self.encode_boxes_from_anchors(anchors, boxes, labels)
-    #         loc_targets.append(loc_t.unsqueeze(0))
-    #         cls_targets.append(cls_t.unsqueeze(0).long())
-    #
-    #     loc_targets = torch.cat(loc_targets, dim=0)  # (N,#anchors,4)
-    #     cls_targets = torch.cat(cls_targets, dim=0)  # (N,#anchors,C)
-    #
-    #     return loc_targets, cls_targets
-    #
-    #
-    # def encode_boxes_from_anchors(self, anchors, gt_boxes, labels):
-    #     anchors_xyxy = box.change_box_order(anchors, "xywh2xyxy")
-    #     boxes, cls_targets = box.assign_priors(gt_boxes, labels, anchors_xyxy,
-    #                                            self.fg_iou_threshold, self.bg_iou_threshold)
-    #     boxes = box.change_box_order(boxes, "xyxy2xywh")
-    #     loc_xy = (boxes[:, :2] - anchors[:, :2]) / anchors[:, 2:] / self.variances[0]
-    #     loc_wh = torch.log(boxes[:, 2:] / anchors[:, 2:])  / self.variances[1]
-    #     loc_targets = torch.cat([loc_xy, loc_wh], 1)
-    #     return loc_targets, cls_targets
-    #
-    # def encode_txn_boxes_old(self, features, targets):
-    #     anchors, _ = self(features)
-    #     device = features[0].device
-    #
-    #     torch.cuda.synchronize()
-    #     start = time.time()
-    #     loc_targets, cls_targets = [], []
-    #     for t in range(len(targets)):
-    #         for i in range(len(targets[t])):
-    #             if len(targets[t][i]) == 0:
-    #                 targets[t][i] = torch.ones((1, 5), dtype=torch.float32) * -1
-    #
-    #             boxes, labels = targets[t][i][:, :4], targets[t][i][:, -1]
-    #             boxes, labels = boxes.to(device), labels.to(device) + self.label_offset
-    #             loc_t, cls_t = self.encode_boxes_from_anchors(anchors, boxes, labels)
-    #             loc_targets.append(loc_t.unsqueeze(0))
-    #             cls_targets.append(cls_t.unsqueeze(0).long())
-    #
-    #     loc_targets = torch.cat(loc_targets, dim=0)  # (N,#anchors,4)
-    #     cls_targets = torch.cat(cls_targets, dim=0)  # (N,#anchors,C)
-    #
-    #     torch.cuda.synchronize()
-    #     print('current encoding: ', time.time() - start)
-    #
-    #     return loc_targets, cls_targets
-
 
 
 if __name__ == '__main__':

@@ -22,8 +22,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description='PyTorch SSD Training')
     parser.add_argument('logdir', type=str, help='where to save')
     parser.add_argument('--path', type=str, default='', help='path to dataset')
-    parser.add_argument('--batchsize', type=int, default=1, help='batchsize')
-    parser.add_argument('--time', type=int, default=1, help='timesteps')
+    parser.add_argument('--batchsize', type=int, default=8, help='batchsize')
+    parser.add_argument('--time', type=int, default=8, help='timesteps')
 
     parser.add_argument('--lr', default=1e-3, type=float, help='learning rate #1e-5 is advised')
     parser.add_argument('--resume', action='store_true', help='resume from checkpoint')
@@ -91,7 +91,7 @@ def main():
 
     # Model
     print('==> Building model..')
-    net = SingleStageDetector(num_classes=classes, cin=cin, height=height, width=width, act="softmax")
+    net = SingleStageDetector(num_classes=classes, cin=cin, act="softmax")
 
     if args.cuda:
         net.cuda()
