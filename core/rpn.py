@@ -4,69 +4,79 @@ from __future__ import print_function
 
 import torch
 import torch.nn as nn
-from core.ssd.model import Trident
-from torchvision.models.detection import rpn
-from torchvision.models.detection.image_list import ImageList
+import torch.nn.functional as F
+from core.modules import Bottleneck
 
 
 
-class WrapRPN(nn.Module):
-    def __init__(self, num_classes, in_channels, height, width,
-                                    fg_iou_thresh=0.7, bg_iou_thresh=0.3,
-                                    batch_size_per_image=10, positive_fraction=1.0,
-                                    nms_thresh=0.7):
-        super(WrapRPN, self).__init__()
-
-
-        pre_nms_top_n = {'training':10000, 'testing':1000}
-        post_nms_top_n = {'training':100, 'testing':10}
-
-
-        self._backbone = Trident(in_channels)
-
+class BoxHead(nn.Module):
+    def __init__(self, in_channels, num_anchors, num_classes, act='sigmoid', n_layers=0):
+        super(BoxHead, self).__init__()
         self.num_classes = num_classes
         self.in_channels = in_channels
-        self.height, self.width = height, width
-        x = torch.randn(1, 1, self.in_channels, self.height, self.width)
-        sources = self._backbone(x)
-        sizes = [min(item.shape[-2:]) for item in sources]
+        self.num_anchors = num_anchors
 
-        self._rpn_head = rpn.RPNHead(self._backbone.end_point_channels[0], 3)
-        self._anchor_generator = rpn.AnchorGenerator(sizes=sizes,
-                                                            aspect_ratios=(0.5, 1.0, 2.0))
+        self.aspect_ratios = []
+        self.act = act
 
-        self._rpn = rpn.RegionProposalNetwork(self._anchor_generator,
-                                            self._rpn_head,
-                                            fg_iou_thresh, bg_iou_thresh,
-                                            batch_size_per_image, positive_fraction,
-                                            pre_nms_top_n, post_nms_top_n, nms_thresh)
+        self.loc_head = self._make_head(in_channels, self.num_anchors * 4, n_layers)
+        self.cls_head = self._make_head(in_channels, self.num_anchors * self.num_classes, n_layers)
 
+        torch.nn.init.normal_(self.loc_head[-1].weight, std=0.01)
+        torch.nn.init.constant_(self.loc_head[-1].bias, 0)
+
+        if self.act == 'softmax':
+            self.softmax_init(self.cls_head[-1])
+        else:
+            self.sigmoid_init(self.cls_head[-1])
+
+    def sigmoid_init(self, l):
+        px = 0.99
+        bias_bg = math.log(px / (1 - px))
+        torch.nn.init.normal_(l.weight, std=0.01)
+        torch.nn.init.constant_(l.bias, 0)
+        l.bias.data = l.bias.data.reshape(self.num_anchors, self.num_classes)
+        l.bias.data[:, 0:] -= bias_bg
+        l.bias.data = l.bias.data.reshape(-1)
+
+    def softmax_init(self, l):
+        px = 0.99
+        K = self.num_classes - 1
+        bias_bg = math.log(K * px / (1 - px))
+        torch.nn.init.normal_(l.weight, std=0.01)
+        torch.nn.init.constant_(l.bias, 0)
+        l.bias.data = l.bias.data.reshape(self.num_anchors, self.num_classes)
+        l.bias.data[:, 0] += bias_bg
+        l.bias.data = l.bias.data.reshape(-1)
+
+    def _make_head(self, in_planes, out_planes, n_layers):
+        layers = []
+        layers.append(Bottleneck(in_planes, 256))
+        for _ in range(n_layers):
+            layers.append(Bottleneck(256, 256))
+        layers.append(nn.Conv2d(256, out_planes, kernel_size=3, stride=1, padding=1))
+        return nn.Sequential(*layers)
 
     def reset(self):
-        self._backbone.reset()
+        self.feature_extractor.reset()
 
-    def forward(self, x):
-        features = self._backbone(x)
-        return self._rpn.forward(self, x, features)[0]
+    def _apply_head(self, layer, xs, ndims):
+        out = []
+        for x in xs:
+            y = layer(x).permute(0, 2, 3, 1).contiguous()
+            y = y.view(y.size(0), -1, ndims)
+            out.append(y)
+        out = torch.cat(out, 1)
+        return out
 
-    def compute_loss(self, x, y):
-        features = self._backbone(x)
-        device = x.device
-        targets_ = []
-        for t in range(len(y)):
-            for i in range(len(y[t])):
-                boxes, labels = y[t][i][:, :-1], y[t][i][:, -1]
-                boxes, labels = boxes.to(device), labels.to(device)
-                box_dic = {'boxes': boxes, 'labels': labels}
-                targets_.append(box_dic)
+    def forward(self, xs):
+        loc_preds = self._apply_head(self.loc_head, xs, 4)
+        cls_preds = self._apply_head(self.cls_head, xs, self.num_classes)
 
-        features = {'level_'+str(i):item for i, item in enumerate(features)}
-        image_size = (x.shape[-2], x.shape[-1])
-        images = x.view(-1, *x.shape[2:])
-        image_list = ImageList(images, [image_size]*len(images))
+        if not self.training:
+            if self.act == 'softmax':
+                cls_preds = F.softmax(cls_preds, dim=2)
+            else:
+                cls_preds = torch.sigmoid(cls_preds)
 
-        losses = self._rpn.forward(image_list, features, targets_)[1]
-
-        loss = sum(losses.values())
-        return loss
-
+        return loc_preds, cls_preds

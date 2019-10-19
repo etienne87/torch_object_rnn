@@ -179,12 +179,13 @@ class Anchors(nn.Module):
         idxs = idxs.to(scores).view(-1)
 
 
-        mask = scores >= 0.001 #score_thresh
+        mask = scores >= score_thresh
         boxes = boxes[mask].contiguous()
         scores = scores[mask].contiguous()
         idxs = idxs[mask].contiguous()
 
 
+        #we nms everything using an offset per class/batch so there is no wrong overlap
         max_coordinate = boxes.max()
         offsets = idxs.to(boxes) * (max_coordinate + 1)
         boxes_for_nms = boxes + offsets[:, None]
@@ -202,12 +203,12 @@ class Anchors(nn.Module):
 
 
     def decode_boxes_from_anchors(self, box_preds, cls_preds, score_thresh=0.6, nms_thresh=0.45):
-        num_classes = cls_preds.shape[1]-self.label_offset
+        num_classes = cls_preds.shape[1] - self.label_offset
         boxes = []
         labels = []
         scores = []
-        for i in range(self.label_offset, self.label_offset + num_classes):
-            score = cls_preds[:,i]
+        for i in range(num_classes):
+            score = cls_preds[:,i+self.label_offset]
             mask = score > score_thresh
             if not mask.any():
                 continue

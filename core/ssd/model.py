@@ -223,7 +223,7 @@ class SSD(nn.Module):
             # print('diff cls: ', diff_cls.abs().max())
 
             if USE_ANCHOR_MODULE:
-                loc_targets, cls_targets = self.box_coder.encode_txn_boxes(xs, targets)
+                loc_targets, cls_targets = self.box_coder.encode(xs, targets)
             else:
                 loc_targets, cls_targets = self.box_coder.encode_txn_boxes(targets)
 
@@ -241,7 +241,7 @@ class SSD(nn.Module):
         out_dic = self._forward(xs)
         loc_preds, cls_preds = out_dic['loc'], out_dic['cls']
         if USE_ANCHOR_MODULE:
-            targets = self.box_coder.decode_txn_boxes(xs, loc_preds, cls_preds, x.size(1), score_thresh=score_thresh)
+            targets = self.box_coder.decode(xs, loc_preds, cls_preds, x.size(1), score_thresh=score_thresh)
         else:
             targets = self.box_coder.decode_txn_boxes(loc_preds, cls_preds, x.size(1), score_thresh=score_thresh)
         return targets
