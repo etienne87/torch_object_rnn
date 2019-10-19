@@ -9,7 +9,8 @@ import torch.optim as optim
 import torch.backends.cudnn as cudnn
 from functools import partial
 
-from core.ssd.model import SSD
+# from core.ssd.model import SSD
+from core.single_stage_detector import SingleStageDetector
 from core.trainer import DetTrainer
 from core.utils import opts
 
@@ -90,7 +91,7 @@ def main():
 
     # Model
     print('==> Building model..')
-    net = SSD(num_classes=classes, cin=cin, height=height, width=width, act="softmax")
+    net = SingleStageDetector(num_classes=classes, cin=cin, height=height, width=width, act="softmax")
 
     if args.cuda:
         net.cuda()
