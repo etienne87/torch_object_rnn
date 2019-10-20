@@ -131,85 +131,54 @@ class Anchors(nn.Module):
 
 
     def decode(self, features, loc_preds, cls_preds, batchsize, score_thresh, nms_thresh=0.6):
-        # torch.cuda.synchronize()
-        # start = time.time()
+        torch.cuda.synchronize()
+        start = time.time()
         anchors, _ = self(features)
         box_preds = box.deltas_to_bbox(loc_preds, anchors)
 
         # batched
-        # boxes, scores, labels, batch_index = self.batch_decode(box_preds, cls_preds, score_thresh, nms_thresh)
-        # targets = []
-        # for t in range(loc_preds.size(0)):
-        #     targets_t = []
-        #     for i in range(loc_preds.size(1)):
-        #
-        #         targets_t.append((None, None, None))
-        #     targets.append(targets_t)
+
+        # boxes, labels, scores, batch_index = self.batch_decode(box_preds, cls_preds, score_thresh, nms_thresh)
+        # tbins = len(cls_preds) // batchsize
+        # targets = [[(None,None,None) for i in range(batchsize)] for t in range(tbins)]
+        # for t in range(tbins):
+        #     for i in range(batchsize):
+        #         index = t*batchsize + i
+        #         mask = batch_index == index
+        #         boxe = boxes[mask]
+        #         score = scores[mask]
+        #         label = labels[mask]
+        #         if len(boxe):
+        #             targets[t][i] = (boxe, score, label)
 
         box_preds = opts.batch_to_time(box_preds, batchsize)
         cls_preds = opts.batch_to_time(cls_preds, batchsize)
+
         targets = []
         for t in range(box_preds.size(0)):
             targets_t = []
             for i in range(box_preds.size(1)):
-                boxes, labels, scores = self.decode_boxes_from_anchors(box_preds[t, i].data,
+                boxes, labels, scores = self.batch_decode_boxes_from_anchors(box_preds[t, i].data,
                                                                         cls_preds[t, i].data,
                                                                         score_thresh=score_thresh,
                                                                         nms_thresh=nms_thresh)
                 targets_t.append((boxes, labels, scores))
             targets.append(targets_t)
 
-        # torch.cuda.synchronize()
-        # print(time.time()-start, ' s decoding')
+        torch.cuda.synchronize()
+        print(time.time()-start, ' s decoding')
         return targets
-
-    def batch_decode(self, box_preds, cls_preds, score_thresh, nms_thresh):
-
-        num_classes = cls_preds.shape[-1] - self.label_offset
-        num_anchors = box_preds.shape[1]
-        boxes = box_preds.unsqueeze(2).expand(-1, num_anchors, num_classes, 4).contiguous()
-
-        scores = cls_preds[..., self.label_offset:].contiguous()
-        boxes = boxes.view(-1, 4)
-        scores = scores.view(-1)
-        rows = torch.arange(len(box_preds), dtype=torch.long)[:,None]
-        cols = torch.arange(num_classes, dtype=torch.long)[None,:]
-        idxs = rows + cols
-        idxs = idxs.unsqueeze(1).expand(len(box_preds), num_anchors, num_classes)
-        idxs = idxs.to(scores).view(-1)
-
-
-        mask = scores >= score_thresh
-        boxes = boxes[mask].contiguous()
-        scores = scores[mask].contiguous()
-        idxs = idxs[mask].contiguous()
-
-
-        #we nms everything using an offset per class/batch so there is no wrong overlap
-        max_coordinate = boxes.max()
-        offsets = idxs.to(boxes) * (max_coordinate + 1)
-        boxes_for_nms = boxes + offsets[:, None]
-        keep = self.nms(boxes_for_nms, scores, nms_thresh)
-
-
-        if len(keep) == 0:
-            return None, None, None
-
-        boxes = boxes[keep]
-        scores = scores[keep]
-        labels = idxs[keep] % num_classes
-        batch_index = idxs[keep] // num_classes
-        return boxes, scores, labels, batch_index
-
 
     def decode_boxes_from_anchors(self, box_preds, cls_preds, score_thresh=0.6, nms_thresh=0.45):
         num_classes = cls_preds.shape[1] - self.label_offset
+
+        maskall = cls_preds > score_thresh
         boxes = []
         labels = []
         scores = []
         for i in range(num_classes):
             score = cls_preds[:,i+self.label_offset]
-            mask = score > score_thresh
+            mask = maskall[:,i+self.label_offset] #score > score_thresh
             if not mask.any():
                 continue
 
@@ -230,87 +199,38 @@ class Anchors(nn.Module):
         else:
             return None, None, None
 
+    def batch_decode_boxes_from_anchors(self, box_preds, cls_preds, score_thresh=0.6, nms_thresh=0.45):
+        num_classes = cls_preds.shape[1] - self.label_offset
+        num_anchors = len(box_preds)
+        boxes = box_preds.unsqueeze(0).expand(num_classes, num_anchors, 4).contiguous() #C,A,4
+        scores = cls_preds[..., self.label_offset:].transpose(1,0).contiguous() #C,A
 
-if __name__ == '__main__':
-    from core.ssd.box_coder import SSDBoxCoder, get_box_params_fixed_size
-    # x = torch.randn(3, 128, 8, 8)
+        boxes = boxes.view(-1, 4)
+        scores = scores.view(-1)
 
-    # layer = AnchorLayer(32, 2**3, [1, 0.5, 2], [1])
-    # anchors = layer(x)
-    # print('anchor shape: ', anchors.shape)
-    # print(anchors)
-    #
-    # anchors = layer(torch.randn(3, 128, 1, 1))
-    # print(anchors.shape)
-    # print(anchors)
+        idxs = torch.arange(num_classes, dtype=torch.long)[None,:].to(boxes)
+        idxs = idxs.expand(num_anchors, num_classes).transpose(1,0).contiguous()
+        idxs = idxs.view(-1)
 
-    imsize = 512
-    sources = []
-    for level in [3,4,5,6]:
-        sources.append(torch.rand(3, 16, imsize>>level, imsize>>level))
+        mask = scores >= score_thresh
+        boxesf = boxes[mask].contiguous()
+        scoresf = scores[mask].contiguous()
+        idxsf = idxs[mask].contiguous()
 
-    box_coder = Anchors(ratios=[0.5, 1, 2], scales=[1, 2**(1./3), 2**(2./3)], base_size=24,
-                        label_offset=1, fg_iou_threshold=0.7, bg_iou_threshold=0.4)
+        # max_coordinate = boxesf.max()
+        # offsets = idxsf.to(boxesf) * (max_coordinate + 1)
+        # boxes_for_nms = boxesf + offsets[:, None]
+        # keep = self.nms(boxes_for_nms, scoresf, nms_thresh)
+        from torchvision.ops.boxes import batched_nms
 
+        keep = batched_nms(boxesf, scoresf, idxsf, nms_thresh)
 
-    class FakeSSD:
-        def __init__(self, height=imsize, width=imsize):
-            self.height, self.width = height, width
-            self.fm_sizes, self.steps, self.box_sizes = get_box_params_fixed_size(sources, height, width)
-            self.aspect_ratios = box_coder.ratios
-            self.scales = box_coder.scales
-            self.num_anchors = len(self.aspect_ratios) * len(self.scales)
+        if len(keep) == 0:
+            return None, None, None
 
-    test = FakeSSD()
-    box_coder2 = SSDBoxCoder(test, 0.7, 0.4)
-
-
-    anchors = box_coder(sources)
-    anchors_xyxy = box.change_box_order(anchors, "xywh2xyxy")
+        boxes = boxesf[keep]
+        scores = scoresf[keep]
+        labels = idxsf[keep]%num_classes
 
 
-    diff = anchors - box_coder2.default_boxes
-    diff2 = anchors_xyxy - box_coder2.default_boxes_xyxy
-
-    print('diff default boxes: ', diff.abs().max().item(), diff.sum().item())
-    print('diff default boxesxyxy: ', diff2.abs().max().item(), diff2.sum().item())
-
-    #take some boxes & check if same default boxes come out
-    from datasets.moving_box_detection import SquaresVideos
-
-    dataset = SquaresVideos(t=10, c=1, h=256, w=256, batchsize=2, mode='diff', max_objects=20, render=False)
-    _, targets, _ = dataset[0]
-    #boxes = boxes[0]
-    # print('boxes: ', boxes)
-
-    # loc_t, cls_t = box_coder.encode_boxes(sources, boxes)
-    #
-    # print(loc_t.shape, cls_t.shape)
-    #
-    # loc_t2, cls_t2 = box_coder2.encode_boxes(boxes)
-
-    boxes, labels = targets[0][:, :4], targets[0][:, -1]
-    # loc_t, cls_t = box_coder.encode_boxes_from_anchors(anchors, boxes.clone(), labels.clone())
-
-    import pdb
-    pdb.set_trace()
-    #
-    # loc_t2, cls_t2 = box_coder2.encode(boxes, labels)
-    print('box coder1: ', box_coder.fg_iou_threshold, box_coder.bg_iou_threshold)
-    loc_t, cls_t = box.assign_priors(boxes, labels + 1, anchors_xyxy,
-                                               box_coder.fg_iou_threshold, box_coder.bg_iou_threshold)
-
-    print('box coder2 : ', box_coder2.fg_iou_threshold, box_coder2.bg_iou_threshold)
-    loc_t2, cls_t2 = box.assign_priors(boxes, labels + 1, anchors_xyxy,
-                                       box_coder2.fg_iou_threshold, box_coder2.bg_iou_threshold)
-
-    diff_loc = loc_t - loc_t2
-    diff_cls = cls_t - cls_t2
-
-    # print(diff_cls[diff_cls != 0])
-    #
-    # import pdb
-    # pdb.set_trace()
-    #
-    # print('diff loc encoding: ', diff_loc.abs().max())
-    print('diff cls encoding: ', diff_cls.abs().max())
+        return boxes, labels, scores
