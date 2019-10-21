@@ -151,9 +151,6 @@ class Anchors(nn.Module):
 
         keep = batched_nms(boxesf, scoresf, idxsf, nms_thresh)
 
-        if len(keep) == 0:
-            return None, None, None
-
         boxes = boxesf[keep]
         scores = scoresf[keep]
         labels = idxsf[keep] % num_classes

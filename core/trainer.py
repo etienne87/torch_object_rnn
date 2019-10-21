@@ -48,7 +48,6 @@ class DetTrainer(object):
         self.net.train()
         self.net.reset()
         train_loss = 0
-        proba_reset = 1 * (0.9)**epoch
         dataloader.dataset.max_consecutive_batches = 4 #(2 ** epoch)
         dataloader.dataset.build()
 
