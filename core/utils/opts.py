@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -50,6 +51,10 @@ def video_collate_fn_with_reset_info(data_list):
     t, n = videos.shape[:2]
     boxes = [[boxes[i][t] for i in range(n)] for t in range(t)]
     return videos, boxes, sum(resets)>0
+
+def cuda_tick():
+    torch.cuda.synchronize()
+    return time.time()
 
 
 class BatchRenorm(nn.Module):
