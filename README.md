@@ -1,8 +1,8 @@
-torch_det_rnn
+# torch_det_rnn
 
-# Artisanal Research for better temporal detectors
+## Artisanal Research for better temporal detectors
 
-## Features:
+### Features:
 
 - [X] NEW!! very fast encode (~1ms) & decode boxes (14 ms) module (look at anchors.py)
 
@@ -16,7 +16,7 @@ but was much slower (~300ms ~250ms by batch) as it was really sequential.
 - [X] recurrent retina-net
 - [X] reports with tensorboard
 
-## Coming Soon:
+### Coming Soon:
 
 - [ ] MOT metrics
 - [ ] COCO metrics
