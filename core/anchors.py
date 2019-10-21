@@ -2,12 +2,9 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import time
-
-
 import torch
 import torch.nn as nn
-from core.utils import box
+from core.utils import box, opts
 import numpy as np
 from torchvision.ops.boxes import batched_nms
 
@@ -82,6 +79,7 @@ class Anchors(nn.Module):
             self.anchors_xyxy = box.change_box_order(self.anchors, "xywh2xyxy")
         return self.anchors, self.anchors_xyxy
 
+    @opts.cuda_time
     def encode(self, features, targets):
         # Strategy: We pad box frames to enable gpu optimization (from 300 ms -> 1 ms)
 
@@ -123,10 +121,8 @@ class Anchors(nn.Module):
 
         return loc_targets, cls_targets
 
-
+    @opts.cuda_time
     def decode(self, features, loc_preds, cls_preds, batchsize, score_thresh, nms_thresh=0.6):
-        torch.cuda.synchronize()
-        start = time.time()
         anchors, _ = self(features)
         box_preds = box.deltas_to_bbox(loc_preds, anchors)
 
@@ -169,6 +165,4 @@ class Anchors(nn.Module):
                 if len(boxe):
                     targets[t][i] = (boxe, label, score)
 
-        torch.cuda.synchronize()
-        print(time.time()-start, ' s decoding')
         return targets

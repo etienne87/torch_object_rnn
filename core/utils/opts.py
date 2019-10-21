@@ -56,6 +56,15 @@ def cuda_tick():
     torch.cuda.synchronize()
     return time.time()
 
+def cuda_time(func):
+    def wrapper(*args, **kwargs):
+        start = cuda_tick()
+        out = func(*args, **kwargs)
+        end = cuda_tick()
+        print(end-start, ' s @', func)
+        return out
+    return wrapper
+
 
 class BatchRenorm(nn.Module):
     r"""

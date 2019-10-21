@@ -300,13 +300,15 @@ def pack_boxes_list_of_list(targets, label_offset):
         for i in range(len(targets[t])):
             frame = targets[t][i]
             gt_padded[t, i, :len(frame)] = frame
-            gt_padded[t, i, :len(frame), 4] += label_offset
+            #gt_padded[t, i, :len(frame), 4] += label_offset
+
+    gt_padded[..., 4] += label_offset
     return gt_padded.view(-1, max_size, 5)
 
 
 def pack_boxes_list(targets, label_offset):
     batchsize = len(targets)
-    max_size = max([len(frame) for frame in time])
+    max_size = max([len(frame) for frame in targets])
     max_size = max(2, max_size)
     gt_padded = torch.ones((batchsize, max_size, 5), dtype=torch.float32) * -1
     for t in range(len(targets)):
