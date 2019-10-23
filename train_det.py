@@ -103,7 +103,7 @@ def main():
     start_epoch = 0  # start from epoch 0 or last epoch
     if args.resume:
         print('==> Resuming from checkpoint..')
-        start_epoch = opts.load_last_checkpoint(net, optimizer, args.logdir)
+        start_epoch = opts.load_last_checkpoint(net, optimizer, args.logdir) + 1
 
 
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.99)
@@ -111,8 +111,9 @@ def main():
     trainer = DetTrainer(args.logdir, net, optimizer)
 
     if args.just_test:
-        map = trainer.evaluate(start_epoch, test_dataset, args)
-        print('map: ', map)
+        # map = trainer.evaluate(start_epoch, test_dataset, args)
+        # print('map: ', map)
+        trainer.test(start_epoch + 1, test_dataset, args)
         exit()
 
     for epoch in range(start_epoch, args.epochs):
