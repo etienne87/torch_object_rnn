@@ -300,9 +300,7 @@ def pack_boxes_list_of_list(targets, label_offset):
         for i in range(len(targets[t])):
             frame = targets[t][i]
             gt_padded[t, i, :len(frame)] = frame
-            #gt_padded[t, i, :len(frame), 4] += label_offset
-
-    gt_padded[..., 4] += label_offset
+            gt_padded[t, i, :len(frame), 4] += label_offset
     return gt_padded.view(-1, max_size, 5)
 
 

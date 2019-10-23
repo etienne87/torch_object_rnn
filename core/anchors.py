@@ -79,7 +79,6 @@ class Anchors(nn.Module):
             self.anchors_xyxy = box.change_box_order(self.anchors, "xywh2xyxy")
         return self.anchors, self.anchors_xyxy
 
-    @opts.cuda_time
     def encode(self, features, targets):
         # Strategy: We pad box frames to enable gpu optimization (from 300 ms -> 1 ms)
 
@@ -91,6 +90,8 @@ class Anchors(nn.Module):
         else:
             gt_padded = box.pack_boxes_list(targets, self.label_offset).to(device)
 
+        do_mask = False
+        valid = (gt_padded[:,:,4] < 0).long()
         total = len(gt_padded)
         max_size = gt_padded.shape[1]
         gt_boxes = gt_padded[..., :4]
@@ -104,8 +105,19 @@ class Anchors(nn.Module):
         #V1 (fast, but no guarantee of uniqueness for low quality matches)
         for target_index in range(max_size):
             index = batch_best_prior_per_target_index[..., target_index:target_index+1]
-            batch_best_target_per_prior_index.scatter_(-1, index, target_index)
-            batch_best_target_per_prior.scatter_(-1, index, 2.0)
+
+            if do_mask:
+                valid_target_index = valid[:, target_index:target_index+1]
+                masked_index = torch.gather(batch_best_target_per_prior_index, 1, index)
+                masked_index = masked_index * (1-valid_target_index) + target_index * valid_target_index
+                masked_value = torch.gather(batch_best_target_per_prior, 1, index)
+                masked_value = masked_value * (1 - valid_target_index) + 2.0 * valid_target_index
+
+                batch_best_target_per_prior_index.scatter_(-1, index, masked_index)
+                batch_best_target_per_prior.scatter_(-1, index, masked_value)
+            else:
+                batch_best_target_per_prior_index.scatter_(-1, index, target_index)
+                batch_best_target_per_prior.scatter_(-1, index, 2.0)
 
         mask_bg = batch_best_target_per_prior < self.bg_iou_threshold
         mask_ign = (batch_best_target_per_prior > self.bg_iou_threshold) * (batch_best_target_per_prior < self.fg_iou_threshold)
@@ -121,7 +133,48 @@ class Anchors(nn.Module):
 
         return loc_targets, cls_targets
 
-    @opts.cuda_time
+    def encode_alternative(self, features, targets):
+        # Strategy: We pad box frames to enable gpu optimization (from 300 ms -> 1 ms)
+
+        anchors, anchors_xyxy = self(features)
+        device = features[0].device
+
+        if isinstance(targets[0], list):
+            gt_padded = box.pack_boxes_list_of_list(targets, self.label_offset).to(device)
+        else:
+            gt_padded = box.pack_boxes_list(targets, self.label_offset).to(device)
+
+        total = len(gt_padded)
+        gt_boxes = gt_padded[..., :4]
+        gt_labels = gt_padded[..., 4].long()
+
+        ious = box.batch_box_iou(anchors_xyxy, gt_boxes)  # [N, A, M]
+
+        matched_vals, matches = ious.max(-1)  # [N, A]
+        highest_quality_foreach_gt, _ = ious.max(-2)  # [N, M]
+
+        all_matches = matches.clone()
+
+        mask_bg = matched_vals < self.bg_iou_threshold
+        mask_ign = (matched_vals > self.bg_iou_threshold) * (matched_vals < self.fg_iou_threshold)
+
+        gt_pred_pairs_of_highest_quality = torch.nonzero(ious == highest_quality_foreach_gt.unsqueeze(1))
+        batch_index = gt_pred_pairs_of_highest_quality[:, 0]
+        pred_index = gt_pred_pairs_of_highest_quality[:, 0]
+        matches[batch_index, pred_index] = all_matches[batch_index, pred_index]
+
+        labels = torch.gather(gt_labels, 1, matches)
+        labels[mask_bg] = 0
+        labels[mask_ign] = -1
+        index = matches[..., None].expand(total, len(anchors), 4)
+        boxes = torch.gather(gt_boxes, 1, index)
+
+        loc_targets = box.bbox_to_deltas(boxes, anchors[None])
+        cls_targets = labels.view(-1, len(anchors))
+
+        return loc_targets, cls_targets
+
+
     def decode(self, features, loc_preds, cls_preds, batchsize, score_thresh, nms_thresh=0.6):
         anchors, _ = self(features)
         box_preds = box.deltas_to_bbox(loc_preds, anchors)
