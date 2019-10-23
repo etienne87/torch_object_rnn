@@ -52,14 +52,19 @@ def sigmoid_focal_loss(x, y, reduction='none'):
     s = x.sigmoid()
     batchsize, num_anchors, num_classes = x.shape
 
-    t = torch.zeros((len(x), num_classes), dtype=pred.dtype, device=pred.device)
-    t[:, y] = y > 0 #at right column put a 1 or a zero if bg
+    y2 = y.unsqueeze(2)
+    fg = (y2>0).float()
+    t = torch.zeros((len(x), num_anchors, num_classes), dtype=x.dtype, device=x.device)
+    t.scatter_(2, y2.clamp_(0), fg)
 
     pt = (1 - s) * t + s * (1 - t)
-    focal_weight = (alpha * t + (1 - alpha) *
-                    (1 - t)) * pt.pow(gamma)
+    # focal_weight = (alpha * t + (1 - alpha) *
+    #                 (1 - t)) * pt.pow(gamma)
+
+    focal_weight = pt.pow(gamma)
+
     loss = F.binary_cross_entropy_with_logits(
-        x, target, reduction='none') * focal_weight
+        x, t, reduction='none') * focal_weight
     loss = loss.sum(dim=-1)
     loss[y < 0] = 0
 
@@ -67,21 +72,7 @@ def sigmoid_focal_loss(x, y, reduction='none'):
     return loss
 
 
-def smooth_l1_loss(loc_preds, loc_targets, pos):
-    ''' compute regression only where pos
-
-    :param loc_preds:
-    :param loc_targets:
-    :param pos:
-    :return:
-    '''
-    mask = pos.unsqueeze(2).expand_as(loc_preds)  # [N,#anchors,4]
-    loc_loss = F.smooth_l1_loss(loc_preds[mask], loc_targets[mask], reduction='sum')
-    loc_loss /= num_pos
-    return loc_loss
-
-
-def ohem_loss(cls_preds, pos):
+def ohem_loss(cls_preds, cls_targets, pos, batchsize):
     ''' hard-negative mining
 
     :param cls_preds:
@@ -89,11 +80,9 @@ def ohem_loss(cls_preds, pos):
     :param neg:
     :return:
     '''
-    num_pos = pos.sum().item()
-
     cls_loss = F.cross_entropy(cls_preds.view(-1, cls_preds.size(-1)),
                                cls_targets.view(-1), ignore_index=-1, reduction='none')
-    cls_loss = cls_loss.view(batch_size, -1)
+    cls_loss = cls_loss.view(batchsize, -1)
 
     cls_loss2 = cls_loss * (pos.float() - 1)
     _, idx = cls_loss2.sort(1)  # sort by negative losses
@@ -101,11 +90,20 @@ def ohem_loss(cls_preds, pos):
     num_neg = 3 * pos.sum(1)  # [N,]
     neg = rank < num_neg[:, None]
     cls_loss = cls_loss[pos | neg].sum()
-    cls_loss /= num_pos
     return cls_loss
 
 
 
-#
-# class DetectionLoss(nn.Module):
-#     def __init__(self):
+class DetectionLoss(nn.Module):
+    def __init__(self):
+        super(DetectionLoss, self).__init__()
+
+    def forward(self, loc_preds, loc_targets, cls_preds, cls_targets):
+        pos = cls_targets > 0
+        num_pos = pos.sum().item()
+        cls_loss = sigmoid_focal_loss(cls_preds, cls_targets, 'sum')
+
+        mask = pos.unsqueeze(2).expand_as(loc_preds)  # [N,#anchors,4]
+        loc_loss = F.smooth_l1_loss(loc_preds[mask], loc_targets[mask], reduction='sum')
+
+        return loc_loss, cls_loss

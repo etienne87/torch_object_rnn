@@ -67,6 +67,7 @@ class Anchors(nn.Module):
             self.anchor_generators.append(AnchorLayer(box_size, stride, self.ratios, self.scales))
         self.anchors = None
         self.anchors_xyxy = None
+        self.encode = self.encode_v1
 
     def forward(self, features):
         size = sum([(item.shape[-2]*item.shape[-1]*self.num_anchors) for item in features])
@@ -79,7 +80,7 @@ class Anchors(nn.Module):
             self.anchors_xyxy = box.change_box_order(self.anchors, "xywh2xyxy")
         return self.anchors, self.anchors_xyxy
 
-    def encode(self, features, targets):
+    def encode_v1(self, features, targets):
         # Strategy: We pad box frames to enable gpu optimization (from 300 ms -> 1 ms)
 
         anchors, anchors_xyxy = self(features)
@@ -105,19 +106,20 @@ class Anchors(nn.Module):
         #V1 (fast, but no guarantee of uniqueness for low quality matches)
         for target_index in range(max_size):
             index = batch_best_prior_per_target_index[..., target_index:target_index+1]
+            batch_best_target_per_prior_index.scatter_(-1, index, target_index)
+            batch_best_target_per_prior.scatter_(-1, index, 2.0)
 
-            if do_mask:
-                valid_target_index = valid[:, target_index:target_index+1]
-                masked_index = torch.gather(batch_best_target_per_prior_index, 1, index)
-                masked_index = masked_index * (1-valid_target_index) + target_index * valid_target_index
-                masked_value = torch.gather(batch_best_target_per_prior, 1, index)
-                masked_value = masked_value * (1 - valid_target_index) + 2.0 * valid_target_index
+            # if do_mask:
+            #     valid_target_index = valid[:, target_index:target_index+1]
+            #     masked_index = torch.gather(batch_best_target_per_prior_index, 1, index)
+            #     masked_index = masked_index * (1-valid_target_index) + target_index * valid_target_index
+            #     masked_value = torch.gather(batch_best_target_per_prior, 1, index)
+            #     masked_value = masked_value * (1 - valid_target_index) + 2.0 * valid_target_index
+            #
+            #     batch_best_target_per_prior_index.scatter_(-1, index, masked_index)
+            #     batch_best_target_per_prior.scatter_(-1, index, masked_value)
+            # else:
 
-                batch_best_target_per_prior_index.scatter_(-1, index, masked_index)
-                batch_best_target_per_prior.scatter_(-1, index, masked_value)
-            else:
-                batch_best_target_per_prior_index.scatter_(-1, index, target_index)
-                batch_best_target_per_prior.scatter_(-1, index, 2.0)
 
         mask_bg = batch_best_target_per_prior < self.bg_iou_threshold
         mask_ign = (batch_best_target_per_prior > self.bg_iou_threshold) * (batch_best_target_per_prior < self.fg_iou_threshold)

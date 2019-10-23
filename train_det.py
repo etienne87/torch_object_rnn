@@ -52,7 +52,7 @@ def make_moving_mnist(args):
     test_dataset.num_batches = args.test_iter
     train_dataset = datafunc(train_dataset)
     test_dataset = datafunc(test_dataset)
-    classes = 11
+    classes = 10
     return train_dataset, test_dataset, classes
 
 
@@ -74,11 +74,11 @@ def main():
 
     os.environ['OMP_NUM_THREADS'] = '1'
 
-    classes, cin, height, width = 11, 3, 256, 256
+    cin, height, width = 3, 256, 256
 
-    args.cin = cin
-    args.height = height
-    args.width = width
+    args.cin = 3
+    args.height = 256
+    args.width = 256
 
     # Dataset
     print('==> Preparing dataset..')
@@ -91,7 +91,7 @@ def main():
 
     # Model
     print('==> Building model..')
-    net = SingleStageDetector(num_classes=classes, cin=cin, act="softmax")
+    net = SingleStageDetector(num_classes=classes, cin=cin, act="sigmoid")
 
     if args.cuda:
         net.cuda()

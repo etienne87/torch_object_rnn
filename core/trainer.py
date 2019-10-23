@@ -67,22 +67,24 @@ class DetTrainer(object):
             self.optimizer.zero_grad()
             loss_dict = self.net.compute_loss(inputs, targets)
 
-            loss = sum([value for key, value in loss_dict.items()])
-            loss.backward()
+
+            loss_bp = sum([value/(value.item()+1e-3) for key, value in loss_dict.items()])
+            loss_bp.backward()
             # torch.nn.utils.clip_grad_norm_(self.net.parameters(), 0.1)
             self.optimizer.step()
 
             runtime_stats['network'] += time.time() - start
 
-            train_loss += loss.item()
+            loss = sum([value.item() for key, value in loss_dict.items()])
 
+            train_loss += loss
             for key, value in loss_dict.items():
                 self.writer.add_scalar('train_'+key, value.data.item(),
                                        batch_idx + epoch * len(dataloader) )
 
             if batch_idx % args.log_every == 0:
                 print('\rtrain_loss: %.3f | avg_loss: %.3f [%d/%d] | @data: %.3f | @net: %.3f'
-                      % (loss.data.item(), train_loss / (batch_idx + 1),
+                      % (loss, train_loss / (batch_idx + 1),
                          batch_idx + 1, len(dataloader),
                          runtime_stats['dataloader'] / (batch_idx + 1),
                          runtime_stats['network'] / (batch_idx + 1)
