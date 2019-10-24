@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -30,8 +31,11 @@ def softmax_focal_loss(x, y, reduction='none'):
     :return:
     '''
     gamma = 2.0
+    num_classes = x.size(-1)
+    x = x.view(-1, num_classes)
+    y = y.view(-1)
     r = torch.arange(x.size(0))
-    ce = F.log_softmax(x, dim=1)[r, y]
+    ce = F.log_softmax(x, dim=-1)[r, y.clamp_(0)]
     pt = torch.exp(ce)
     weights = (1-pt).pow(gamma)
     loss = -(weights * ce)
@@ -59,10 +63,10 @@ def sigmoid_focal_loss(x, y, reduction='none'):
     t.scatter_(2, y_index, fg)
 
     pt = (1 - s) * t + s * (1 - t)
-    # focal_weight = (alpha * t + (1 - alpha) *
-    #                 (1 - t)) * pt.pow(gamma)
+    focal_weight = (alpha * t + (1 - alpha) *
+                    (1 - t)) * pt.pow(gamma)
 
-    focal_weight = pt.pow(gamma)
+    # focal_weight = pt.pow(gamma)
 
     loss = F.binary_cross_entropy_with_logits(
         x, t, reduction='none') * focal_weight
@@ -96,13 +100,14 @@ def ohem_loss(cls_preds, cls_targets, pos, batchsize):
 
 
 class DetectionLoss(nn.Module):
-    def __init__(self):
+    def __init__(self, cls_loss_func='softmax_focal_loss'):
         super(DetectionLoss, self).__init__()
+        self.cls_loss_func = getattr(sys.modules[__name__], cls_loss_func)
 
     def forward(self, loc_preds, loc_targets, cls_preds, cls_targets):
         pos = cls_targets > 0
         num_pos = pos.sum().item()
-        cls_loss = sigmoid_focal_loss(cls_preds, cls_targets, 'sum') / num_pos
+        cls_loss = self.cls_loss_func(cls_preds, cls_targets, 'sum') / num_pos
 
         mask = pos.unsqueeze(2).expand_as(loc_preds)  # [N,#anchors,4]
         loc_loss = F.smooth_l1_loss(loc_preds[mask], loc_targets[mask], reduction='sum') / num_pos

@@ -5,9 +5,8 @@ from __future__ import print_function
 import torch
 import torch.nn as nn
 
-from core.ssd.loss import SSDLoss
-from core.losses import DetectionLoss
 
+from core.losses import DetectionLoss
 from core.backbones import FPN
 from core.anchors import Anchors
 from core.rpn import BoxHead
@@ -34,11 +33,6 @@ class SingleStageDetector(nn.Module):
 
         self.rpn = rpn(self.feature_extractor.cout, self.box_coder.num_anchors, self.num_classes + self.label_offset, act)
 
-        # self.criterion = SSDLoss(num_classes=self.num_classes,
-        #                          mode='focal',
-        #                          use_sigmoid=self.act=='sigmoid',
-        #                          use_iou=False)
-
         self.criterion = DetectionLoss()
 
     def reset(self):
@@ -63,5 +57,6 @@ class SingleStageDetector(nn.Module):
     def get_boxes(self, x, score_thresh=0.4):
         xs = self.feature_extractor(x)
         loc_preds, cls_preds = self.rpn(xs)
-        targets = self.box_coder.decode(xs, loc_preds, cls_preds[:, self.label_offset:], x.size(1), score_thresh=score_thresh)
+        scores = cls_preds[..., self.label_offset:].contiguous()
+        targets = self.box_coder.decode(xs, loc_preds, scores, x.size(1), score_thresh=score_thresh)
         return targets
