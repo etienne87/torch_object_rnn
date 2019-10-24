@@ -68,16 +68,14 @@ class DetTrainer(object):
             loss_dict = self.net.compute_loss(inputs, targets)
 
 
-            loss_bp = sum([value/(value.item()+1e-3) for key, value in loss_dict.items()])
-            loss_bp.backward()
+            loss = sum([value for key, value in loss_dict.items()])
+            loss.backward()
             # torch.nn.utils.clip_grad_norm_(self.net.parameters(), 0.1)
             self.optimizer.step()
 
             runtime_stats['network'] += time.time() - start
 
-            loss = sum([value.item() for key, value in loss_dict.items()])
-
-            train_loss += loss
+            train_loss += loss.item()
             for key, value in loss_dict.items():
                 self.writer.add_scalar('train_'+key, value.data.item(),
                                        batch_idx + epoch * len(dataloader) )

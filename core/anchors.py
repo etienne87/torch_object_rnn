@@ -59,7 +59,7 @@ class Anchors(nn.Module):
         self.fg_iou_threshold = kwargs.get("fg_iou_threshold", 0.5)
         self.bg_iou_threshold = kwargs.get("bg_iou_threshold", 0.4)
         self.num_anchors = len(self.scales) * len(self.ratios)
-        self.label_offset = kwargs.get("label_offset", 0) #0 by default, has to be 1 if using softmax
+        self.label_offset = kwargs.get("label_offset", 0) #TODO: handle this label_offset should be done in the dataloader ALWAYS.
 
         self.variances = (0.1, 0.2)
         self.anchor_generators = nn.ModuleList()
@@ -87,12 +87,12 @@ class Anchors(nn.Module):
         device = features[0].device
 
         if isinstance(targets[0], list):
-            gt_padded = box.pack_boxes_list_of_list(targets, self.label_offset).to(device)
+            gt_padded = box.pack_boxes_list_of_list(targets).to(device)
         else:
-            gt_padded = box.pack_boxes_list(targets, self.label_offset).to(device)
+            gt_padded = box.pack_boxes_list(targets).to(device)
 
-        do_mask = False
-        valid = (gt_padded[:,:,4] < 0).long()
+        # do_mask = False
+        # valid = (gt_padded[:,:,4] < 0).long()
         total = len(gt_padded)
         max_size = gt_padded.shape[1]
         gt_boxes = gt_padded[..., :4]
@@ -142,9 +142,9 @@ class Anchors(nn.Module):
         device = features[0].device
 
         if isinstance(targets[0], list):
-            gt_padded = box.pack_boxes_list_of_list(targets, self.label_offset).to(device)
+            gt_padded = box.pack_boxes_list_of_list(targets).to(device)
         else:
-            gt_padded = box.pack_boxes_list(targets, self.label_offset).to(device)
+            gt_padded = box.pack_boxes_list(targets).to(device)
 
         total = len(gt_padded)
         gt_boxes = gt_padded[..., :4]
@@ -178,15 +178,16 @@ class Anchors(nn.Module):
 
 
     def decode(self, features, loc_preds, cls_preds, batchsize, score_thresh, nms_thresh=0.6):
+        # loc_preds [N, C] (do not include background column)
         anchors, _ = self(features)
         box_preds = box.deltas_to_bbox(loc_preds, anchors)
 
         # batch decoding
-        num_classes = cls_preds.shape[-1] - self.label_offset
+        num_classes = cls_preds.shape[-1]
         num_anchors = box_preds.shape[1]
         boxes = box_preds.unsqueeze(2).expand(-1, num_anchors, num_classes, 4).contiguous()
 
-        scores = cls_preds[..., self.label_offset:].contiguous()
+        scores = cls_preds
         boxes = boxes.view(-1, 4)
         scores = scores.view(-1)
         rows = torch.arange(len(box_preds), dtype=torch.long)[:, None]

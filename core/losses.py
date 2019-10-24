@@ -43,7 +43,7 @@ def sigmoid_focal_loss(x, y, reduction='none'):
     ''' sigmoid focal loss
 
     :param x: [N, A, C]
-    :param y: [N, A]
+    :param y: [N, A] (-1: ignore, 0: background, [1,C+1]: classes)
     :param reduction:
     :return:
     '''
@@ -54,8 +54,9 @@ def sigmoid_focal_loss(x, y, reduction='none'):
 
     y2 = y.unsqueeze(2)
     fg = (y2>0).float()
+    y_index = (y2 - 1).clamp_(0)
     t = torch.zeros((len(x), num_anchors, num_classes), dtype=x.dtype, device=x.device)
-    t.scatter_(2, y2.clamp_(0), fg)
+    t.scatter_(2, y_index, fg)
 
     pt = (1 - s) * t + s * (1 - t)
     # focal_weight = (alpha * t + (1 - alpha) *
@@ -101,9 +102,9 @@ class DetectionLoss(nn.Module):
     def forward(self, loc_preds, loc_targets, cls_preds, cls_targets):
         pos = cls_targets > 0
         num_pos = pos.sum().item()
-        cls_loss = sigmoid_focal_loss(cls_preds, cls_targets, 'sum')
+        cls_loss = sigmoid_focal_loss(cls_preds, cls_targets, 'sum') / num_pos
 
         mask = pos.unsqueeze(2).expand_as(loc_preds)  # [N,#anchors,4]
-        loc_loss = F.smooth_l1_loss(loc_preds[mask], loc_targets[mask], reduction='sum')
+        loc_loss = F.smooth_l1_loss(loc_preds[mask], loc_targets[mask], reduction='sum') / num_pos
 
         return loc_loss, cls_loss

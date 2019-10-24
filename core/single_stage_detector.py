@@ -19,7 +19,7 @@ class SingleStageDetector(nn.Module):
                  num_classes=2, cin=2, act='sigmoid'):
         super(SingleStageDetector, self).__init__()
         self.label_offset = 1 * (act=='softmax')
-        self.num_classes = num_classes + self.label_offset
+        self.num_classes = num_classes
         self.cin = cin
 
         self.feature_extractor = feature_extractor(cin)
@@ -27,13 +27,12 @@ class SingleStageDetector(nn.Module):
         self.box_coder = Anchors(pyramid_levels=[i for i in range(3,3+self.feature_extractor.levels)],
                                  scales=[1.0, 1.5],
                                  ratios=[1],
-                                 label_offset=self.label_offset,
                                  fg_iou_threshold=0.5, bg_iou_threshold=0.4)
 
         self.num_anchors = self.box_coder.num_anchors
         self.act = act
 
-        self.rpn = rpn(self.feature_extractor.cout, self.box_coder.num_anchors, self.num_classes, act)
+        self.rpn = rpn(self.feature_extractor.cout, self.box_coder.num_anchors, self.num_classes + self.label_offset, act)
 
         # self.criterion = SSDLoss(num_classes=self.num_classes,
         #                          mode='focal',
@@ -64,5 +63,5 @@ class SingleStageDetector(nn.Module):
     def get_boxes(self, x, score_thresh=0.4):
         xs = self.feature_extractor(x)
         loc_preds, cls_preds = self.rpn(xs)
-        targets = self.box_coder.decode(xs, loc_preds, cls_preds, x.size(1), score_thresh=score_thresh)
+        targets = self.box_coder.decode(xs, loc_preds, cls_preds[:, self.label_offset:], x.size(1), score_thresh=score_thresh)
         return targets
