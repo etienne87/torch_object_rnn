@@ -174,18 +174,18 @@ class Anchors(nn.Module):
         scores = scoresf[keep]
         labels = idxsf[keep] % num_classes
         batch_index = idxsf[keep] // num_classes
-        batch_index = batch_index#.cpu()
+        batch_index = batch_index
 
         tbins = len(cls_preds) // batchsize
         targets = [[(None,None,None) for _ in range(batchsize)] for _ in range(tbins)]
 
         bidx, sidx = batch_index.sort()
-        bidx_vals, sizes = torch.unique(bidx, return_counts=True)
+        bidx_vals, sizes = torch.unique(bidx.long(), return_counts=True)
         sidx_list = sidx.split(sizes.cpu().numpy().tolist())
-        for bidx_val, group in zip(bidx_vals.cpu().long().numpy().tolist(), sidx_list):
+
+        for bidx_val, group in zip(bidx_vals.cpu().numpy().tolist(), sidx_list):
             t = bidx_val // batchsize
             i = bidx_val % batchsize
             targets[t][i] = (boxes[group], labels[group], scores[group])
-
 
         return targets
