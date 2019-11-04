@@ -4,19 +4,17 @@ from __future__ import print_function
 
 import torch
 import torch.nn as nn
-
-
+import torchvision.ops.poolers as pool
 from core.losses import DetectionLoss
 from core.backbones import FPN
 from core.anchors import Anchors
 from core.rpn import BoxHead
 
 
-
-class SingleStageDetector(nn.Module):
+class TwoStageDetector(nn.Module):
     def __init__(self, feature_extractor=FPN, rpn=BoxHead,
                  num_classes=2, cin=2, act='sigmoid'):
-        super(SingleStageDetector, self).__init__()
+        super(TwoStageDetector, self).__init__()
         self.label_offset = 1 * (act=='softmax')
         self.num_classes = num_classes
         self.cin = cin
@@ -31,16 +29,36 @@ class SingleStageDetector(nn.Module):
         self.num_anchors = self.box_coder.num_anchors
         self.act = act
 
-        self.rpn = rpn(self.feature_extractor.cout, self.box_coder.num_anchors, self.num_classes + self.label_offset, act)
+        self.rpn = rpn(self.feature_extractor.cout, self.box_coder.num_anchors, 1 + self.label_offset, act)
+
+        self.roi_pool = pool.MultiScaleRoIAlign(feat_names, output_size)
+        self.second_stage = rpn(self.feature_extractor.cout,
+                                         self.box_coder.num_anchors,
+                                         self.num_classes + self.label_offset, act)
+
 
         self.criterion = DetectionLoss('sigmoid_focal_loss')
+
+
 
     def reset(self):
         self.feature_extractor.reset()
 
     def forward(self, x):
         xs = self.feature_extractor(x)
-        return self.rpn(xs)
+        loc_preds, cls_preds = self.rpn(xs)
+
+        scores = cls_preds[..., self.label_offset:].contiguous()
+        rois = self.box_coder.decode(xs, loc_preds, scores, x.size(1), score_thresh=score_thresh)
+
+        out = self.roi_pool(xs, rois)
+
+        loc_rois, cls_rois = self.second_stage(out)
+
+        #decode loc_rois knowing rois using bbox_to_deltas
+
+
+        return boxes
 
     def compute_loss(self, x, targets):
         xs = self.feature_extractor(x)
