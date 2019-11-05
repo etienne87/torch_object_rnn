@@ -59,7 +59,6 @@ class Anchors(nn.Module):
         self.fg_iou_threshold = kwargs.get("fg_iou_threshold", 0.5)
         self.bg_iou_threshold = kwargs.get("bg_iou_threshold", 0.4)
         self.num_anchors = len(self.scales) * len(self.ratios)
-        self.label_offset = kwargs.get("label_offset", 0) #TODO: handle this label_offset should be done in the dataloader ALWAYS.
         self.allow_low_quality_matches = kwargs.get("allow_low_quality_matches", False)
         self.variances = (0.1, 0.2)
         self.anchor_generators = nn.ModuleList()
@@ -120,22 +119,10 @@ class Anchors(nn.Module):
     def set_low_quality_matches_v1(self, ious, matches):
         _, batch_best_prior_per_target_index = ious.max(-2)  # [N, M]
         max_size = ious.shape[-1]
-
-        # do_mask = False
-        # valid = (gt_padded[:,:,4] < 0).long()
         for target_index in range(max_size):
             index = batch_best_prior_per_target_index[..., target_index:target_index + 1]
             matches.scatter_(-1, index, target_index)
             matches.scatter_(-1, index, 2.0)
-            # if do_mask:
-            #     valid_target_index = valid[:, target_index:target_index+1]
-            #     masked_index = torch.gather(batch_best_target_per_prior_index, 1, index)
-            #     masked_index = masked_index * (1-valid_target_index) + target_index * valid_target_index
-            #     masked_value = torch.gather(batch_best_target_per_prior, 1, index)
-            #     masked_value = masked_value * (1 - valid_target_index) + 2.0 * valid_target_index
-            #     batch_best_target_per_prior_index.scatter_(-1, index, masked_index)
-            #     batch_best_target_per_prior.scatter_(-1, index, masked_value)
-
 
     def set_low_quality_matches_v2(self, ious, matches, all_matches):
         highest_quality_foreach_gt, _ = ious.max(-2)  # [N, M]
@@ -154,32 +141,14 @@ class Anchors(nn.Module):
         num_classes = cls_preds.shape[-1]
         num_anchors = box_preds.shape[1]
 
-
-        # Max-Score Decoding
-        scores, labels = cls_preds.max(-1)
-        idxs = torch.arange(len(box_preds), dtype=torch.long)[:, None].to(scores.device) * num_classes + labels
-
-        boxes = box_preds.view(-1, 4)
-        scores = scores.view(-1)
-        idxs = idxs.view(-1)
-        mask = scores >= score_thresh
-        boxesf = boxes[mask].contiguous()
-        scoresf = scores[mask].contiguous()
-        idxsf = idxs[mask].contiguous()
-        keep = batched_nms(boxesf, scoresf, idxsf, nms_thresh)
-        boxes = boxesf[keep]
-        scores = scoresf[keep]
-        labels = idxsf[keep] % num_classes
-        batch_index = idxsf[keep] // num_classes
-
         # Per-Column Decoding
-        # boxes = box_preds.unsqueeze(2).expand(-1, num_anchors, num_classes, 4).contiguous()
-        # scores = cls_preds
-        # boxes, scores, idxs = self.decode_per_image(boxes, scores,
-        #                                             num_anchors, num_classes,
-        #                                             len(box_preds), score_thresh, nms_thresh)
-        # labels = idxs % num_classes
-        # batch_index = idxs // num_classes
+        boxes = box_preds.unsqueeze(2).expand(-1, num_anchors, num_classes, 4).contiguous()
+        scores = cls_preds
+        boxes, scores, idxs = self.decode_per_image(boxes, scores,
+                                                    num_anchors, num_classes,
+                                                    len(box_preds), score_thresh, nms_thresh)
+        labels = idxs % num_classes
+        batch_index = idxs // num_classes
 
         tbins = len(cls_preds) // batchsize
         targets = [[(None,None,None) for _ in range(batchsize)] for _ in range(tbins)]
@@ -208,7 +177,7 @@ class Anchors(nn.Module):
         boxesf = boxes[mask].contiguous()
         scoresf = scores[mask].contiguous()
         idxsf = idxs[mask].contiguous()
-        topk = 500 * len(loc_preds)
+        topk = int(1e5)
         if len(boxesf) > topk:
             scoresf, idx = torch.sort(scoresf, descending=True)
             scoresf = scoresf[:topk]
