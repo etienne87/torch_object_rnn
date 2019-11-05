@@ -124,7 +124,7 @@ class Anchors(nn.Module):
         # do_mask = False
         # valid = (gt_padded[:,:,4] < 0).long()
         for target_index in range(max_size):
-            index = best_prior_per_target_index[..., target_index:target_index + 1]
+            index = batch_best_prior_per_target_index[..., target_index:target_index + 1]
             matches.scatter_(-1, index, target_index)
             matches.scatter_(-1, index, 2.0)
             # if do_mask:
@@ -153,16 +153,33 @@ class Anchors(nn.Module):
         # batch decoding
         num_classes = cls_preds.shape[-1]
         num_anchors = box_preds.shape[1]
-        boxes = box_preds.unsqueeze(2).expand(-1, num_anchors, num_classes, 4).contiguous()
-
-        scores = cls_preds
 
 
-        boxes, scores, idxs = self.decode_per_image(boxes, scores,
-                                                    num_anchors, num_classes,
-                                                    len(box_preds), score_thresh, nms_thresh)
-        labels = idxs % num_classes
-        batch_index = idxs // num_classes
+        # Max-Score Decoding
+        scores, labels = cls_preds.max(-1)
+        idxs = torch.arange(len(box_preds), dtype=torch.long)[:, None].to(scores.device) * num_classes + labels
+
+        boxes = box_preds.view(-1, 4)
+        scores = scores.view(-1)
+        idxs = idxs.view(-1)
+        mask = scores >= score_thresh
+        boxesf = boxes[mask].contiguous()
+        scoresf = scores[mask].contiguous()
+        idxsf = idxs[mask].contiguous()
+        keep = batched_nms(boxesf, scoresf, idxsf, nms_thresh)
+        boxes = boxesf[keep]
+        scores = scoresf[keep]
+        labels = idxsf[keep] % num_classes
+        batch_index = idxsf[keep] // num_classes
+
+        # Per-Column Decoding
+        # boxes = box_preds.unsqueeze(2).expand(-1, num_anchors, num_classes, 4).contiguous()
+        # scores = cls_preds
+        # boxes, scores, idxs = self.decode_per_image(boxes, scores,
+        #                                             num_anchors, num_classes,
+        #                                             len(box_preds), score_thresh, nms_thresh)
+        # labels = idxs % num_classes
+        # batch_index = idxs // num_classes
 
         tbins = len(cls_preds) // batchsize
         targets = [[(None,None,None) for _ in range(batchsize)] for _ in range(tbins)]
@@ -178,11 +195,11 @@ class Anchors(nn.Module):
 
         return targets
 
-    def batched_decode(self, boxes, scores, num_anchors, num_classes, score_thresh, nms_thresh):
-        rows = torch.arange(len(box_preds), dtype=torch.long)[:, None]
+    def batched_decode(self, boxes, scores, num_anchors, num_classes, batchsize, score_thresh, nms_thresh):
+        rows = torch.arange(batchsize, dtype=torch.long)[:, None]
         cols = torch.arange(num_classes, dtype=torch.long)[None, :]
         idxs = rows * num_classes + cols
-        idxs = idxs.unsqueeze(1).expand(len(box_preds), num_anchors, num_classes).contiguous()
+        idxs = idxs.unsqueeze(1).expand(batchsize, num_anchors, num_classes).contiguous()
         idxs = idxs.to(scores.device)
         boxes = boxes.view(-1, 4)
         scores = scores.view(-1)
