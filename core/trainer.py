@@ -134,7 +134,7 @@ class DetTrainer(object):
 
             start = time.time()
 
-        det_results, gt_bboxes, gt_labels = mean_ap.convert(gts, proposals, self.net.num_classes-1)
+        det_results, gt_bboxes, gt_labels = mean_ap.convert(gts, proposals, self.net.num_classes)
 
         map, eval_results = mean_ap.eval_map(det_results,
                                                  gt_bboxes,
