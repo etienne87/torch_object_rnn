@@ -67,6 +67,7 @@ class Anchors(nn.Module):
             self.anchor_generators.append(AnchorLayer(box_size, stride, self.ratios, self.scales))
         self.anchors = None
         self.anchors_xyxy = None
+        self.idxs = None
         self.encode = self.encode_v1
 
     def forward(self, features):
@@ -155,26 +156,13 @@ class Anchors(nn.Module):
         boxes = box_preds.unsqueeze(2).expand(-1, num_anchors, num_classes, 4).contiguous()
 
         scores = cls_preds
-        boxes = boxes.view(-1, 4)
-        scores = scores.view(-1)
-        rows = torch.arange(len(box_preds), dtype=torch.long)[:, None]
-        cols = torch.arange(num_classes, dtype=torch.long)[None, :]
-        idxs = rows * num_classes + cols
-        idxs = idxs.unsqueeze(1).expand(len(box_preds), num_anchors, num_classes)
-        idxs = idxs.to(scores).view(-1)
 
-        mask = scores >= score_thresh
-        boxesf = boxes[mask].contiguous()
-        scoresf = scores[mask].contiguous()
-        idxsf = idxs[mask].contiguous()
 
-        keep = batched_nms(boxesf, scoresf, idxsf, nms_thresh)
-
-        boxes = boxesf[keep]
-        scores = scoresf[keep]
-        labels = idxsf[keep] % num_classes
-        batch_index = idxsf[keep] // num_classes
-        batch_index = batch_index
+        boxes, scores, idxs = self.decode_per_image(boxes, scores,
+                                                    num_anchors, num_classes,
+                                                    len(box_preds), score_thresh, nms_thresh)
+        labels = idxs % num_classes
+        batch_index = idxs // num_classes
 
         tbins = len(cls_preds) // batchsize
         targets = [[(None,None,None) for _ in range(batchsize)] for _ in range(tbins)]
@@ -189,3 +177,57 @@ class Anchors(nn.Module):
             targets[t][i] = (boxes[group], labels[group], scores[group])
 
         return targets
+
+    def batched_decode(self, boxes, scores, num_anchors, num_classes, score_thresh, nms_thresh):
+        rows = torch.arange(len(box_preds), dtype=torch.long)[:, None]
+        cols = torch.arange(num_classes, dtype=torch.long)[None, :]
+        idxs = rows * num_classes + cols
+        idxs = idxs.unsqueeze(1).expand(len(box_preds), num_anchors, num_classes).contiguous()
+        idxs = idxs.to(scores.device)
+        boxes = boxes.view(-1, 4)
+        scores = scores.view(-1)
+        idxs = idxs.view(-1)
+        mask = scores >= score_thresh
+        boxesf = boxes[mask].contiguous()
+        scoresf = scores[mask].contiguous()
+        idxsf = idxs[mask].contiguous()
+        topk = 500 * len(loc_preds)
+        if len(boxesf) > topk:
+            scoresf, idx = torch.sort(scoresf, descending=True)
+            scoresf = scoresf[:topk]
+            boxesf = boxesf[idx][:topk]
+            idxsf = idxsf[idx][:topk]
+        keep = batched_nms(boxesf, scoresf, idxsf, nms_thresh)
+        boxes = boxesf[keep]
+        scores = scoresf[keep]
+        labels = idxsf[keep] % num_classes
+        batch_index = idxsf[keep] // num_classes
+        return boxes, scores, labels, batch_index
+
+    def decode_per_image(self, boxes, scores, num_anchors, num_classes, batchsize, score_thresh, nms_thresh):
+        rows = torch.arange(batchsize, dtype=torch.long)[:, None]
+        cols = torch.arange(num_classes, dtype=torch.long)[None, :]
+        idxs = rows * num_classes + cols
+        idxs = idxs.unsqueeze(1).expand(batchsize, num_anchors, num_classes).contiguous()
+        idxs = idxs.to(scores.device)
+        labels = cols.expand(num_anchors, num_classes).to(scores.device).view(-1)
+        allboxes = []
+        allscores = []
+        allidxs = []
+        for i in range(batchsize):
+            boxesi = boxes[i].view(-1, 4)
+            scoresi = scores[i].view(-1)
+            idxsi = idxs[i].view(-1)
+            mask = scoresi >= score_thresh
+            boxesf = boxesi[mask].contiguous()
+            scoresf = scoresi[mask].contiguous()
+            idxsf = idxsi[mask].contiguous()
+            labelsf = labels[mask]
+            keep = batched_nms(boxesf, scoresf, labelsf, nms_thresh)
+            allboxes.append(boxesf[keep])
+            allscores.append(scoresf[keep])
+            allidxs.append(idxsf[keep])
+        boxes = torch.cat(allboxes)
+        scores = torch.cat(allscores)
+        idxs = torch.cat(allidxs)
+        return boxes, scores, idxs
