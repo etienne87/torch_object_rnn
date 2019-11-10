@@ -23,7 +23,7 @@ class FPN(nn.Module):
         self.conv1 = SequenceWise(nn.Sequential(
             Bottleneck(cin, self.base * 2, 2),
             Bottleneck(self.base * 2, self.base * 4, 2),
-            Bottleneck(self.base * 4, self.base * 8, 2)
+            Bottleneck(self.base * 4, self.base * 8, 2),
         ))
 
         self.levels = 4
@@ -82,3 +82,44 @@ class Trident(nn.Module):
         for name, module in self._modules.items():
             if isinstance(module, ConvRNN):
                 module.timepool.reset()
+
+
+from core import pretrained_backbones as pbb
+from core.fpn import FeaturePyramidNetwork
+
+class MobileNetFPN(nn.Module):
+    def __init__(self, in_channels=1, out_channels=256):
+        super(MobileNetFPN, self).__init__()
+        self.base = 16
+        self.bb = pbb.MobileNet(in_channels, frozen_stages=3)
+        self.p6 = ConvLayer(self.bb.out_channel_list[-1], out_channels, stride=2)
+        self.p7 = ConvLayer(out_channels, out_channels, stride=2)
+
+        out_channel_list = self.bb.out_channel_list + [out_channels, out_channels]
+        self.neck = FeaturePyramidNetwork(out_channel_list, out_channels)
+        self.levels = 5
+
+    def forward(self, x):
+        x, n = time_to_batch(x)
+        x1 = self.bb(x)
+        p6 = self.p6(x1[-1])
+        p7 = self.p7(p6)
+        x1 += [p6, p7]
+        x1 = [batch_to_time(item, n) for item in x1]
+        outs = self.neck(x1)
+        sources = [time_to_batch(item)[0] for item in outs][::-1]
+
+        return sources
+
+    def reset(self):
+        for name, module in self._modules.items():
+            if hasattr(module, "reset"):
+                module.reset()
+
+
+if __name__ == '__main__':
+    t, n, c, h, w = 10, 3, 3, 128, 128
+    x = torch.rand(t, n, c, h, w)
+    net = MobileNetFPN(3)
+    out = net(x)
+    print([item.shape for item in out])
