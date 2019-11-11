@@ -14,7 +14,8 @@ class FeaturePyramidNetwork(nn.Module):
     def __init__(self, in_channels_list, out_channels, up_func=ConvRNN):
         super(FeaturePyramidNetwork, self).__init__()
 
-        up = partial(up_func, kernel_size=3, stride=1, padding=1, dilation=1)
+        # up = partial(up_func, kernel_size=3, stride=1, padding=1, dilation=1)
+        up = lambda x, y: SequenceWise(nn.Conv2d(x, y, 1, 1, 0))
         skip = lambda x, y: SequenceWise(nn.Conv2d(x, y, 1, 1, 0))
 
 

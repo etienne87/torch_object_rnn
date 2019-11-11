@@ -7,14 +7,14 @@ import torch.nn as nn
 
 
 from core.losses import DetectionLoss
-from core.backbones import FPN
+from core.backbones import FPN, MobileNetFPN
 from core.anchors import Anchors
 from core.rpn import BoxHead
 
 
 
 class SingleStageDetector(nn.Module):
-    def __init__(self, feature_extractor=FPN, rpn=BoxHead,
+    def __init__(self, feature_extractor=MobileNetFPN, rpn=BoxHead,
                  num_classes=2, cin=2, act='sigmoid'):
         super(SingleStageDetector, self).__init__()
         self.label_offset = 1 * (act=='softmax')
@@ -25,7 +25,7 @@ class SingleStageDetector(nn.Module):
 
         self.box_coder = Anchors(pyramid_levels=[i for i in range(3,3+self.feature_extractor.levels)],
                                  scales=[1.0, 1.5],
-                                 ratios=[1],
+                                 ratios=[0.5, 1.0, 2.0],
                                  fg_iou_threshold=0.5, bg_iou_threshold=0.4)
 
         self.num_anchors = self.box_coder.num_anchors

@@ -70,7 +70,7 @@ class DetTrainer(object):
 
             loss = sum([value for key, value in loss_dict.items()])
             loss.backward()
-            # torch.nn.utils.clip_grad_norm_(self.net.parameters(), 0.1)
+            torch.nn.utils.clip_grad_norm_(self.net.parameters(), 0.1)
             self.optimizer.step()
 
             runtime_stats['network'] += time.time() - start

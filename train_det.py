@@ -26,7 +26,7 @@ def parse_args():
     parser.add_argument('--batchsize', type=int, default=8, help='batchsize')
     parser.add_argument('--time', type=int, default=8, help='timesteps')
 
-    parser.add_argument('--lr', default=1e-3, type=float, help='learning rate #1e-5 is advised')
+    parser.add_argument('--lr', default=1e-5, type=float, help='learning rate #1e-5 is advised')
     parser.add_argument('--resume', action='store_true', help='resume from checkpoint')
     parser.add_argument('--train_iter', type=int, default=500, help='#iter / train epoch')
     parser.add_argument('--test_iter', type=int, default=50, help='#iter / test epoch')
@@ -125,8 +125,8 @@ def main():
         trainer.writer.add_scalar('learning rate', optimizer.param_groups[0]['lr'], epoch)
         scheduler.step(map)
 
-        if epoch%args.test_every == 0:
-            trainer.test(epoch, test_dataset, args)
+        # if epoch%args.test_every == 0:
+        #     trainer.test(epoch, test_dataset, args)
 
         if epoch%args.save_every == 0:
             trainer.save_ckpt(epoch, 'checkpoint#'+str(epoch))
