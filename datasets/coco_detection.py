@@ -77,6 +77,8 @@ class CocoDataset(Dataset):
         return sample
 
     def load_image(self, image_index):
+        assert image_index < len(self.image_ids)
+        #image_index = image_index % len(self.image_ids)
         image_info = self.coco.loadImgs(self.image_ids[image_index])[0]
         path = os.path.join(self.root_dir, 'images', self.set_name, image_info['file_name'])
         img = skimage.io.imread(path)
@@ -127,6 +129,12 @@ class CocoDataset(Dataset):
     def num_classes(self):
         return 80
 
+    def build(self):
+        pass
+
+    def reset(self):
+        pass
+
 
 def collater(data):
     imgs = [s['img'] for s in data]
@@ -148,7 +156,8 @@ def collater(data):
 
     padded_imgs = padded_imgs.permute(0, 3, 1, 2)
 
-    return {'img': padded_imgs.unsqueeze(0), 'annot': [annots], 'scale': scales}
+    #TODO: put back a dictionary, everywhere
+    return padded_imgs.unsqueeze(0), [annots], 1
 
 
 class Resizer(object):
@@ -293,9 +302,9 @@ def viz_batch(data, unnormalize, labelmap):
         cv2.waitKey(0)
 
 
-def make_coco_dataset(v):
-    dataset_train = CocoDataset(root_dir, set_name='val2017', transform=transforms.Compose([
-        Normalizer(), Resizer(), Augmenter()]))
+def make_coco_dataset(root_dir, batchsize, num_workers):
+    dataset_train = CocoDataset(root_dir, set_name='train2017', transform=transforms.Compose([
+        Normalizer(), Resizer()]))
     dataset_val = CocoDataset(root_dir, set_name='val2017',
                               transform=transforms.Compose([Normalizer(), Resizer()]))
 
@@ -303,7 +312,7 @@ def make_coco_dataset(v):
     train_loader = DataLoader(dataset_train, num_workers=num_workers,
                               collate_fn=collater, batch_sampler=train_sampler, pin_memory=True)
 
-    val_sampler = AspectRatioBasedSampler(dataset_train, batch_size=batchsize, drop_last=False)
+    val_sampler = AspectRatioBasedSampler(dataset_val, batch_size=batchsize, drop_last=False)
     val_loader = DataLoader(dataset_val, num_workers=num_workers,
                             collate_fn=collater, batch_sampler=val_sampler, pin_memory=True)
     return train_loader, val_loader, len(dataset_train.labels)
@@ -314,22 +323,29 @@ if __name__ == '__main__':
 
     coco_path = '/home/etienneperot/workspace/data/coco/'
     dataset_train = CocoDataset(coco_path, set_name='val2017',
-                                transform=transforms.Compose([Normalizer(),Flipper(), Resizer()]))
+                                transform=transforms.Compose([ Resizer()]))
 
-    sampler = AspectRatioBasedSampler(dataset_train, batch_size=2, drop_last=False)
-    loader = torch.utils.data.DataLoader(dataset_train, num_workers=0,
+    # for i in range(118000, len(dataset_train)):
+    #     print('i: ', i, '/', len(dataset_train), len(dataset_train.image_ids))
+    #     _ = dataset_train[i]
+
+    sampler = AspectRatioBasedSampler(dataset_train, batch_size=64, drop_last=False)
+    loader = torch.utils.data.DataLoader(dataset_train, num_workers=4,
                                          collate_fn=collater, batch_sampler=sampler, pin_memory=False)
 
-    unnormalize = UnNormalizer()
+    for i, data in enumerate(loader):
+        print(i,'/',len(loader))
 
-    start = time.time()
-    for data in loader:
-
-        end = time.time()
-        print(end - start, ' time loading')
-
-        print(data['img'].shape)
-        viz_batch(data, unnormalize, dataset_train.labels)
-
-        start = time.time()
-        print(start - end, ' time showing')
+    # unnormalize = UnNormalizer()
+    #
+    # start = time.time()
+    # for data in loader:
+    #
+    #     end = time.time()
+    #     print(end - start, ' time loading')
+    #
+    #     print(data['img'].shape)
+    #     viz_batch(data, unnormalize, dataset_train.labels)
+    #
+    #     start = time.time()
+    #     print(start - end, ' time showing')
