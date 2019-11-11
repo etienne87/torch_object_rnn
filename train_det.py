@@ -16,6 +16,7 @@ from core.utils import opts
 
 from datasets.moving_mnist_detection import MovingMnistDataset
 from datasets.moving_coco_detection import MovingCOCODataset
+from datasets.coco_detection import make_coco_dataset as make_still_coco
 
 
 def parse_args():
@@ -80,13 +81,14 @@ def main():
     args.height = 256
     args.width = 256
 
+    coco_path = '/home/etienneperot/workspace/data/coco/'
     # Dataset
     print('==> Preparing dataset..')
 
 
     train_dataset, test_dataset, classes = make_moving_mnist(args)
     # train_dataset, test_dataset, classes = make_moving_coco(time, height, width, args)
-
+    train_dataset, test_dataset, classes = make_still_coco(coco_path, args.batchsize, args.num_workers)
 
 
     # Model
