@@ -6,18 +6,13 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from core.utils.opts import time_to_batch, batch_to_time
-from core.modules import SequenceWise, ConvRNN
-from functools import partial
-
+from core.modules import SequenceWise
 
 class FeaturePyramidNetwork(nn.Module):
-    def __init__(self, in_channels_list, out_channels, up_func=ConvRNN):
+    def __init__(self, in_channels_list, out_channels, up=lambda x, y: SequenceWise(nn.Conv2d(x, y, 3, 1, 1))):
         super(FeaturePyramidNetwork, self).__init__()
 
-        # up = partial(up_func, kernel_size=3, stride=1, padding=1, dilation=1)
-        up = lambda x, y: SequenceWise(nn.Conv2d(x, y, 1, 1, 0))
         skip = lambda x, y: SequenceWise(nn.Conv2d(x, y, 1, 1, 0))
-
 
         self.inner_blocks = nn.ModuleList()
         self.layer_blocks = nn.ModuleList()
