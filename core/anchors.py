@@ -67,22 +67,21 @@ class Anchors(nn.Module):
         self.anchors = None
         self.anchors_xyxy = None
         self.idxs = None
-        self.encode = self.encode_v1
+        self.last_shapes = []
 
     def forward(self, features):
-        size = sum([(item.shape[-2]*item.shape[-1]*self.num_anchors) for item in features])
-        if self.anchors is None or len(self.anchors) != size:
+        shapes = [item.shape for item in features]
+        if self.anchors is None or shapes != self.last_shapes:
             default_boxes = []
             for feature_map, anchor_layer in zip(features, self.anchor_generators):
                 anchors = anchor_layer(feature_map)
                 default_boxes.append(anchors)
             self.anchors = torch.cat(default_boxes, dim=0)
             self.anchors_xyxy = box.change_box_order(self.anchors, "xywh2xyxy")
+        self.last_shapes = shapes
         return self.anchors, self.anchors_xyxy
 
-    def encode_v1(self, features, targets):
-        # Strategy: We pad box frames to enable gpu optimization (from 300 ms -> 1 ms)
-
+    def encode(self, features, targets):
         anchors, anchors_xyxy = self(features)
         device = features[0].device
 
