@@ -38,7 +38,7 @@ class AnchorLayer(nn.Module):
 
     def forward(self, x):
         height, width = x.shape[-2:]
-        if self.anchors is None or self.anchors.shape[-2:] != (height, width) or self.anchors.device != x.device:
+        if self.anchors is None or self.anchors.shape[0] != height or self.anchors.shape[1] != width or self.anchors.device != x.device:
             grid = self.make_grid(height, width).to(x.device)
             wh = torch.zeros((self.num_anchors * 2, height, width), dtype=x.dtype, device=x.device) + self.box_sizes.view(self.num_anchors * 2, 1, 1)
             wh = wh.permute([1, 2, 0]).view(height, width, self.num_anchors, 2)
