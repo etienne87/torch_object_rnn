@@ -1,3 +1,13 @@
+'''
+This contains the class to encode/ decode the gt into 'anchor-boxes'
+This runs in parallel over all images at once by padding the gt.
+You run the module like this:
+
+> sources = pyramid_network(x)
+> loc_targets, cls_targets = anchors.encode(sources)
+
+The module can resize its grid internally (so batches can change sizes)
+'''
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -10,6 +20,11 @@ from torchvision.ops.boxes import batched_nms
 
 
 class AnchorLayer(nn.Module):
+    '''
+    For one level of the pyramid: Manages One Grid (x,y,w,h)
+    The anchors grid is (height, width, num_anchors_per_position, 4)
+    The grid is cached, but changes if featuremap size changes
+    '''
     def __init__(self, box_size=32, stride=8, ratios=[1], scales=[1]):
         super(AnchorLayer, self).__init__()
         self.num_anchors = len(scales) * len(ratios)
@@ -48,6 +63,12 @@ class AnchorLayer(nn.Module):
 
 
 class Anchors(nn.Module):
+    '''
+    Pyramid of Anchoring Grids.
+    Handle encoding/ decoding algorithms.
+    Encoding uses padding in order to parallelize iou & assignement computation.
+    Decoding uses "batched_nms" of torchvision to parallelize accross images and classes.
+    '''
     def __init__(self, **kwargs):
         super(Anchors, self).__init__()
         self.pyramid_levels = kwargs.get("pyramid_levels", [3, 4, 5, 6])
@@ -90,7 +111,6 @@ class Anchors(nn.Module):
         else:
             gt_padded = box.pack_boxes_list(targets).to(device)
 
-
         total = len(gt_padded)
         gt_boxes = gt_padded[..., :4]
         gt_labels = gt_padded[..., 4].long()
@@ -127,7 +147,7 @@ class Anchors(nn.Module):
         highest_quality_foreach_gt, _ = ious.max(-2)  # [N, M]
         gt_pred_pairs_of_highest_quality = torch.nonzero(ious == highest_quality_foreach_gt.unsqueeze(1))
         batch_index = gt_pred_pairs_of_highest_quality[:, 0]
-        pred_index = gt_pred_pairs_of_highest_quality[:, 0]
+        pred_index = gt_pred_pairs_of_highest_quality[:, 1]
         matches[batch_index, pred_index] = all_matches[batch_index, pred_index]
 
     @opts.cuda_time

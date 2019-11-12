@@ -24,7 +24,7 @@ class SingleStageDetector(nn.Module):
         self.feature_extractor = feature_extractor(cin)
 
         self.box_coder = Anchors(pyramid_levels=[i for i in range(3,3+self.feature_extractor.levels)],
-                                 scales=[1.0, 1.5],
+                                 scales=[1.0, 2**1./3, 2**2./3],
                                  ratios=[0.5, 1.0, 2.0],
                                  fg_iou_threshold=0.5, bg_iou_threshold=0.4)
 
@@ -49,6 +49,7 @@ class SingleStageDetector(nn.Module):
         with torch.no_grad():
             loc_targets, cls_targets = self.box_coder.encode(xs, targets)
 
+        assert cls_targets.shape[1] == cls_preds.shape[1]
         loc_loss, cls_loss = self.criterion(loc_preds, loc_targets, cls_preds, cls_targets)
         loss_dict = {'loc': loc_loss, 'cls_loss': cls_loss}
 

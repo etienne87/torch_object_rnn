@@ -5,12 +5,12 @@ from __future__ import print_function
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from core.modules import Bottleneck
+from core.modules import Bottleneck, ConvLayer
 import math
 
 
 class BoxHead(nn.Module):
-    def __init__(self, in_channels, num_anchors, num_classes, act='sigmoid', n_layers=0):
+    def __init__(self, in_channels, num_anchors, num_classes, act='sigmoid', n_layers=3):
         super(BoxHead, self).__init__()
         self.num_classes = num_classes
         self.in_channels = in_channels
@@ -19,8 +19,10 @@ class BoxHead(nn.Module):
         self.aspect_ratios = []
         self.act = act
 
-        self.loc_head = self._make_head(in_channels, self.num_anchors * 4, n_layers)
-        self.cls_head = self._make_head(in_channels, self.num_anchors * self.num_classes, n_layers)
+        conv_func = lambda x,y: ConvLayer(x, y, norm='none', activation='ReLU')
+        # conv_func = lambda x, y: Bottleneck(x, y)
+        self.loc_head = self._make_head(in_channels, self.num_anchors * 4, n_layers, conv_func)
+        self.cls_head = self._make_head(in_channels, self.num_anchors * self.num_classes, n_layers, conv_func)
 
         torch.nn.init.normal_(self.loc_head[-1].weight, std=0.01)
         torch.nn.init.constant_(self.loc_head[-1].bias, 0)
@@ -49,11 +51,11 @@ class BoxHead(nn.Module):
         l.bias.data[:, 0] += bias_bg
         l.bias.data = l.bias.data.reshape(-1)
 
-    def _make_head(self, in_planes, out_planes, n_layers):
+    def _make_head(self, in_planes, out_planes, n_layers, conv_func):
         layers = []
-        layers.append(Bottleneck(in_planes, 256))
+        layers.append(conv_func(in_planes, 256))
         for _ in range(n_layers):
-            layers.append(Bottleneck(256, 256))
+            layers.append(conv_func(256, 256))
         layers.append(nn.Conv2d(256, out_planes, kernel_size=3, stride=1, padding=1))
         return nn.Sequential(*layers)
 
