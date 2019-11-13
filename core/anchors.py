@@ -102,25 +102,31 @@ class Anchors(nn.Module):
         self.last_shapes = shapes
         return self.anchors, self.anchors_xyxy
 
+    @opts.cuda_time
     def encode(self, features, targets):
         anchors, anchors_xyxy = self(features)
         device = features[0].device
 
         if isinstance(targets[0], list):
-            gt_padded = box.pack_boxes_list_of_list(targets).to(device)
+            gt_padded, sizes = box.pack_boxes_list_of_list(targets)
         else:
-            gt_padded = box.pack_boxes_list(targets).to(device)
+            gt_padded, sizes = box.pack_boxes_list(targets)
 
         total = len(gt_padded)
+        gt_padded = gt_padded.to(device)
         gt_boxes = gt_padded[..., :4]
         gt_labels = gt_padded[..., 4].long()
 
         ious = box.batch_box_iou(anchors_xyxy, gt_boxes) # [N, A, M]
 
+        #make sure to not select the dummies
+        mask = (gt_labels == -2).float().unsqueeze(1)
+        ious = (-1 * mask) + ious * (1-mask)
+
         batch_best_target_per_prior, batch_best_target_per_prior_index = ious.max(-1) # [N, A]
 
         if self.allow_low_quality_matches:
-            self.set_low_quality_matches_v1(ious, batch_best_target_per_prior_index, batch_best_target_per_prior)
+            self.set_low_quality_matches(ious, batch_best_target_per_prior_index, batch_best_target_per_prior, sizes)
 
         mask_bg = batch_best_target_per_prior < self.bg_iou_threshold
         mask_ign = (batch_best_target_per_prior > self.bg_iou_threshold) * (batch_best_target_per_prior < self.fg_iou_threshold)
@@ -135,20 +141,14 @@ class Anchors(nn.Module):
 
         return loc_targets, cls_targets
 
-    def set_low_quality_matches_v1(self, ious, batch_best_target_per_prior_index, batch_best_target_per_prior):
+    def set_low_quality_matches(self, ious, batch_best_target_per_prior_index, batch_best_target_per_prior, sizes):
         _, batch_best_prior_per_target_index = ious.max(-2)  # [N, M]
-        max_size = ious.shape[-1]
-        for target_index in range(max_size):
-            index = batch_best_prior_per_target_index[..., target_index:target_index + 1]
-            batch_best_target_per_prior_index.scatter_(-1, index, target_index)
-            batch_best_target_per_prior.scatter_(-1, index, 2.0)
-
-    def set_low_quality_matches_v2(self, ious, batch_best_target_per_prior_index, batch_best_target_per_prior):
-        highest_quality_foreach_gt, _ = ious.max(-2)  # [N, M]
-        gt_pred_pairs_of_highest_quality = torch.nonzero(ious == highest_quality_foreach_gt.unsqueeze(1))
-        batch_index = gt_pred_pairs_of_highest_quality[:, 0]
-        pred_index = gt_pred_pairs_of_highest_quality[:, 1]
-        batch_best_target_per_prior[batch_index, pred_index] = 2.0
+        for t in range(len(sizes)):
+            max_size = sizes[t]
+            best_prior_per_target_index = batch_best_prior_per_target_index[t, :max_size]
+            for target_index, prior_index in enumerate(best_prior_per_target_index):
+                batch_best_target_per_prior_index[t, prior_index] = target_index
+                batch_best_target_per_prior[t, prior_index] = 2.0
 
     @opts.cuda_time
     def decode(self, features, loc_preds, cls_preds, batchsize, score_thresh, nms_thresh=0.6):

@@ -295,25 +295,29 @@ def pack_boxes_list_of_list(targets, label_offset=1):
     tbins, batchsize = len(targets), len(targets[0])
     max_size = max([max([len(frame) for frame in time]) for time in targets])
     max_size = max(2, max_size)
-    gt_padded = torch.ones((tbins, batchsize, max_size, 5), dtype=torch.float32) * -1
+    gt_padded = torch.ones((tbins, batchsize, max_size, 5), dtype=torch.float32) * -2
+    sizes = []
     for t in range(len(targets)):
         for i in range(len(targets[t])):
             frame = targets[t][i]
             gt_padded[t, i, :len(frame)] = frame
             gt_padded[t, i, :len(frame), 4] += label_offset
-    return gt_padded.view(-1, max_size, 5)
+            sizes.append(len(frame))
+    return gt_padded.view(-1, max_size, 5), sizes
 
 
 def pack_boxes_list(targets, label_offset=1):
     batchsize = len(targets)
     max_size = max([len(frame) for frame in targets])
     max_size = max(2, max_size)
-    gt_padded = torch.ones((batchsize, max_size, 5), dtype=torch.float32) * -1
+    gt_padded = torch.ones((batchsize, max_size, 5), dtype=torch.float32) * -2
+    sizes = []
     for t in range(len(targets)):
-        frame = targets[t][i]
+        frame = targets[t]
         gt_padded[t, :len(frame)] = frame
         gt_padded[t, :len(frame), 4] += label_offset
-    return gt_padded.view(-1, max_size, 5)
+        sizes.append(len(frame))
+    return gt_padded.view(-1, max_size, 5), sizes
 
 
 def assign_priors(gt_boxes, gt_labels, corner_form_priors,
@@ -337,8 +341,7 @@ def assign_priors(gt_boxes, gt_labels, corner_form_priors,
     if allow_low_quality_matches:
         for target_index, prior_index in enumerate(best_prior_per_target_index):
             best_target_per_prior_index[prior_index] = target_index
-        # 2.0 is used to make sure every target has a prior assigned
-        best_target_per_prior.index_fill_(0, best_prior_per_target_index, 2)
+            best_target_per_prior[prior_index] = 2
 
     # size: num_priors
     labels = gt_labels[best_target_per_prior_index]
@@ -351,6 +354,18 @@ def assign_priors(gt_boxes, gt_labels, corner_form_priors,
 
 
     return boxes, labels
+
+def assign_priors_custom(gt_boxes, corner_form_priors, allow_low_quality_matches=True):
+    ious = box_iou(corner_form_priors, gt_boxes)
+    best_target_per_prior, best_target_per_prior_index = ious.max(1)
+    best_prior_per_target, best_prior_per_target_index = ious.max(0)
+    if allow_low_quality_matches:
+        for target_index, prior_index in enumerate(best_prior_per_target_index):
+            best_target_per_prior_index[prior_index] = target_index
+            best_target_per_prior[prior_index] = 2
+
+    return best_target_per_prior_index, best_target_per_prior
+
 
 def assign_priors_v2(gt_boxes, gt_labels, corner_form_priors,
                   fg_iou_threshold, bg_iou_threshold, min_pos_threshold=0.2):
