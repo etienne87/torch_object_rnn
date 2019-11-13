@@ -89,6 +89,7 @@ class Anchors(nn.Module):
         self.anchors_xyxy = None
         self.idxs = None
         self.last_shapes = []
+        self.set_low_quality_matches = self.set_low_quality_matches_v1
 
     def forward(self, features):
         shapes = [item.shape for item in features]
@@ -141,7 +142,7 @@ class Anchors(nn.Module):
 
         return loc_targets, cls_targets
 
-    def set_low_quality_matches(self, ious, batch_best_target_per_prior_index, batch_best_target_per_prior, sizes):
+    def set_low_quality_matches_v1(self, ious, batch_best_target_per_prior_index, batch_best_target_per_prior, sizes):
         _, batch_best_prior_per_target_index = ious.max(-2)  # [N, M]
         for t in range(len(sizes)):
             max_size = sizes[t]
@@ -149,6 +150,15 @@ class Anchors(nn.Module):
             for target_index, prior_index in enumerate(best_prior_per_target_index):
                 batch_best_target_per_prior_index[t, prior_index] = target_index
                 batch_best_target_per_prior[t, prior_index] = 2.0
+
+    def set_low_quality_matches_v2(self, ious, matches, match_vals, sizes):
+        highest_quality_foreach_gt, _ = ious.max(-2)  # [N, M]
+        gt_pred_pairs_of_highest_quality = torch.nonzero(ious == highest_quality_foreach_gt.unsqueeze(1))
+        batch_index = gt_pred_pairs_of_highest_quality[:, 0]
+        pred_index = gt_pred_pairs_of_highest_quality[:, 1]
+        gt_index = gt_pred_pairs_of_highest_quality[:, 2]
+        matches[batch_index, pred_index] = gt_index
+        match_vals[batch_index, pred_index] = 2.0
 
     @opts.cuda_time
     def decode(self, features, loc_preds, cls_preds, batchsize, score_thresh, nms_thresh=0.6):
