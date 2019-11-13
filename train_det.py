@@ -34,9 +34,9 @@ def parse_args():
     parser.add_argument('--cuda', action='store_true', help='use cuda')
     parser.add_argument('--log_every', type=int, default=10, help='log every')
     parser.add_argument('--save_video', action='store_true')
-    parser.add_argument('--test_every', default=1, help='test_every')
-    parser.add_argument('--save_every', default=2, help='save_every')
-    parser.add_argument('--num_workers', default=2, help='save_every')
+    parser.add_argument('--test_every', type=int, default=1, help='test_every')
+    parser.add_argument('--save_every', type=int, default=2, help='save_every')
+    parser.add_argument('--num_workers', type=int, default=2, help='save_every')
     parser.add_argument('--just_test', action='store_true')
     return parser.parse_args()
 
@@ -81,8 +81,8 @@ def main():
     args.height = 256
     args.width = 256
 
-    # coco_path = '/home/etienneperot/workspace/data/coco/'
-    coco_path = '/home/prophesee/work/etienne/datasets/coco/'
+    coco_path = '/home/etienneperot/workspace/data/coco/'
+    # coco_path = '/home/prophesee/work/etienne/datasets/coco/'
     # Dataset
     print('==> Preparing dataset..')
 
