@@ -101,13 +101,13 @@ def batch_box_iou(box1, box2):
     Reference:
       https://github.com/chainer/chainercv/blob/master/chainercv/utils/bbox/bbox_iou.py
     '''
-    lt = torch.max(box1[None,:,None,:2], box2[:,None,:,:2])  # [B,N,M,2]
+    lt = torch.max(box1[None,:,None,:2], box2[:,None,:,:2])  # [B,N,M,2] broadcast_max( (_,N,_,2), (B,_,M,2) )
     rb = torch.min(box1[None,:,None,2:], box2[:,None,:,2:])  # [B,N,M,2]
 
     wh = (rb-lt).clamp(min=0)      # [B,N,M,2]
     inter = wh[...,0] * wh[...,1]  # [B,N,M]
 
-    area1 = (box1[...,2]-box1[...,0]) * (box1[:,3]-box1[:,1])  # [N,]
+    area1 = (box1[...,2]-box1[...,0]) * (box1[...,3]-box1[...,1])  # [N,]
     area2 = (box2[...,2]-box2[...,0]) * (box2[...,3]-box2[...,1])  # [B,M,]
     iou = inter / (area1[None,:,None] + area2[:,None,:] - inter) # [B,N,M]
     return iou
@@ -317,7 +317,7 @@ def pack_boxes_list(targets, label_offset=1):
 
 
 def assign_priors(gt_boxes, gt_labels, corner_form_priors,
-                  fg_iou_threshold, bg_iou_threshold):
+                  fg_iou_threshold, bg_iou_threshold, allow_low_quality_matches=True):
     """Assign ground truth boxes and targets to priors.
     Args:
         gt_boxes (num_targets, 4): ground truth boxes.
@@ -334,11 +334,12 @@ def assign_priors(gt_boxes, gt_labels, corner_form_priors,
     # size: num_targets
     best_prior_per_target, best_prior_per_target_index = ious.max(0)
 
-    for target_index, prior_index in enumerate(best_prior_per_target_index):
-        best_target_per_prior_index[prior_index] = target_index
+    if allow_low_quality_matches:
+        for target_index, prior_index in enumerate(best_prior_per_target_index):
+            best_target_per_prior_index[prior_index] = target_index
+        # 2.0 is used to make sure every target has a prior assigned
+        best_target_per_prior.index_fill_(0, best_prior_per_target_index, 2)
 
-    # 2.0 is used to make sure every target has a prior assigned
-    best_target_per_prior.index_fill_(0, best_prior_per_target_index, 2)
     # size: num_priors
     labels = gt_labels[best_target_per_prior_index]
 
