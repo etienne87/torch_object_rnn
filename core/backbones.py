@@ -91,7 +91,7 @@ class MobileNetFPN(nn.Module):
     def __init__(self, in_channels=1, out_channels=256):
         super(MobileNetFPN, self).__init__()
         self.base = 16
-        self.bb = pbb.MobileNet(in_channels, frozen_stages=0)
+        self.bb = pbb.MobileNet(in_channels, frozen_stages=3, norm_eval=True)
         self.p6 = ConvLayer(self.bb.out_channel_list[-1], out_channels, stride=2)
         self.p7 = ConvLayer(out_channels, out_channels, stride=2)
 

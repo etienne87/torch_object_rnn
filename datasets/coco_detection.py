@@ -14,10 +14,10 @@ from torch.utils.data.sampler import Sampler
 
 from pycocotools.coco import COCO
 
-import skimage.io
-import skimage.transform
-import skimage.color
-import skimage
+# import skimage.io
+# import skimage.transform
+# import skimage.color
+# import skimage
 
 from core.utils import vis
 import cv2
@@ -81,11 +81,14 @@ class CocoDataset(Dataset):
         #image_index = image_index % len(self.image_ids)
         image_info = self.coco.loadImgs(self.image_ids[image_index])[0]
         path = os.path.join(self.root_dir, 'images', self.set_name, image_info['file_name'])
-        img = skimage.io.imread(path)
+        # img = skimage.io.imread(path)
+        img = cv2.imread(path)
 
         if len(img.shape) == 2:
-            img = skimage.color.gray2rgb(img)
+            #img = skimage.color.gray2rgb(img)
+            img = cv2.cvtColor(img, cv2.COLOR_GRAYRGB)
 
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         return img.astype(np.float32) / 255.0
 
     def load_annotations(self, image_index):
@@ -181,7 +184,9 @@ class Resizer(object):
             scale = max_side / largest_side
 
         # resize the image with the computed scale
-        image = skimage.transform.resize(image, (int(round(rows * scale)), int(round((cols * scale)))))
+        # image = skimage.transform.resize(image, (int(round(rows * scale)), int(round((cols * scale)))))
+        height, width =  (int(round(rows * scale)), int(round((cols * scale))))
+        image = cv2.resize(image, (width, height), interpolation=cv2.INTER_LINEAR)
         rows, cols, cns = image.shape
 
         pad_w = 32 - rows % 32
@@ -294,7 +299,8 @@ def viz_batch(data, unnormalize, labelmap):
         img[img < 0] = 0
         img[img > 255] = 255
         img = np.transpose(img, (1, 2, 0))
-        img = cv2.cvtColor(img.astype(np.uint8), cv2.COLOR_BGR2RGB)
+        img = img.astype(np.uint8)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         boxes = data['annot'][i].cpu().numpy().astype(np.int32)
         bboxes = vis.boxarray_to_boxes(boxes, boxes[:, -1], labelmap)
         img_ann = vis.draw_bboxes(img, bboxes)
@@ -323,29 +329,31 @@ if __name__ == '__main__':
 
     coco_path = '/home/etienneperot/workspace/data/coco/'
     dataset_train = CocoDataset(coco_path, set_name='val2017',
-                                transform=transforms.Compose([ Resizer()]))
+                                transform=transforms.Compose([Normalizer(), Resizer()]))
 
     # for i in range(118000, len(dataset_train)):
     #     print('i: ', i, '/', len(dataset_train), len(dataset_train.image_ids))
     #     _ = dataset_train[i]
 
     sampler = AspectRatioBasedSampler(dataset_train, batch_size=64, drop_last=False)
-    loader = torch.utils.data.DataLoader(dataset_train, num_workers=4,
+    loader = torch.utils.data.DataLoader(dataset_train, num_workers=0,
                                          collate_fn=collater, batch_sampler=sampler, pin_memory=False)
 
-    for i, data in enumerate(loader):
-        print(i,'/',len(loader))
+    # for i, data in enumerate(loader):
+    #     print(i,'/',len(loader))
 
-    # unnormalize = UnNormalizer()
-    #
-    # start = time.time()
-    # for data in loader:
-    #
-    #     end = time.time()
-    #     print(end - start, ' time loading')
-    #
-    #     print(data['img'].shape)
-    #     viz_batch(data, unnormalize, dataset_train.labels)
-    #
-    #     start = time.time()
-    #     print(start - end, ' time showing')
+    unnormalize = UnNormalizer()
+
+    start = time.time()
+    for data in loader:
+
+        data = {'img':data[0][0], 'annot':data[1][0]}
+
+        end = time.time()
+        print(end - start, ' time loading')
+
+        print(data['img'].shape)
+        viz_batch(data, unnormalize, dataset_train.labels)
+
+        start = time.time()
+        print(start - end, ' time showing')

@@ -31,7 +31,8 @@ class TwoStageDetector(nn.Module):
 
         self.rpn = rpn(self.feature_extractor.cout, self.box_coder.num_anchors, 1 + self.label_offset, act)
 
-        self.roi_pool = pool.MultiScaleRoIAlign(feat_names, output_size)
+        feat_names = ['feat'+str(i) for i in range(self.feature_extractor.levels)]
+        self.roi_pool = pool.MultiScaleRoIAlign(feat_names, 5, 2)
         self.second_stage = rpn(self.feature_extractor.cout,
                                          self.box_coder.num_anchors,
                                          self.num_classes + self.label_offset, act)
@@ -44,16 +45,34 @@ class TwoStageDetector(nn.Module):
     def reset(self):
         self.feature_extractor.reset()
 
-    def forward(self, x):
+
+
+    def forward(self, x, score_thresh=0.4):
         xs = self.feature_extractor(x)
         loc_preds, cls_preds = self.rpn(xs)
 
         scores = cls_preds[..., self.label_offset:].contiguous()
         rois = self.box_coder.decode(xs, loc_preds, scores, x.size(1), score_thresh=score_thresh)
 
-        out = self.roi_pool(xs, rois)
+        #this expects list of tensor of shape N, 4
+        allboxes = []
+        for t in range(x.size(0)):
+            for i in range(x.size(1)):
+                num = torch.randint(0,6,(1,)).item()
+                print('num: ', num)
+                boxes = torch.rand(num, 4) * 256; boxes[:, 2:] += boxes[:, :2]
+                allboxes += [boxes]
 
-        loc_rois, cls_rois = self.second_stage(out)
+        image_sizes = [x.shape[-2:]]*x.size(0)*x.size(1)
+        sources = {'feat'+str(i):item for i, item in enumerate(xs)}
+
+        #need to remember the sizes in order to split after
+        out = self.roi_pool(sources, allboxes, image_sizes)
+
+        import pdb
+        pdb.set_trace()
+
+        #loc_rois, cls_rois = self.second_stage(out)
 
         #decode loc_rois knowing rois using bbox_to_deltas
 
@@ -78,3 +97,10 @@ class TwoStageDetector(nn.Module):
         scores = cls_preds[..., self.label_offset:].contiguous()
         targets = self.box_coder.decode(xs, loc_preds, scores, x.size(1), score_thresh=score_thresh)
         return targets
+
+if __name__ == '__main__':
+    x = torch.rand(1, 2, 3, 128, 128)
+
+    net = TwoStageDetector(cin=3)
+
+    y = net(x)
