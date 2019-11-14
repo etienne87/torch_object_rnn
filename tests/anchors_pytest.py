@@ -19,6 +19,7 @@ class TestAnchors(object):
         self.bg_iou_threshold = bg_iou_threshold
         self.fg_iou_threshold = fg_iou_threshold
         self.allow_low_quality_matches = allow_low_quality_matches
+        self.num_classes = 3
         self.box_generator = SquaresVideos(self.batchsize, self.time, self.height, self.width, max_objects=3, max_classes=3, render=False)
         self.box_coder = Anchors(allow_low_quality_matches=allow_low_quality_matches, bg_iou_threshold=bg_iou_threshold, fg_iou_threshold=fg_iou_threshold)
         self.fmaps = []
@@ -71,7 +72,6 @@ class TestAnchors(object):
         targets = [self.box_generator[i][1] for i in range(self.batchsize)]
         targets = [[targets[i][t] for i in range(self.batchsize)] for t in range(self.time)]
         anchors, anchors_xyxy = self.box_coder(self.fmaps)
-        # With dummies encoded
         loc_targets, cls_targets = self.box_coder.encode(anchors, anchors_xyxy, targets)
         loc_targets2, cls_targets2 = self.encode_sequential(targets, anchors, anchors_xyxy,
                                                             self.box_coder.fg_iou_threshold,
@@ -91,7 +91,6 @@ class TestAnchors(object):
         targets = [self.box_generator[i][1] for i in range(self.batchsize)]
         targets = [[targets[i][t] for i in range(self.batchsize)] for t in range(self.time)]
         anchors, anchors_xyxy = self.box_coder(self.fmaps)
-        # With dummies encoded
         loc_targets, cls_targets = self.box_coder.encode(anchors, anchors_xyxy, targets)
         loc_targets2, cls_targets2 = self.encode_sequential(targets, anchors, anchors_xyxy,
                                                             self.box_coder.fg_iou_threshold,
@@ -105,3 +104,32 @@ class TestAnchors(object):
         assert max_loc_diff == 0
         assert max_cls_diff == 0
         assert cat_diff.abs().max() == 0
+
+    def one_hot(self, y, num_classes):
+        y2 = y.unsqueeze(2)
+        fg = (y2 > 0).float()
+        y_index = (y2 - 1).clamp_(0)
+        t = torch.zeros((y.shape[0], y.shape[1], num_classes), dtype=torch.float)
+        t.scatter_(2, y_index, fg)
+        return t
+
+    def pytestcase_batched_decode_boxes(self):
+        self.init(1, 1, allow_low_quality_matches=True, bg_iou_threshold=0.3, fg_iou_threshold=0.3)
+        targets = [self.box_generator[i][1] for i in range(self.batchsize)]
+        targets = [[targets[i][t] for i in range(self.batchsize)] for t in range(self.time)]
+        anchors, anchors_xyxy = self.box_coder(self.fmaps)
+        loc_targets, cls_targets = self.box_coder.encode(anchors, anchors_xyxy, targets)
+        scores = self.one_hot(cls_targets, self.num_classes)
+
+        boxes1 = self.box_coder.decode(anchors, loc_targets.clone(), scores, self.batchsize, 0.99)
+
+        self.box_coder.decode_func = self.box_coder.batched_decode
+
+        boxes2 = self.box_coder.decode(anchors, loc_targets, scores, self.batchsize, 0.99)
+
+        for t in range(self.time):
+            for x, y in zip(boxes1[t], boxes2[t]):
+                b,s,l = x
+                b2,s2,l2 = y
+
+                print(b, b2)

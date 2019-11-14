@@ -93,6 +93,7 @@ class Anchors(nn.Module):
         self.idxs = None
         self.last_shapes = []
         self.set_low_quality_matches = self.set_low_quality_matches_v1
+        self.decode_func = self.decode_per_image
 
     def forward(self, features):
         shapes = [item.shape for item in features]
@@ -174,11 +175,9 @@ class Anchors(nn.Module):
         # Per-Column Decoding
         boxes = box_preds.unsqueeze(2).expand(-1, num_anchors, num_classes, 4).contiguous()
         scores = cls_preds
-        boxes, scores, idxs = self.decode_per_image(boxes, scores,
+        boxes, scores, labels, batch_index = self.batched_decode(boxes, scores,
                                                     num_anchors, num_classes,
                                                     len(box_preds), score_thresh, nms_thresh)
-        labels = idxs % num_classes
-        batch_index = idxs // num_classes
 
         tbins = len(cls_preds) // batchsize
         targets = [[(None,None,None) for _ in range(batchsize)] for _ in range(tbins)]
@@ -226,7 +225,7 @@ class Anchors(nn.Module):
         idxs = rows * num_classes + cols
         idxs = idxs.unsqueeze(1).expand(batchsize, num_anchors, num_classes).contiguous()
         idxs = idxs.to(scores.device)
-        labels = cols.expand(num_anchors, num_classes).to(scores.device).view(-1)
+        labels = cols.expand(num_anchors, num_classes).to(scores.device).reshape(-1)
         allboxes = []
         allscores = []
         allidxs = []
@@ -246,4 +245,6 @@ class Anchors(nn.Module):
         boxes = torch.cat(allboxes)
         scores = torch.cat(allscores)
         idxs = torch.cat(allidxs)
-        return boxes, scores, idxs
+        labels = idxs % num_classes
+        batch_index = idxs // num_classes
+        return boxes, scores, labels, batch_index
