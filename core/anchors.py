@@ -1,10 +1,13 @@
 '''
 This contains the class to encode/ decode the gt into 'anchor-boxes'
-This runs in parallel over all images at once by padding the gt.
-You run the module like this:
+This runs in parallel over all images at once by padding the gt with dummies
+The dummies are however not encoded. This is enforced by the pytest.
 
-> sources = pyramid_network(x)
-> loc_targets, cls_targets = anchors.encode(sources)
+Examples::
+
+    >> sources = pyramid_network(x)
+    >> anchors = anchors(sources)
+    >> loc_targets, cls_targets = box_coder.encode(anchors, targets)
 
 The module can resize its grid internally (so batches can change sizes)
 '''
@@ -103,10 +106,9 @@ class Anchors(nn.Module):
         self.last_shapes = shapes
         return self.anchors, self.anchors_xyxy
 
-    @opts.cuda_time
-    def encode(self, features, targets):
-        anchors, anchors_xyxy = self(features)
-        device = features[0].device
+    # @opts.cuda_time
+    def encode(self, anchors, anchors_xyxy, targets):
+        device = anchors.device
 
         if isinstance(targets[0], list):
             gt_padded, sizes = box.pack_boxes_list_of_list(targets)
@@ -161,9 +163,8 @@ class Anchors(nn.Module):
         match_vals[batch_index, pred_index] = 2.0
 
     @opts.cuda_time
-    def decode(self, features, loc_preds, cls_preds, batchsize, score_thresh, nms_thresh=0.6):
+    def decode(self, anchors, loc_preds, cls_preds, batchsize, score_thresh, nms_thresh=0.6):
         # loc_preds [N, C] (do not include background column)
-        anchors, _ = self(features)
         box_preds = box.deltas_to_bbox(loc_preds, anchors)
 
         # batch decoding

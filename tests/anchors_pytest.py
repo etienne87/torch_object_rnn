@@ -72,7 +72,7 @@ class TestAnchors(object):
         targets = [[targets[i][t] for i in range(self.batchsize)] for t in range(self.time)]
         anchors, anchors_xyxy = self.box_coder(self.fmaps)
         # With dummies encoded
-        loc_targets, cls_targets = self.box_coder.encode(self.fmaps, targets)
+        loc_targets, cls_targets = self.box_coder.encode(anchors, anchors_xyxy, targets)
         loc_targets2, cls_targets2 = self.encode_sequential(targets, anchors, anchors_xyxy,
                                                             self.box_coder.fg_iou_threshold,
                                                             self.box_coder.bg_iou_threshold,
@@ -92,7 +92,7 @@ class TestAnchors(object):
         targets = [[targets[i][t] for i in range(self.batchsize)] for t in range(self.time)]
         anchors, anchors_xyxy = self.box_coder(self.fmaps)
         # With dummies encoded
-        loc_targets, cls_targets = self.box_coder.encode(self.fmaps, targets)
+        loc_targets, cls_targets = self.box_coder.encode(anchors, anchors_xyxy, targets)
         loc_targets2, cls_targets2 = self.encode_sequential(targets, anchors, anchors_xyxy,
                                                             self.box_coder.fg_iou_threshold,
                                                             self.box_coder.bg_iou_threshold,

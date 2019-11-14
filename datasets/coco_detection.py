@@ -14,11 +14,6 @@ from torch.utils.data.sampler import Sampler
 
 from pycocotools.coco import COCO
 
-# import skimage.io
-# import skimage.transform
-# import skimage.color
-# import skimage
-
 from core.utils import vis
 import cv2
 
@@ -78,14 +73,11 @@ class CocoDataset(Dataset):
 
     def load_image(self, image_index):
         assert image_index < len(self.image_ids)
-        #image_index = image_index % len(self.image_ids)
         image_info = self.coco.loadImgs(self.image_ids[image_index])[0]
         path = os.path.join(self.root_dir, 'images', self.set_name, image_info['file_name'])
-        # img = skimage.io.imread(path)
         img = cv2.imread(path)
 
         if len(img.shape) == 2:
-            #img = skimage.color.gray2rgb(img)
             img = cv2.cvtColor(img, cv2.COLOR_GRAYRGB)
 
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -184,7 +176,6 @@ class Resizer(object):
             scale = max_side / largest_side
 
         # resize the image with the computed scale
-        # image = skimage.transform.resize(image, (int(round(rows * scale)), int(round((cols * scale)))))
         height, width =  (int(round(rows * scale)), int(round((cols * scale))))
         image = cv2.resize(image, (width, height), interpolation=cv2.INTER_LINEAR)
         rows, cols, cns = image.shape

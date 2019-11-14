@@ -47,7 +47,8 @@ class SingleStageDetector(nn.Module):
         loc_preds, cls_preds = self.rpn(xs)
 
         with torch.no_grad():
-            loc_targets, cls_targets = self.box_coder.encode(xs, targets)
+            anchors, anchors_xyxy = self.box_coder(xs)
+            loc_targets, cls_targets = self.box_coder.encode(anchors, anchors_xyxy, targets)
 
         assert cls_targets.shape[1] == cls_preds.shape[1]
         loc_loss, cls_loss = self.criterion(loc_preds, loc_targets, cls_preds, cls_targets)
@@ -59,5 +60,6 @@ class SingleStageDetector(nn.Module):
         xs = self.feature_extractor(x)
         loc_preds, cls_preds = self.rpn(xs)
         scores = cls_preds[..., self.label_offset:].contiguous()
-        targets = self.box_coder.decode(xs, loc_preds, scores, x.size(1), score_thresh=score_thresh)
+        anchors, _ = self.box_coder(xs)
+        targets = self.box_coder.decode(anchors, loc_preds, scores, x.size(1), score_thresh=score_thresh)
         return targets

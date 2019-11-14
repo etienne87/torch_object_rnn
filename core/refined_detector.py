@@ -18,7 +18,7 @@ from core.fpn import FeaturePyramidNetwork
 class RefinedDetector(nn.Module):
     def __init__(self, feature_extractor=MobileNetFPN, rpn=BoxHead,
                  num_classes=2, cin=2, act='sigmoid'):
-        super(SingleStageDetector, self).__init__()
+        super(RefinedDetector, self).__init__()
         self.label_offset = 1 * (act=='softmax')
         self.num_classes = num_classes
         self.cin = cin
@@ -38,7 +38,7 @@ class RefinedDetector(nn.Module):
         # refinement
         self.feature_extractor2 = FeaturePyramidNetwork([self.feature_extractor.cout]*self.feature_extractor.levels,
                                                       self.feature_extractor.cout)
-        self.rpn2 = rpn2(self.feature_extractor.cout, self.box_coder.num_anchors, self.num_classes + self.label_offset,
+        self.rpn2 = rpn(self.feature_extractor.cout, self.box_coder.num_anchors, self.num_classes + self.label_offset,
                        act)
 
         self.criterion = DetectionLoss('sigmoid_focal_loss')
@@ -75,7 +75,7 @@ class RefinedDetector(nn.Module):
 
         return loss_dict
 
-    def get_refined_anchors(self, loc_preds):
+    def get_refined_anchors(self, xs, loc_preds):
         anchors, _ = self.box_coder(xs)
         anchors2 = box.deltas_to_bbox(loc_preds, anchors)
         anchors2xyxy = box.change_box_order(anchors2, 'xywh2xyxy')
@@ -87,7 +87,7 @@ class RefinedDetector(nn.Module):
         loc_preds, cls_preds = self.rpn2(ys)
         loc_preds2, cls_preds2 = self.rpn2(ys)
 
-        anchors, anchorsxyxy = get_refined_anchors(loc_preds)
+        anchors, anchorsxyxy = self.get_refined_anchors(xs, loc_preds)
         scores = cls_preds2[..., self.label_offset:].contiguous()
         targets = self.box_coder.decode_with_anchors(anchors, anchorsxyxy, loc_preds, scores, x.size(1), score_thresh=score_thresh)
         return targets
