@@ -132,4 +132,6 @@ class TestAnchors(object):
                 b,s,l = x
                 b2,s2,l2 = y
 
-                print(b, b2)
+                self.assert_equal(b, b2)
+                self.assert_equal(s, s2)
+                self.assert_equal(l, l2)

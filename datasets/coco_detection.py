@@ -11,11 +11,11 @@ import random
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from torch.utils.data.sampler import Sampler
-
-from pycocotools.coco import COCO
+from coco_wrapper import COCO2
 
 from core.utils import vis
 import cv2
+
 
 
 class CocoDataset(Dataset):
@@ -31,17 +31,14 @@ class CocoDataset(Dataset):
         self.root_dir = root_dir
         self.set_name = set_name
         self.transform = transform
-
-        self.coco = COCO(os.path.join(self.root_dir, 'annotations', 'instances_' + self.set_name + '.json'))
-        self.image_ids = self.coco.getImgIds()
-
+        self.coco = COCO2(self.root_dir, self.set_name) 
+        self.image_ids = self.coco.get_image_ids()
         self.load_classes()
 
     def load_classes(self):
         # load class names (name -> label)
-        categories = self.coco.loadCats(self.coco.getCatIds())
+        categories = self.coco.load_categories()
         categories.sort(key=lambda x: x['id'])
-
         self.classes = {}
         self.coco_labels = {}
         self.coco_labels_inverse = {}
@@ -73,7 +70,7 @@ class CocoDataset(Dataset):
 
     def load_image(self, image_index):
         assert image_index < len(self.image_ids)
-        image_info = self.coco.loadImgs(self.image_ids[image_index])[0]
+        image_info = self.coco.load_image(self.image_ids[image_index])
         path = os.path.join(self.root_dir, 'images', self.set_name, image_info['file_name'])
         img = cv2.imread(path)
 
@@ -84,22 +81,19 @@ class CocoDataset(Dataset):
         return img.astype(np.float32) / 255.0
 
     def load_annotations(self, image_index):
-        # get ground truth annotations
-        annotations_ids = self.coco.getAnnIds(imgIds=self.image_ids[image_index], iscrowd=False)
-        annotations = np.zeros((0, 5))
-
-        # some images appear to miss annotations (like image with id 257034)
-        if len(annotations_ids) == 0:
-            return annotations
-
         # parse annotations
-        coco_annotations = self.coco.loadAnns(annotations_ids)
+        coco_annotations = self.coco.load_annotation(self.image_ids[image_index])
+        if len(coco_annotations) == 0:
+            return coco_annotations
+
+        annotations = np.zeros((0, 5))
         for idx, a in enumerate(coco_annotations):
 
             # some annotations have basically no width / height, skip them
             if a['bbox'][2] < 1 or a['bbox'][3] < 1:
                 continue
-
+            
+            # import pdb;pdb.set_trace()
             annotation = np.zeros((1, 5))
             annotation[0, :4] = a['bbox']
             annotation[0, 4] = self.coco_label_to_label(a['category_id'])
@@ -118,7 +112,7 @@ class CocoDataset(Dataset):
         return self.coco_labels[label]
 
     def image_aspect_ratio(self, image_index):
-        image = self.coco.loadImgs(self.image_ids[image_index])[0]
+        image = self.coco.load_image(self.image_ids[image_index])
         return float(image['width']) / float(image['height'])
 
     def num_classes(self):
@@ -318,8 +312,10 @@ def make_coco_dataset(root_dir, batchsize, num_workers):
 if __name__ == '__main__':
     import time
 
-    coco_path = '/home/etienneperot/workspace/data/coco/'
-    dataset_train = CocoDataset(coco_path, set_name='val2017',
+    #coco_path = '/home/etienneperot/workspace/data/coco/'
+    coco_path = '/home/prophesee/work/etienne/datasets/coco/'
+
+    dataset_train = CocoDataset(coco_path, set_name='train2017',
                                 transform=transforms.Compose([Normalizer(), Resizer()]))
 
     # for i in range(118000, len(dataset_train)):
