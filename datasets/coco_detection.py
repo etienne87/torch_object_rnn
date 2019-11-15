@@ -11,7 +11,7 @@ import random
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from torch.utils.data.sampler import Sampler
-from coco_wrapper import COCO2
+from datasets.coco_wrapper import COCO2 as COCO 
 
 from core.utils import vis
 import cv2
@@ -31,7 +31,7 @@ class CocoDataset(Dataset):
         self.root_dir = root_dir
         self.set_name = set_name
         self.transform = transform
-        self.coco = COCO2(self.root_dir, self.set_name) 
+        self.coco = COCO(self.root_dir, self.set_name) 
         self.image_ids = self.coco.get_image_ids()
         self.load_classes()
 

@@ -294,6 +294,49 @@ class ConvGRUCell(RNNCell):
         self.prev_h = None
 
 
+class ConvIRNNCell(RNNCell):
+    r"""ConvIRNNCell module, applies sequential part of IRNN.
+    """
+    def __init__(self, hidden_dim, kernel_size, bias, conv_func=nn.Conv2d, hard=False):
+        super(ConvIRNNCell, self).__init__(hard)
+        self.hidden_dim = hidden_dim
+        self.conv_h2h = conv_func(in_channels=self.hidden_dim,
+                                  out_channels=self.hidden_dim,
+                                  kernel_size=kernel_size,
+                                  padding=1,
+                                  bias=bias)
+        self.reset()
+        # identity initialization
+        self.conv_h2h.weight.data[...] = 0
+        mid = kernel_size//2
+        self.conv_h2h.weight[:,:,mid,mid] = torch.eye(self.hidden_dim)
+
+    def forward(self, xi):
+        self.saturation_cost = 0
+        xiseq = xi.split(1, 0) #t,n,c,h,w
+        if self.prev_h is not None:
+            self.prev_h = self.prev_h.detach()
+
+        result = []
+        for t, xt in enumerate(xiseq):
+            xt = xt.squeeze(0)
+
+            if self.prev_h is not None:
+                tmp = self.conv_h2h(self.prev_h) + xt
+            else:
+                tmp = xt
+
+            h = F.relu(tmp)
+
+            result.append(h.unsqueeze(0))
+            self.prev_h = h
+        res = torch.cat(result, dim=0)
+        return res
+
+    def reset(self):
+        self.prev_h = None
+
+
 class ConvRNN(nn.Module):
     r"""ConvRNN module.
     """
@@ -307,6 +350,9 @@ class ConvRNN(nn.Module):
         if cell == 'gru':
             self.timepool = ConvGRUCell(out_channels, 3, True, hard=hard)
             factor = 3
+        elif cell == 'irnn':
+            self.timepool = ConvIRNNCell(out_channels, 3, True, hard=hard)
+            factor = 1
         else:
             self.timepool = ConvLSTMCell(out_channels, 3, hard=hard)
             factor = 4
@@ -391,6 +437,6 @@ if __name__ == '__main__':
     # z = sep(x[0])
     # print(z.shape)
 
-    net = BottleneckLSTM(128, 256, 3, 1, 1, 1)
+    net = ConvRNN(128, 256, 3, 1, 1, 1, cell='irnn')
     y = net(x)
     print(y.shape)
