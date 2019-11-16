@@ -464,7 +464,6 @@ def regiongrowing(gt, shift=1, discard_size=20):
     return np.concatenate(bbs, 0), np.array(labels)
 
 
-
 if __name__ == '__main__':
     heatmap = np.zeros((256, 256), dtype=np.float32)
     center = (128, 128)

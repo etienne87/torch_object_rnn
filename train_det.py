@@ -81,8 +81,8 @@ def main():
     args.height = 256
     args.width = 256
 
-    # coco_path = '/home/etienneperot/workspace/data/coco/'
-    coco_path = '/home/prophesee/work/etienne/datasets/coco/'
+    coco_path = '/home/etienneperot/workspace/data/coco/'
+    # coco_path = '/home/prophesee/work/etienne/datasets/coco/'
     # Dataset
     print('==> Preparing dataset..')
 
@@ -91,10 +91,10 @@ def main():
     # train_dataset, test_dataset, classes = make_moving_coco(time, height, width, args)
     train_dataset, test_dataset, classes = make_still_coco(coco_path, args.batchsize, args.num_workers)
 
-
+    print('classes: ', classes)
     # Model
     print('==> Building model..')
-    net = SingleStageDetector(num_classes=classes, cin=cin, act="sigmoid")
+    net = SingleStageDetector.mobilenet_v2_fpn(cin, classes, act="sigmoid")
 
     if args.cuda:
         net.cuda()

@@ -7,31 +7,35 @@ import torch.nn as nn
 
 
 from core.losses import DetectionLoss
-from core.backbones import FPN, MobileNetFPN
+from core.backbones import FPN, MobileNetFPN, ResNet50FPN
 from core.anchors import Anchors
 from core.rpn import BoxHead
 
 
 
 class SingleStageDetector(nn.Module):
-    def __init__(self, feature_extractor=MobileNetFPN, rpn=BoxHead,
-                 num_classes=2, cin=2, act='sigmoid'):
+    def __init__(self, feature_extractor=FPN, rpn=BoxHead,
+                 in_channels=3, 
+                 num_classes=2,  
+                 act='sigmoid', 
+                 ratios=[0.5,1.0,2.0], 
+                 scales=[1.0,2**1./3,2**2./3], nlayers=3):
         super(SingleStageDetector, self).__init__()
         self.label_offset = 1 * (act=='softmax')
         self.num_classes = num_classes
-        self.cin = cin
+        self.in_channels = in_channels
 
-        self.feature_extractor = feature_extractor(cin)
+        self.feature_extractor = feature_extractor(in_channels)
 
         self.box_coder = Anchors(pyramid_levels=[i for i in range(3,3+self.feature_extractor.levels)],
-                                 scales=[1.0, 2**1./3, 2**2./3],
-                                 ratios=[0.5, 1.0, 2.0],
+                                 scales=scales,
+                                 ratios=ratios,
                                  fg_iou_threshold=0.5, bg_iou_threshold=0.4)
 
         self.num_anchors = self.box_coder.num_anchors
         self.act = act
 
-        self.rpn = rpn(self.feature_extractor.cout, self.box_coder.num_anchors, self.num_classes + self.label_offset, act)
+        self.rpn = rpn(self.feature_extractor.cout, self.box_coder.num_anchors, self.num_classes + self.label_offset, act, nlayers)
 
         self.criterion = DetectionLoss('sigmoid_focal_loss')
 
@@ -63,3 +67,15 @@ class SingleStageDetector(nn.Module):
         anchors, _ = self.box_coder(xs)
         targets = self.box_coder.decode(anchors, loc_preds, scores, x.size(1), score_thresh=score_thresh)
         return targets
+
+    @classmethod
+    def tiny_rnn_fpn(cls, in_channels, num_classes, act='sigmoid'):
+        return cls(FPN, BoxHead, in_channels, num_classes, act, ratios=[1.0], scales=[1.0, 1.5])
+
+    @classmethod
+    def mobilenet_v2_fpn(cls, in_channels, num_classes, act='sigmoid'):
+        return cls(MobileNetFPN, BoxHead, in_channels, num_classes, act)
+
+    @classmethod
+    def resnet50_fpn(cls, in_channels, num_classes, act='sigmoid'):
+        return cls(ResNet50FPN, BoxHead, in_channels, num_classes, act)

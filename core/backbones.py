@@ -50,9 +50,9 @@ class Trident(nn.Module):
         self.cin = cin
         base = 8
         self.conv1 = SequenceWise(nn.Sequential(
-            Bottleneck(cin, base, kernel_size=7, stride=2, padding=3),
-            Bottleneck(base, base * 4, kernel_size=7, stride=2, padding=3),
-            Bottleneck(base * 4, base * 8, kernel_size=7, stride=2, padding=3)
+            Bottleneck(cin, base, 2),
+            Bottleneck(base, base * 4, 2),
+            Bottleneck(base * 4, base * 8, 2)
         ))
 
         self.conv3 = ConvRNN(base * 8, base * 8, kernel_size=7, stride=2, padding=3)
@@ -117,14 +117,14 @@ class BackboneWithFPN(nn.Module):
                 module.reset()
 
 class MobileNetFPN(BackboneWithFPN):
-    def __init__(self, in_channels=1, out_channels=256):
+    def __init__(self, in_channels=3, out_channels=256):
         super(MobileNetFPN, self).__init__(
             pbb.MobileNet(in_channels, frozen_stages=1, norm_eval=True)
         )
 
-class Resnet50FPN(BackboneWithFPN):
-    def __init__(self, in_channels=1, out_channels=256):
-        super(Resnet50FPN, self).__init__(
+class ResNet50FPN(BackboneWithFPN):
+    def __init__(self, in_channels=3, out_channels=256):
+        super(ResNet50FPN, self).__init__(
             pbb.resnet50(in_channels, True, frozen_stages=1, norm_eval=True)
         )
 

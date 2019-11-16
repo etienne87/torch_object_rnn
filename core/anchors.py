@@ -93,7 +93,7 @@ class Anchors(nn.Module):
         self.idxs = None
         self.last_shapes = []
         self.set_low_quality_matches = self.set_low_quality_matches_v1
-        self.decode_func = self.decode_per_image
+        self.decode_func = self.batched_decode
 
     def forward(self, features):
         shapes = [item.shape for item in features]
@@ -175,7 +175,7 @@ class Anchors(nn.Module):
         # Per-Column Decoding
         boxes = box_preds.unsqueeze(2).expand(-1, num_anchors, num_classes, 4).contiguous()
         scores = cls_preds
-        boxes, scores, labels, batch_index = self.batched_decode(boxes, scores,
+        boxes, scores, labels, batch_index = self.decode_func(boxes, scores,
                                                     num_anchors, num_classes,
                                                     len(box_preds), score_thresh, nms_thresh)
 

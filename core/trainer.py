@@ -6,13 +6,9 @@ import time
 import torch
 import numpy as np
 from tensorboardX import SummaryWriter
-from core.utils import vis, tbx, plot
+from core.utils import vis, tbx, plot, image
 from core.eval import mean_ap
-
-
-
-
-
+import cv2
 
 class DetTrainer(object):
     """
@@ -169,8 +165,9 @@ class DetTrainer(object):
         time = args.time
         nrows = 2 ** ((batchsize.bit_length() - 1) // 2)
         ncols = batchsize // nrows
+        
         grid = np.zeros((args.test_iter * time, nrows, ncols, args.height, args.width, 3), dtype=np.uint8)
-
+        
         for period, (inputs, targets, reset) in enumerate(dataloader):
             images = inputs.clone().data.numpy()
 
@@ -183,21 +180,26 @@ class DetTrainer(object):
             with torch.no_grad():
                 targets = self.net.get_boxes(inputs)
 
-            vis.draw_txn_boxes_on_images(images, targets, grid, self.make_image,
-                                         period, time, ncols, labelmap)
+            time, batchsize, _, height, width = images.shape
+            grid2 = np.zeros((time, nrows, ncols, height, width, 3), dtype=np.uint8)
+
+            # grid[period * time]
+            vis.draw_txn_boxes_on_grid(images, targets, grid2, self.make_image, labelmap)
+            grid2 = grid2.swapaxes(2, 3).reshape(nrows * height, ncols * width, 3)
+            
+            cv2.imshow('img', grid2[...,::-1])
+            cv2.waitKey()
 
             if period >= (args.test_iter-1):
                 break
 
-        grid = grid.swapaxes(2, 3).reshape(args.test_iter * time, nrows * args.height, ncols * args.width, 3)
-
-
+        """ grid = grid.swapaxes(2, 3).reshape(args.test_iter * time, nrows * args.height, ncols * args.width, 3)
         if args.save_video:
             video_name =  self.logdir + '/videos/' + 'video#' + str(epoch) + '.avi'
             tbx.prepare_ckpt_dir(video_name)
             vis.write_video_opencv(video_name, grid)
         else:
-            tbx.add_video(self.writer, 'test', grid[...,::-1], global_step=epoch, fps=30)
+            tbx.add_video(self.writer, 'test', grid[...,::-1], global_step=epoch, fps=30) """
 
 
     def save_ckpt(self, epoch, name='checkpoint#'):

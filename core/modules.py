@@ -307,9 +307,9 @@ class ConvIRNNCell(RNNCell):
                                   bias=bias)
         self.reset()
         # identity initialization
-        self.conv_h2h.weight.data[...] = 0
+        """ self.conv_h2h.weight.data[...] = 0
         mid = kernel_size//2
-        self.conv_h2h.weight[:,:,mid,mid] = torch.eye(self.hidden_dim)
+        self.conv_h2h.weight.data[:,:,mid,mid] = torch.eye(self.hidden_dim) """
 
     def forward(self, xi):
         self.saturation_cost = 0

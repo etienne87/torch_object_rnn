@@ -112,16 +112,16 @@ class MobileNet(BackBone):
         self.features = module.features[:-2]
 
 
-def resnet18(in_channels, pretrained, frozen_stages=-1):
-    return ResNet(in_channels, models.resnet18(pretrained=pretrained), frozen_stages)
+def resnet18(in_channels, pretrained, frozen_stages=-1, norm_eval=True):
+    return ResNet(in_channels, models.resnet18(pretrained=pretrained), frozen_stages, norm_eval)
 
 
-def resnet34(in_channels, pretrained, frozen_stages=-1):
-    return ResNet(in_channels, models.resnet34(pretrained=pretrained), frozen_stages)
+def resnet34(in_channels, pretrained, frozen_stages=-1, norm_eval=True):
+    return ResNet(in_channels, models.resnet34(pretrained=pretrained), frozen_stages, norm_eval)
 
 
-def resnet50(in_channels, pretrained, frozen_stages=-1):
-    return ResNet(in_channels, models.resnet50(pretrained=pretrained), frozen_stages)
+def resnet50(in_channels, pretrained, frozen_stages=-1, norm_eval=True):
+    return ResNet(in_channels, models.resnet50(pretrained=pretrained), frozen_stages, norm_eval)
 
 
 

@@ -392,3 +392,16 @@ def assign_priors_v2(gt_boxes, gt_labels, corner_form_priors,
     boxes = gt_boxes[best_target_per_prior_index]
 
     return boxes, labels
+
+def batched_nms(boxes, scores, idxs, iou_threshold):
+    if boxes.numel() == 0:
+        return torch.empty((0,), dtype=torch.int64, device=boxes.device)
+    # strategy: in order to perform NMS independently per class.
+    # we add an offset to all the boxes. The offset is dependent
+    # only on the class idx, and is large enough so that boxes
+    # from different classes do not overlap
+    max_coordinate = boxes.max()
+    offsets = idxs.to(boxes) * (max_coordinate + 1)
+    boxes_for_nms = boxes + offsets[:, None]
+    keep = box_nms(boxes_for_nms, scores, iou_threshold)
+    return keep
