@@ -26,3 +26,5 @@ but was much slower (~300ms ~250ms by batch) as it was really sequential.
 ![](data/moving_mnist_detection.gif)
 
 ![](data/focal_softmax_vs_sigmoid.png)
+
+![](data/mobilenet_v2_fpn.png)
