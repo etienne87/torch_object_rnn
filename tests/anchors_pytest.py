@@ -121,6 +121,8 @@ class TestAnchors(object):
         loc_targets, cls_targets = self.box_coder.encode(anchors, anchors_xyxy, targets)
         scores = self.one_hot(cls_targets, self.num_classes)
 
+        self.box_coder.decode_func = self.box_coder.decode_per_image
+
         boxes1 = self.box_coder.decode(anchors, loc_targets.clone(), scores, self.batchsize, 0.99)
 
         self.box_coder.decode_func = self.box_coder.batched_decode
