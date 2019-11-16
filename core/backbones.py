@@ -87,14 +87,14 @@ class Trident(nn.Module):
 from core import pretrained_backbones as pbb
 from core.fpn import FeaturePyramidNetwork
 
-class MobileNetFPN(nn.Module):
-    def __init__(self, in_channels=1, out_channels=256):
-        super(MobileNetFPN, self).__init__()
+
+class BackboneWithFPN(nn.Module):
+    def __init__(self, backbone, out_channels=256):
+        super(BackboneWithFPN, self).__init__()
         self.base = 16
-        self.bb = pbb.MobileNet(in_channels, frozen_stages=3, norm_eval=True)
+        self.bb = backbone
         self.p6 = ConvLayer(self.bb.out_channel_list[-1], out_channels, stride=2)
         self.p7 = ConvLayer(out_channels, out_channels, stride=2)
-
         out_channel_list = self.bb.out_channel_list + [out_channels, out_channels]
         self.neck = FeaturePyramidNetwork(out_channel_list, out_channels)
         self.levels = 5
@@ -109,13 +109,24 @@ class MobileNetFPN(nn.Module):
         x1 = [batch_to_time(item, n) for item in x1]
         outs = self.neck(x1)
         sources = [time_to_batch(item)[0] for item in outs][::-1]
-
         return sources
 
     def reset(self):
         for name, module in self._modules.items():
             if hasattr(module, "reset"):
                 module.reset()
+
+class MobileNetFPN(BackboneWithFPN):
+    def __init__(self, in_channels=1, out_channels=256):
+        super(MobileNetFPN, self).__init__(
+            pbb.MobileNet(in_channels, frozen_stages=1, norm_eval=True)
+        )
+
+class Resnet50FPN(BackboneWithFPN):
+    def __init__(self, in_channels=1, out_channels=256):
+        super(Resnet50FPN, self).__init__(
+            pbb.resnet50(in_channels, True, frozen_stages=1, norm_eval=True)
+        )
 
 
 if __name__ == '__main__':
