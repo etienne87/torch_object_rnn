@@ -291,7 +291,8 @@ def deltas_to_bbox(loc_preds, default_boxes, variances=[0.1, 0.2]):
     return box_preds
 
 
-def pack_boxes_list_of_list(targets, label_offset=1):
+def pack_boxes_list_of_list(targets):
+    #targets range must be [1, C]
     tbins, batchsize = len(targets), len(targets[0])
     max_size = max([max([len(frame) for frame in time]) for time in targets])
     max_size = max(2, max_size)
@@ -301,12 +302,12 @@ def pack_boxes_list_of_list(targets, label_offset=1):
         for i in range(len(targets[t])):
             frame = targets[t][i]
             gt_padded[t, i, :len(frame)] = frame
-            gt_padded[t, i, :len(frame), 4] += label_offset
             sizes.append(len(frame))
     return gt_padded.view(-1, max_size, 5), sizes
 
 
-def pack_boxes_list(targets, label_offset=1):
+def pack_boxes_list(targets):
+    #targets range is [1, C]
     batchsize = len(targets)
     max_size = max([len(frame) for frame in targets])
     max_size = max(2, max_size)
@@ -315,7 +316,6 @@ def pack_boxes_list(targets, label_offset=1):
     for t in range(len(targets)):
         frame = targets[t]
         gt_padded[t, :len(frame)] = frame
-        gt_padded[t, :len(frame), 4] += label_offset
         sizes.append(len(frame))
     return gt_padded.view(-1, max_size, 5), sizes
 

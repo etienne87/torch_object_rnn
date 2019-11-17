@@ -118,7 +118,7 @@ def main():
         trainer.test(start_epoch + 1, test_dataset, args)
         exit()
     elif args.just_val:
-        map = trainer.evaluate(start_epoch, test_dataset, args)
+        map = trainer.evaluate(start_epoch + 1, test_dataset, args)
         print('map: ', map)
         exit()
 

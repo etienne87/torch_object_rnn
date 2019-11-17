@@ -34,6 +34,7 @@ class CocoDataset(Dataset):
         self.coco = COCO(self.root_dir, self.set_name) 
         self.image_ids = self.coco.get_image_ids()
         self.load_classes()
+        self.label_offset = 1
 
     def load_classes(self):
         # load class names (name -> label)
@@ -61,7 +62,7 @@ class CocoDataset(Dataset):
 
         img = self.load_image(idx)
         annot = self.load_annotations(idx)
-        sample = {'img': img, 'annot': annot}
+        sample = {'img': img, 'annot': annot, 'idx': idx}
 
         if self.transform:
             sample = self.transform(sample)
@@ -96,7 +97,7 @@ class CocoDataset(Dataset):
             # import pdb;pdb.set_trace()
             annotation = np.zeros((1, 5))
             annotation[0, :4] = a['bbox']
-            annotation[0, 4] = self.coco_label_to_label(a['category_id'])
+            annotation[0, 4] = self.coco_label_to_label(a['category_id']) + self.label_offset
             annotations = np.append(annotations, annotation, axis=0)
 
         # transform from [x, y, w, h] to [x1, y1, x2, y2]
@@ -129,6 +130,7 @@ def collater(data):
     imgs = [s['img'] for s in data]
     annots = [s['annot'] for s in data]
     scales = [s['scale'] for s in data]
+    indices = [s['idx'] for s in data]
 
     widths = [int(s.shape[0]) for s in imgs]
     heights = [int(s.shape[1]) for s in imgs]
@@ -145,8 +147,13 @@ def collater(data):
 
     padded_imgs = padded_imgs.permute(0, 3, 1, 2)
 
-    #TODO: put back a dictionary, everywhere
-    return padded_imgs.unsqueeze(0), [annots], 1
+    out = {'data':padded_imgs[None], 
+           'boxes': [annots], 
+           'resets': 1, 
+           'indices': indices,
+           'scales':  scales
+           }
+    return out
 
 
 class Resizer(object):
@@ -182,7 +189,8 @@ class Resizer(object):
 
         annots[:, :4] *= scale
 
-        return {'img': torch.from_numpy(new_image), 'annot': torch.from_numpy(annots), 'scale': scale}
+        return {'img': torch.from_numpy(new_image), 'annot': torch.from_numpy(annots), 
+        'scale': scale, 'idx': sample['idx']}
 
 
 
@@ -203,7 +211,8 @@ class Flipper(object):
 
             annots[:, 0] = cols - x2
             annots[:, 2] = cols - x_tmp
-            sample = {'img': image, 'annot': annots}
+            sample['img'] = image
+            sample['annot'] = annots
         return sample
 
 
@@ -215,8 +224,8 @@ class Normalizer(object):
 
     def __call__(self, sample):
         image, annots = sample['img'], sample['annot']
-
-        return {'img': ((image.astype(np.float32) - self.mean) / self.std), 'annot': annots}
+        sample['img'] = ((image.astype(np.float32) - self.mean) / self.std)
+        return sample
 
 
 class UnNormalizer(object):
@@ -312,8 +321,8 @@ def make_coco_dataset(root_dir, batchsize, num_workers):
 if __name__ == '__main__':
     import time
 
-    #coco_path = '/home/etienneperot/workspace/data/coco/'
-    coco_path = '/home/prophesee/work/etienne/datasets/coco/'
+    coco_path = '/home/etienneperot/workspace/data/coco/'
+    #coco_path = '/home/prophesee/work/etienne/datasets/coco/'
 
     dataset_train = CocoDataset(coco_path, set_name='train2017',
                                 transform=transforms.Compose([Normalizer(), Resizer()]))

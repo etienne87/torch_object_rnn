@@ -14,6 +14,7 @@ from collections import deque
 
 if __name__ == '__main__':
     coco_path = '/home/prophesee/work/etienne/datasets/coco/'
+    coco_path = '/home/etienneperot/workspace/data/coco/'
     batchsize = 32
     num_workers = 3
     train_dataset, test_dataset, classes = make_still_coco(coco_path, batchsize, num_workers)

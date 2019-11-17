@@ -29,6 +29,7 @@ class MovingMnistAnimation(toy.Animation):
     def __init__(self, t=10, h=128, w=128, c=1, max_stop=15,
                 max_objects=3, train=True):
         self.dataset_ = TRAIN_DATASET if train else TEST_DATASET
+        self.label_offset = 1
         super(MovingMnistAnimation, self).__init__(t, h, w, c, max_stop, 'none', 10, max_objects, True)
 
     def reset(self):
@@ -52,7 +53,7 @@ class MovingMnistAnimation(toy.Animation):
         boxes = np.zeros((len(self.objects), 5), dtype=np.float32)
         for i, object in enumerate(self.objects):
             x1, y1, x2, y2 = object.run()
-            boxes[i] = np.array([x1, y1, x2, y2, object.class_id])
+            boxes[i] = np.array([x1, y1, x2, y2, object.class_id + self.label_offset])
             #draw in roi resized version of img
             thumbnail = cv2.resize(object.img, (x2-x1, y2-y1), cv2.INTER_LINEAR)
             self.img[y1:y2, x1:x2] = np.maximum(self.img[y1:y2, x1:x2], thumbnail)

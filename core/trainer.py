@@ -7,7 +7,7 @@ import torch
 import numpy as np
 from tensorboardX import SummaryWriter
 from core.utils import vis, tbx, plot, image
-from core.eval import mean_ap
+from core.eval import mean_ap, coco_eval
 import cv2
 from tqdm import tqdm
 
@@ -53,7 +53,7 @@ class DetTrainer(object):
         for batch_idx, data in enumerate(dataloader):
             if batch_idx > 0:
                 runtime_stats['dataloader'] += time.time() - start
-            inputs, targets, reset = data
+            inputs, targets, reset = data['data'], data['boxes'], data['resets']
             if args.cuda:
                 inputs = inputs.cuda()
 
@@ -103,7 +103,7 @@ class DetTrainer(object):
         for batch_idx, data in tqdm(enumerate(dataloader), total=len(dataloader)):
             if batch_idx > 0:
                 runtime_stats['dataloader'] += time.time() - start
-            inputs, targets, reset = data
+            inputs, targets, reset = data['data'], data['boxes'], data['resets']
             if args.cuda:
                 inputs = inputs.cuda()
 
@@ -131,6 +131,7 @@ class DetTrainer(object):
 
             start = time.time()
 
+        coco_eval()
         det_results, gt_bboxes, gt_labels = mean_ap.convert(gts, proposals, self.net.num_classes)
 
         map, eval_results = mean_ap.eval_map(det_results,
@@ -169,7 +170,8 @@ class DetTrainer(object):
         
         grid = np.zeros((args.test_iter * time, nrows, ncols, args.height, args.width, 3), dtype=np.uint8)
         
-        for period, (inputs, targets, reset) in enumerate(dataloader):
+        for period, data in enumerate(dataloader):
+            inputs, targets, reset = data['data'], data['boxes'], data['resets']
             images = inputs.clone().data.numpy()
 
             if args.cuda:

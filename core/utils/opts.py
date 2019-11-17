@@ -36,13 +36,12 @@ def video_collate_fn(data_list):
     videos = torch.stack(videos, 1)
     t, n = videos.shape[:2]
     boxes = [[boxes[i][t] for i in range(n)] for t in range(t)]
-    return videos, boxes
-
+    return {'data': videos, 'boxes': boxes}
 
 def image_collate_fn(data_list):
     images, boxes = zip(*data_list)
     images = torch.stack(images, 0)
-    return images, boxes
+    return {'data': images, 'boxes': boxes}
 
 
 def video_collate_fn_with_reset_info(data_list):
@@ -50,7 +49,7 @@ def video_collate_fn_with_reset_info(data_list):
     videos = torch.stack(videos, 1)
     t, n = videos.shape[:2]
     boxes = [[boxes[i][t] for i in range(n)] for t in range(t)]
-    return videos, boxes, sum(resets)>0
+    return {'data': videos, 'boxes': boxes, 'resets': sum(resets)>0}
 
 def cuda_tick():
     torch.cuda.synchronize()
