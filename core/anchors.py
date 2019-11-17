@@ -71,6 +71,7 @@ class Anchors(nn.Module):
     Handle encoding/ decoding algorithms.
     Encoding uses padding in order to parallelize iou & assignement computation.
     Decoding uses "batched_nms" of torchvision to parallelize accross images and classes.
+    The option "max_decode" means we only decode the best score, otherwise we decode per class
     '''
     def __init__(self, **kwargs):
         super(Anchors, self).__init__()
@@ -93,7 +94,8 @@ class Anchors(nn.Module):
         self.idxs = None
         self.last_shapes = []
         self.set_low_quality_matches = self.set_low_quality_matches_v1
-        self.decode_func = self.batched_decode
+        self.decode_func = self.decode_per_image
+        self.max_decode = kwargs.get("max_decode", True)
 
     def forward(self, features):
         shapes = [item.shape for item in features]
@@ -172,10 +174,8 @@ class Anchors(nn.Module):
         num_classes = cls_preds.shape[-1]
         num_anchors = box_preds.shape[1]
 
-        # Per-Column Decoding
-        boxes = box_preds.unsqueeze(2).expand(-1, num_anchors, num_classes, 4).contiguous()
-        scores = cls_preds
-        boxes, scores, labels, batch_index = self.decode_func(boxes, scores,
+        # Decoding
+        boxes, scores, labels, batch_index = self.decode_func(box_preds, cls_preds,
                                                     num_anchors, num_classes,
                                                     len(box_preds), score_thresh, nms_thresh)
 
@@ -194,11 +194,19 @@ class Anchors(nn.Module):
         return targets
 
     def batched_decode(self, boxes, scores, num_anchors, num_classes, batchsize, score_thresh, nms_thresh):
-        rows = torch.arange(batchsize, dtype=torch.long)[:, None]
-        cols = torch.arange(num_classes, dtype=torch.long)[None, :]
-        idxs = rows * num_classes + cols
-        idxs = idxs.unsqueeze(1).expand(batchsize, num_anchors, num_classes).contiguous()
-        idxs = idxs.to(scores.device)
+        if self.max_decode:
+            scores, idxs = scores.max(dim=-1)
+            rows = torch.arange(batchsize, dtype=torch.long)[:, None] * num_classes
+            rows = rows.to(scores.device)
+            idxs += rows
+        else:
+            boxes = boxes.unsqueeze(2).expand(-1, num_anchors, num_classes, 4).contiguous()
+            rows = torch.arange(batchsize, dtype=torch.long)[:, None]
+            cols = torch.arange(num_classes, dtype=torch.long)[None, :]
+            idxs = rows * num_classes + cols
+            idxs = idxs.unsqueeze(1).expand(batchsize, num_anchors, num_classes).contiguous()
+            idxs = idxs.to(scores.device) 
+
         boxes = boxes.view(-1, 4)
         scores = scores.view(-1)
         idxs = idxs.view(-1)
@@ -220,12 +228,20 @@ class Anchors(nn.Module):
         return boxes, scores, labels, batch_index
 
     def decode_per_image(self, boxes, scores, num_anchors, num_classes, batchsize, score_thresh, nms_thresh):
-        rows = torch.arange(batchsize, dtype=torch.long)[:, None]
-        cols = torch.arange(num_classes, dtype=torch.long)[None, :]
-        idxs = rows * num_classes + cols
-        idxs = idxs.unsqueeze(1).expand(batchsize, num_anchors, num_classes).contiguous()
-        idxs = idxs.to(scores.device)
-        labels = cols.expand(num_anchors, num_classes).to(scores.device).reshape(-1)
+        if self.max_decode:
+            scores, idxs = scores.max(dim=-1)
+            labels = idxs.clone()
+            rows = torch.arange(batchsize, dtype=torch.long)[:, None] * num_classes
+            rows = rows.to(scores.device)
+            idxs += rows
+        else:
+            boxes = boxes.unsqueeze(2).expand(-1, num_anchors, num_classes, 4).contiguous()
+            rows = torch.arange(batchsize, dtype=torch.long)[:, None]
+            cols = torch.arange(num_classes, dtype=torch.long)[None, :]
+            idxs = rows * num_classes + cols
+            idxs = idxs.unsqueeze(1).expand(batchsize, num_anchors, num_classes).contiguous()
+            idxs = idxs.to(scores.device)
+            labels = cols.expand(num_anchors, num_classes).to(scores.device).reshape(-1)
         allboxes = []
         allscores = []
         allidxs = []
@@ -237,7 +253,7 @@ class Anchors(nn.Module):
             boxesf = boxesi[mask].contiguous()
             scoresf = scoresi[mask].contiguous()
             idxsf = idxsi[mask].contiguous()
-            labelsf = labels[mask]
+            labelsf = labels[i][mask] if self.max_decode else labels[mask]
             keep = batched_nms(boxesf, scoresf, labelsf, nms_thresh)
             allboxes.append(boxesf[keep])
             allscores.append(scoresf[keep])
