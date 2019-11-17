@@ -38,6 +38,7 @@ def parse_args():
     parser.add_argument('--save_every', type=int, default=2, help='save_every')
     parser.add_argument('--num_workers', type=int, default=2, help='save_every')
     parser.add_argument('--just_test', action='store_true')
+    parser.add_argument('--just_val', action='store_true')
     return parser.parse_args()
 
 
@@ -113,10 +114,12 @@ def main():
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min') #patience=3, verbose=True)
     trainer = DetTrainer(args.logdir, net, optimizer)
 
-    if args.just_test:
-        # map = trainer.evaluate(start_epoch, test_dataset, args)
-        # print('map: ', map)
+    if args.just_test: 
         trainer.test(start_epoch + 1, test_dataset, args)
+        exit()
+    elif args.just_val:
+        map = trainer.evaluate(start_epoch, test_dataset, args)
+        print('map: ', map)
         exit()
 
     for epoch in range(start_epoch, args.epochs):

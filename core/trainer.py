@@ -9,6 +9,7 @@ from tensorboardX import SummaryWriter
 from core.utils import vis, tbx, plot, image
 from core.eval import mean_ap
 import cv2
+from tqdm import tqdm
 
 class DetTrainer(object):
     """
@@ -99,7 +100,7 @@ class DetTrainer(object):
         proposals = [] #list of K array of size 6
         start = 0
         runtime_stats = {'dataloader': 0, 'network': 0}
-        for batch_idx, data in enumerate(dataloader):
+        for batch_idx, data in tqdm(enumerate(dataloader), total=len(dataloader)):
             if batch_idx > 0:
                 runtime_stats['dataloader'] += time.time() - start
             inputs, targets, reset = data
@@ -186,7 +187,6 @@ class DetTrainer(object):
             # grid[period * time]
             vis.draw_txn_boxes_on_grid(images, targets, grid2, self.make_image, labelmap)
             grid2 = grid2.swapaxes(2, 3).reshape(nrows * height, ncols * width, 3)
-            
             cv2.imshow('img', grid2[...,::-1])
             cv2.waitKey()
 
