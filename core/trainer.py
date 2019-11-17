@@ -7,7 +7,7 @@ import torch
 import numpy as np
 from tensorboardX import SummaryWriter
 from core.utils import vis, tbx, plot, image
-from core.eval import mean_ap, coco_eval
+from core.eval import mean_ap
 import cv2
 from tqdm import tqdm
 
@@ -131,7 +131,6 @@ class DetTrainer(object):
 
             start = time.time()
 
-        coco_eval()
         det_results, gt_bboxes, gt_labels = mean_ap.convert(gts, proposals, self.net.num_classes)
 
         map, eval_results = mean_ap.eval_map(det_results,

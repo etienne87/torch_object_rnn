@@ -107,7 +107,7 @@ def main():
     start_epoch = 0  # start from epoch 0 or last epoch
     if args.resume:
         print('==> Resuming from checkpoint..')
-        start_epoch = opts.load_last_checkpoint(net, optimizer, args.logdir) + 1
+        start_epoch = opts.load_last_checkpoint(args.logdir, net, optimizer) + 1
 
 
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.99)
