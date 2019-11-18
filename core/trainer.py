@@ -189,9 +189,10 @@ class DetTrainer(object):
         nrows = 2 ** ((batchsize.bit_length() - 1) // 2)
         ncols = batchsize // nrows
         
-        grid = np.zeros((args.test_iter * time, nrows, ncols, args.height, args.width, 3), dtype=np.uint8)
+        if args.is_video_dataset:
+            grid = np.zeros((args.test_iter * time, nrows, ncols, args.height, args.width, 3), dtype=np.uint8)
         
-        for period, data in enumerate(dataloader):
+        for period, data in tqdm(enumerate(dataloader), total=args.test_iter):
             inputs, targets, reset = data['data'], data['boxes'], data['resets']
             images = inputs.clone().data.numpy()
 
@@ -205,24 +206,28 @@ class DetTrainer(object):
                 targets = self.net.get_boxes(inputs)
 
             time, batchsize, _, height, width = images.shape
-            grid2 = np.zeros((time, nrows, ncols, height, width, 3), dtype=np.uint8)
 
-            # grid[period * time]
-            vis.draw_txn_boxes_on_grid(images, targets, grid2, self.make_image, labelmap)
-            grid2 = grid2.swapaxes(2, 3).reshape(nrows * height, ncols * width, 3)
-            cv2.imshow('img', grid2[...,::-1])
-            cv2.waitKey()
+            if args.is_video_dataset:
+                vis.draw_txn_boxes_on_grid(images, targets, grid[period * time:], self.make_image, labelmap)
+            else:
+                grid2 = np.zeros((time, nrows, ncols, height, width, 3), dtype=np.uint8)
+                vis.draw_txn_boxes_on_grid(images, targets, grid2, self.make_image, labelmap)
+                grid2 = grid2.swapaxes(2, 3).reshape(nrows * height, ncols * width, 3)
+                image_name = self.logdir + '/images/test_batch#'+str(period)+'.jpg'
+                tbx.prepare_ckpt_dir(image_name)
+                cv2.imwrite(image_name, grid2[...,::-1])
 
             if period >= (args.test_iter-1):
                 break
 
-        """ grid = grid.swapaxes(2, 3).reshape(args.test_iter * time, nrows * args.height, ncols * args.width, 3)
-        if args.save_video:
-            video_name =  self.logdir + '/videos/' + 'video#' + str(epoch) + '.avi'
-            tbx.prepare_ckpt_dir(video_name)
-            vis.write_video_opencv(video_name, grid)
-        else:
-            tbx.add_video(self.writer, 'test', grid[...,::-1], global_step=epoch, fps=30) """
+        if args.is_video_dataset:
+            grid = grid.swapaxes(2, 3).reshape(args.test_iter * time, nrows * args.height, ncols * args.width, 3)
+            if args.save_video:
+                video_name =  self.logdir + '/videos/' + 'video#' + str(epoch) + '.avi'
+                tbx.prepare_ckpt_dir(video_name)
+                vis.write_video_opencv(video_name, grid)
+            else:
+                tbx.add_video(self.writer, 'test', grid[...,::-1], global_step=epoch, fps=30)
 
 
     def save_ckpt(self, epoch, name='checkpoint#'):

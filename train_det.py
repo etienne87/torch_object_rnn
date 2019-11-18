@@ -92,6 +92,8 @@ def main():
     # train_dataset, test_dataset, classes = make_moving_coco(time, height, width, args)
     train_dataset, test_dataset, classes = make_still_coco(coco_path, args.batchsize, args.num_workers)
 
+    args.is_video_dataset = False
+
     print('classes: ', classes)
     # Model
     print('==> Building model..')

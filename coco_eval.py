@@ -84,7 +84,7 @@ def main():
                     'bbox': box_xywh,
                 }
                 results.append(image_result)
-            image_ids.append(indices[i]) 
+            image_ids.append(indices[i])
         
         for i in range(len(targets[0])):
             boxes = targets[0][i]
@@ -104,30 +104,26 @@ def main():
                     'iscrowd': False,
                     'area': area
                 }
-                gts.append(image_gt)
+                gts.append(image_gt) 
         
 
     original_gt_path = os.path.join(coco_path, 'annotations', 'instances_val2017.json')
     with open(original_gt_path, 'r') as fp:
         original_dict = json.load(fp)
-    
-    # import pdb;pdb.set_trace()
-    original_dict['annotations'] = gts
+    original_dict['annotations'] = gts  
 
- 
     result_path = '{}_bbox_results.json'.format(dataloader.dataset.set_name)
     gt_path = '{}_bbox_gts.json'.format(dataloader.dataset.set_name)
     ids_path = 'image_ids.json'
     json.dump(results, open(result_path, 'w'), indent=4)
     json.dump(original_dict, open(gt_path, 'w'), indent=4)
-    json.dump(image_ids, open(ids_path, 'w'), indent=4)
+    json.dump(image_ids, open(ids_path, 'w'), indent=4) 
     
     with open(ids_path, 'r') as fp:
         image_ids = json.load(fp)
-    
 
     # load results in COCO evaluation tool
-    coco_true = COCO(original_gt_path)
+    coco_true = COCO(gt_path)
     coco_pred = coco_true.loadRes(result_path)
 
     # run COCO evaluation
