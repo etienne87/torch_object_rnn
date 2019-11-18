@@ -118,16 +118,16 @@ def main():
         trainer.test(start_epoch + 1, test_dataset, args)
         exit()
     elif args.just_val:
-        map = trainer.evaluate(start_epoch + 1, test_dataset, args)
-        print('map: ', map)
+        mean_ap_50 = trainer.evaluate(start_epoch + 1, test_dataset, args)
+        print('mean_ap_50: ', mean_ap_50)
         exit()
 
     for epoch in range(start_epoch, args.epochs):
         trainer.train(epoch, train_dataset, args)
-        map = trainer.evaluate(epoch, test_dataset, args)
+        mean_ap_50 = trainer.evaluate(epoch, test_dataset, args)
 
         trainer.writer.add_scalar('learning rate', optimizer.param_groups[0]['lr'], epoch)
-        scheduler.step(map)
+        scheduler.step(mean_ap_50)
 
         # if epoch%args.test_every == 0:
         #     trainer.test(epoch, test_dataset, args)

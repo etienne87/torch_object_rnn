@@ -132,9 +132,13 @@ class DetTrainer(object):
 
             start = time.time()
 
+            if batch_idx > 20:
+                break
+
         det_results, gt_bboxes, gt_labels = mean_ap.convert(gts, proposals, self.net.num_classes)
 
-        map, eval_results = mean_ap.eval_map(det_results,
+
+        map_50, eval_results = mean_ap.eval_map(det_results,
                                                  gt_bboxes,
                                                  gt_labels,
                                                  gt_ignore=None,
@@ -142,8 +146,25 @@ class DetTrainer(object):
                                                  iou_thr=0.5,
                                                  dataset=None,
                                                  print_summary=True)
+        
+        #compute actual mean_ap of coco
+        mean_ap_levels = [map_50]
+        for iou_threshold in np.linspace(0.55, 0.95, 9).tolist():
+            mean_ap_level, eval_results = mean_ap.eval_map(det_results,
+                                                gt_bboxes,
+                                                gt_labels,
+                                                gt_ignore=None,
+                                                scale_ranges=None,
+                                                iou_thr=iou_threshold,
+                                                dataset=None,
+                                                print_summary=False)
 
-        self.writer.add_scalar('mean_ap', map, epoch)
+            print('iou_threshold: ', iou_threshold, mean_ap_level)
+            mean_ap_levels.append(mean_ap_level)
+        mean_ap_coco = sum(mean_ap_levels)/len(mean_ap_levels)
+
+        self.writer.add_scalar('mean_ap_coco', mean_ap_coco, epoch)
+        self.writer.add_scalar('mean_ap_50', map_50, epoch)
         xs = [item['recall'] for item in eval_results]
         ys = [item['precision'] for item in eval_results]
         fig = plot.xy_curves(xs, ys)
@@ -152,7 +173,7 @@ class DetTrainer(object):
         aps = np.array([item['ap'] for item in eval_results])
         fig2 = plot.bar(aps)
         self.writer.add_figure('aps', fig2, epoch)
-        return map
+        return map_50
 
 
     def test(self, epoch, dataloader, args):
