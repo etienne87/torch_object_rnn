@@ -7,7 +7,8 @@ Examples::
 
     >> sources = pyramid_network(x)
     >> anchors = anchors(sources)
-    >> loc_targets, cls_targets = box_coder.encode(anchors, targets)
+    >> loc_targets, cls_targets = box_coder.encode(anchors, anchors_xyxy, targets)
+    >> boxes =  box_coder.decode(anchors, loc_preds, cls_preds) # Results in xyxy format
 
 The module can resize its grid internally (so batches can change sizes)
 '''
@@ -95,7 +96,7 @@ class Anchors(nn.Module):
         self.last_shapes = []
         self.set_low_quality_matches = self.set_low_quality_matches_v1
         self.decode_func = self.batched_decode
-        self.max_decode = kwargs.get("max_decode", True)
+        self.max_decode = kwargs.get("max_decode", False)
 
     def forward(self, features):
         shapes = [item.shape for item in features]

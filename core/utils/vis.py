@@ -97,7 +97,7 @@ def draw_txn_boxes_on_images(images, targets, grid, make_img_fun, period, time, 
             grid[t + period * time, y, x] = img
 
 def draw_txn_boxes_on_grid(images, targets, grid, make_img_fun, labelmap):
-    nrows, ncols = grid.shape[:2]
+    nrows, ncols = grid.shape[1:3]
     for t in range(len(targets)):
         for i in range(len(targets[t])):
             y = i // ncols

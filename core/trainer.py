@@ -118,6 +118,7 @@ class DetTrainer(object):
             for t in range(len(targets)):
                 for i in range(len(targets[t])):
                     gt_boxes = targets[t][i]
+                    gt_boxes[..., 4] -= dataloader.dataset.label_offset
                     boxes, labels, scores = preds[t][i]
 
                     gts.append(gt_boxes.cpu().numpy())
