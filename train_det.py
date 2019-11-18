@@ -83,7 +83,7 @@ def main():
     args.width = 256
 
     coco_path = '/home/etienneperot/workspace/data/coco/'
-    coco_path = '/home/prophesee/work/etienne/datasets/coco/'
+    # coco_path = '/home/prophesee/work/etienne/datasets/coco/'
     # Dataset
     print('==> Preparing dataset..')
 
@@ -97,7 +97,7 @@ def main():
     print('classes: ', classes)
     # Model
     print('==> Building model..')
-    net = SingleStageDetector.mobilenet_v2_fpn(cin, classes, act="sigmoid")
+    net = SingleStageDetector.mobilenet_v2_fpn(cin, classes, act="softmax")
 
     if args.cuda:
         net.cuda()

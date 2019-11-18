@@ -158,8 +158,12 @@ def collater(data):
 
 class Resizer(object):
     """Convert ndarrays in sample to Tensors."""
+    def __init__(self, min_side=320, max_side=512, fixed_size=True):
+        self.min_side = min_side
+        self.max_side = max_side
+        self.fixed_size = fixed_size
 
-    def __call__(self, sample, min_side=512, max_side=512):
+    def __call__(self, sample):
         image, annots = sample['img'], sample['annot']
 
         rows, cols, cns = image.shape
@@ -167,25 +171,28 @@ class Resizer(object):
         smallest_side = min(rows, cols)
 
         # rescale the image so the smallest side is min_side
-        scale = min_side / smallest_side
+        scale = self.min_side / smallest_side
 
         # check if the largest side is now greater than max_side, which can happen
         # when images have a large aspect ratio
         largest_side = max(rows, cols)
 
-        if largest_side * scale > max_side:
-            scale = max_side / largest_side
+        if largest_side * scale > self.max_side:
+            scale = self.max_side / largest_side
 
         # resize the image with the computed scale
         height, width =  (int(round(rows * scale)), int(round((cols * scale))))
         image = cv2.resize(image, (width, height), interpolation=cv2.INTER_LINEAR)
         rows, cols, cns = image.shape
 
-        pad_w = 32 - rows % 32
-        pad_h = 32 - cols % 32
-
-        new_image = np.zeros((rows + pad_w, cols + pad_h, cns)).astype(np.float32)
-        new_image[:rows, :cols, :] = image.astype(np.float32)
+        if self.fixed_size:
+            new_image = np.zeros((self.max_side, self.max_side, cns)).astype(np.float32)
+            new_image[:rows, :cols, :] = image.astype(np.float32)
+        else:
+            pad_w = 32 - rows % 32
+            pad_h = 32 - cols % 32
+            new_image = np.zeros((rows + pad_w, cols + pad_h, cns)).astype(np.float32)
+            new_image[:rows, :cols, :] = image.astype(np.float32)
 
         annots[:, :4] *= scale
 
@@ -219,8 +226,8 @@ class Flipper(object):
 class Normalizer(object):
 
     def __init__(self):
-        self.mean = np.array([[[0.485, 0.456, 0.406]]])
-        self.std = np.array([[[0.229, 0.224, 0.225]]])
+        self.mean = np.array([[[0.485, 0.456, 0.406]]], dtype=np.float32)
+        self.std = np.array([[[0.229, 0.224, 0.225]]], dtype=np.float32)
 
     def __call__(self, sample):
         image, annots = sample['img'], sample['annot']
@@ -286,7 +293,7 @@ def draw_caption(image, box, caption):
     cv2.putText(image, caption, (b[0], b[1] - 10), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 255), 1)
 
 
-def viz_batch(data, unnormalize, labelmap):
+def viz_batch(data, unnormalize, labelmap, label_offset=1):
     print(data['img'].shape[-2:])
     for i in range(data['img'].shape[0]):
         img = np.array(255 * unnormalize(data['img'][i, :, :, :])).copy()
@@ -296,17 +303,17 @@ def viz_batch(data, unnormalize, labelmap):
         img = img.astype(np.uint8)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         boxes = data['annot'][i].cpu().numpy().astype(np.int32)
-        bboxes = vis.boxarray_to_boxes(boxes, boxes[:, -1], labelmap)
+        bboxes = vis.boxarray_to_boxes(boxes, boxes[:, -1] - label_offset, labelmap)
         img_ann = vis.draw_bboxes(img, bboxes)
         cv2.imshow('im', img_ann)
         cv2.waitKey(0)
 
 
-def make_coco_dataset(root_dir, batchsize, num_workers):
+def make_coco_dataset(root_dir, batchsize, num_workers, fixed_size=True):
     dataset_train = CocoDataset(root_dir, set_name='train2017', transform=transforms.Compose([
-        Normalizer(), Resizer()]))
+        Normalizer(), Flipper(), Resizer(fixed_size=fixed_size)]))
     dataset_val = CocoDataset(root_dir, set_name='val2017',
-                              transform=transforms.Compose([Normalizer(), Resizer()]))
+                              transform=transforms.Compose([Normalizer(), Resizer(fixed_size=fixed_size)]))
 
     train_sampler = AspectRatioBasedSampler(dataset_train, batch_size=batchsize, drop_last=False)
     train_loader = DataLoader(dataset_train, num_workers=num_workers,
@@ -322,10 +329,12 @@ if __name__ == '__main__':
     import time
 
     coco_path = '/home/etienneperot/workspace/data/coco/'
-    #coco_path = '/home/prophesee/work/etienne/datasets/coco/'
+    # coco_path = '/home/prophesee/work/etienne/datasets/coco/'
 
     dataset_train = CocoDataset(coco_path, set_name='train2017',
-                                transform=transforms.Compose([Normalizer(), Resizer()]))
+                                transform=transforms.Compose([
+                                Normalizer(), 
+                                Resizer()]))
 
     # for i in range(118000, len(dataset_train)):
     #     print('i: ', i, '/', len(dataset_train), len(dataset_train.image_ids))
@@ -343,7 +352,7 @@ if __name__ == '__main__':
     start = time.time()
     for data in loader:
 
-        data = {'img':data[0][0], 'annot':data[1][0]}
+        data = {'img':data['data'][0], 'annot':data['boxes'][0]}
 
         end = time.time()
         print(end - start, ' time loading')

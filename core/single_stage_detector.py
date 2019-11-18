@@ -37,7 +37,7 @@ class SingleStageDetector(nn.Module):
 
         self.rpn = rpn(self.feature_extractor.cout, self.box_coder.num_anchors, self.num_classes + self.label_offset, act, nlayers)
 
-        self.criterion = DetectionLoss('sigmoid_focal_loss')
+        self.criterion = DetectionLoss(act + '_focal_loss')
 
     def reset(self):
         self.feature_extractor.reset()
