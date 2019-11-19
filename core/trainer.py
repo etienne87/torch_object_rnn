@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 
 import time
+import collections
 import torch
 import numpy as np
 from tensorboardX import SummaryWriter
@@ -48,6 +49,7 @@ class DetTrainer(object):
         dataloader.dataset.max_consecutive_batches = 4 #(2 ** epoch)
         dataloader.dataset.build()
 
+        loss_hist = collections.deque(maxlen=500)
         start = 0
         runtime_stats = {'dataloader': 0, 'network': 0}
         for batch_idx, data in enumerate(dataloader):
@@ -86,6 +88,8 @@ class DetTrainer(object):
                          ), ' ')
 
             start = time.time()
+            loss_hist.append(loss.item())
+        return loss_hist
 
     def evaluate(self, epoch, dataloader, args):
         print('\nEpoch: %d (val)' % epoch)
@@ -131,9 +135,6 @@ class DetTrainer(object):
                     proposals.append(pred)
 
             start = time.time()
-
-            if batch_idx > 20:
-                break
 
         det_results, gt_bboxes, gt_labels = mean_ap.convert(gts, proposals, self.net.num_classes)
 

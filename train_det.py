@@ -4,6 +4,7 @@ from __future__ import print_function
 
 import argparse
 import os
+import numpy as np
 import torch
 import torch.optim as optim
 import torch.backends.cudnn as cudnn
@@ -113,7 +114,8 @@ def main():
 
 
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.99)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min') #patience=3, verbose=True)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min') 
+    # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3, verbose=True)
     trainer = DetTrainer(args.logdir, net, optimizer)
 
     if args.just_test: 
@@ -125,11 +127,12 @@ def main():
         exit()
 
     for epoch in range(start_epoch, args.epochs):
-        trainer.train(epoch, train_dataset, args)
+        epoch_loss = trainer.train(epoch, train_dataset, args)
         mean_ap_50 = trainer.evaluate(epoch, test_dataset, args)
 
         trainer.writer.add_scalar('learning rate', optimizer.param_groups[0]['lr'], epoch)
         scheduler.step(mean_ap_50)
+        # scheduler.step(np.mean(epoch_loss))
 
         # if epoch%args.test_every == 0:
         #     trainer.test(epoch, test_dataset, args)

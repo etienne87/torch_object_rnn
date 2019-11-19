@@ -95,7 +95,7 @@ class Anchors(nn.Module):
         self.idxs = None
         self.last_shapes = []
         self.set_low_quality_matches = self.set_low_quality_matches_v1
-        self.decode_func = self.batched_decode
+        self.decode_func = self.decode_per_image
         self.max_decode = kwargs.get("max_decode", False)
 
     def forward(self, features):

@@ -26,10 +26,11 @@ def softmax_focal_loss(x, y, reduction='none'):
     ''' softmax focal loss
 
     :param x: [N, A, C+1]
-    :param y: [N, A]
+    :param y: [N, A]  (-1: ignore, 0: background, [1,C]: classes)
     :param reduction:
     :return:
     '''
+    alpha = 0.25
     gamma = 2.0
     num_classes = x.size(-1)
     x = x.view(-1, num_classes)
@@ -38,6 +39,11 @@ def softmax_focal_loss(x, y, reduction='none'):
     ce = F.log_softmax(x, dim=-1)[r, y.clamp_(0)]
     pt = torch.exp(ce)
     weights = (1-pt).pow(gamma)
+
+    # alpha version
+    # p = y > 0
+    # weights = (alpha * p + (1 - alpha) * (1 - p)) * weights.pow(gamma)
+
     loss = -(weights * ce)
     loss[y < 0] = 0
     return reduce(loss, reduction)
@@ -47,7 +53,7 @@ def sigmoid_focal_loss(x, y, reduction='none'):
     ''' sigmoid focal loss
 
     :param x: [N, A, C]
-    :param y: [N, A] (-1: ignore, 0: background, [1,C+1]: classes)
+    :param y: [N, A] (-1: ignore, 0: background, [1,C]: classes)
     :param reduction:
     :return:
     '''
@@ -77,7 +83,7 @@ def sigmoid_focal_loss(x, y, reduction='none'):
     return loss
 
 
-def ohem_loss(cls_preds, cls_targets, pos, batchsize):
+def softmax_ohem_loss(cls_preds, cls_targets, pos, batchsize):
     ''' hard-negative mining
 
     :param cls_preds:
