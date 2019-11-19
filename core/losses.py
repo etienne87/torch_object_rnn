@@ -104,11 +104,25 @@ def softmax_ohem_loss(cls_preds, cls_targets, pos, batchsize):
     return cls_loss
 
 
+def smooth_l1_loss(pred, target, beta=0.11, reduction='sum'):
+    """ smooth l1 loss
+
+    :param pred: positive anchors predictions
+    :param target: positive anchors targets
+    :param beta: limit between l2 and l1 behavior
+    """
+    x = (pred - target).abs()
+    l1 = x - 0.5 * beta
+    l2 = 0.5 * x ** 2 / beta
+    reg_loss = torch.where(x >= beta, l1, l2)
+    return reduce(reg_loss, reduction)
+
 
 class DetectionLoss(nn.Module):
     def __init__(self, cls_loss_func='softmax_focal_loss'):
         super(DetectionLoss, self).__init__()
         self.cls_loss_func = getattr(sys.modules[__name__], cls_loss_func)
+        self.reg_loss_func = smooth_l1_loss # can use F.smooth_l1_loss instead
 
     def forward(self, loc_preds, loc_targets, cls_preds, cls_targets):
         pos = cls_targets > 0
@@ -116,6 +130,5 @@ class DetectionLoss(nn.Module):
         cls_loss = self.cls_loss_func(cls_preds, cls_targets, 'sum') / num_pos
 
         mask = pos.unsqueeze(2).expand_as(loc_preds)  # [N,#anchors,4]
-        loc_loss = F.smooth_l1_loss(loc_preds[mask], loc_targets[mask], reduction='sum') / num_pos
-
+        loc_loss = self.reg_loss_func(loc_preds[mask], loc_targets[mask], reduction='sum') / num_pos
         return loc_loss, cls_loss
