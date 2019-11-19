@@ -342,6 +342,8 @@ class PlanarVoyage(object):
         self.rvec_speed = np.random.choice([1e-1,1e-2,1e-3])
         self.tvec_speed = np.random.choice([1e-1, 1e-2, 1e-3])
 
+        self.rvec_amp[2] = 0.0
+
         self.tshift = np.random.randn(3)
         self.rshift = np.random.randn(3)
         self.d = 1
@@ -356,6 +358,34 @@ class PlanarVoyage(object):
         G_0to2 /= G_0to2[2,2]
         self.time += 1
         return G_0to2
+
+
+def wrap_boxes(boxes, height, width):
+    """repeats boxes in 8 cells around the image
+    """
+    allbox = [boxes]
+    for y in [-height, 0, height]:
+        for x in [-width, 0, width]:
+            if x == 0 and y == 0:
+                continue
+            shift = boxes.copy()
+            shift[:, [0, 2]] += x
+            shift[:, [1, 3]] += y
+            allbox.append(shift)
+    return np.concatenate(allbox, 0)
+
+
+def clamp_boxes(boxes, height, width):
+    boxes[:, [0, 2]] = np.maximum(np.minimum(boxes[:, [0, 2]], width), 0)
+    boxes[:, [1, 3]] = np.maximum(np.minimum(boxes[:, [1, 3]], height), 0)
+    return boxes
+
+
+def discard_too_small(boxes, min_size=30):
+    w = boxes[:, 2] - boxes[:, 0]
+    h = boxes[:, 3] - boxes[:, 1]
+    ids = np.where((w > min_size)*(h > min_size))
+    return boxes[ids]
 
 
 def point_list_toboxes(pts):
