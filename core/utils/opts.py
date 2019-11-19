@@ -65,79 +65,25 @@ def cuda_time(func):
         return out
     return wrapper
 
-
-class BatchRenorm(nn.Module):
-    r"""
-    BatchRenorm
-    https://papers.nips.cc/paper/6790-batch-renormalization-towards-reducing-minibatch-dependence-in-batch-normalized-models.pdf
+class WrapperSingleAllocation(object):
+    """ Receives batch from dataloader
+        Applies list of functions at the batch level
     """
-    def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True):
-        super(BatchRenorm, self).__init__()
-        self.num_features = num_features
-        self.affine = affine
-        self.eps = eps
-        self.momentum = momentum
-        if self.affine:
-            self.weight = nn.Parameter(torch.FloatTensor(1,num_features,1,1))
-            self.bias = nn.Parameter(torch.FloatTensor(1,num_features,1,1))
-        else:
-            self.register_parameter('weight', None)
-            self.register_parameter('bias', None)
+    def __init__(self, dataloader, storage_size, dtype=torch.float32):
+        self.storage = torch.Tensor(storage_size).cuda().fill_(0)
+        self.dataloader = dataloader
+        self.dataset = self.dataloader.dataset #short-cut
 
-        self.register_buffer('running_mean', torch.zeros(1,num_features,1,1))
-        self.register_buffer('running_var', torch.ones(1,num_features,1,1))
-        self.reset_parameters()
-        self.rmax = 1
-        self.dmax = 0
-
-    def reset_parameters(self):
-        self.running_mean.zero_()
-        self.running_var.fill_(1)
-        if self.affine:
-            self.weight.data.uniform_()
-            self.bias.data.zero_()
-        self.rmax = 1
-        self.dmax = 0
-
-    def forward(self, input_):
-        x = input_.permute(0, 2, 3, 1).contiguous().view(-1, self.num_features)
-        mean = x.mean(dim=0)[None,:,None,None]
-        var = x.var(dim=0)[None,:,None,None] + self.eps
-        std = torch.sqrt(var)
-        y = (input_ - mean)/std
-
-        r = (mean / self.running_mean).data.clamp_(1./self.rmax, self.rmax)
-        d = torch.sqrt(var / self.running_var).data.clamp_(-self.dmax, self.dmax)
-        out = y * r * self.weight + d + self.bias
-
-        self.running_mean += self.momentum * (self.running_mean - mean)
-        self.running_var += self.momentum * (self.running_var - var)
-
-        self.rmax += 1e-3
-        self.dmax += 1e-3
-        return out
-
-    def __repr__(self):
-        return ('{name}({num_features}, eps={eps}, momentum={momentum},'
-                ' max_length={max_length}, affine={affine})'
-            .format(name=self.__class__.__name__, **self.__dict__))
-
-
-class CosineConv2d(nn.Conv2d):
-    """Drop-in Replace Conv+BN, but is quite costly"""
-    def __init__(self, *args, **kwargs):
-        super(CosineConv2d, self).__init__(*args, **kwargs)
-
-        self.factor = self.in_channels * self.kernel_size[0]**2
-        self.register_buffer('avg',
-                             torch.ones((1, self.in_channels, self.kernel_size[0], self.kernel_size[0]),
-                                        dtype=torch.float32)/self.factor)
-        self.eps = 1e-8
-
-    def forward(self, x):
-        y = F.conv2d(x, self.weight, None, self.stride, self.padding, self.dilation, self.groups)
-
-        wn = self.weight.view(self.out_channels, -1).norm(p=2, dim=1, keepdim=True)
-        xn = F.conv2d(x**2, self.avg, None, self.stride, self.padding, self.dilation, 1)
-        xn = F.relu(wn[None,:,:,None] * torch.sqrt(xn) - self.eps)
-        return F.leaky_relu(y / xn)
+    def __len__(self):
+        return len(self.dataloader)
+    
+    def __iter__(self):
+        for data in self.dataloader:
+            data_tensor_cpu = data['data']
+            shape = data_tensor_cpu.size()
+            stride = data_tensor_cpu.stride()
+            y = torch.Tensor().cuda()
+            y.set_(self.storage.storage(), storage_offset=0, size=shape, stride=stride)
+            y[...] = data_tensor_cpu
+            data['data'] = y
+            yield data  

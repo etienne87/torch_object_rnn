@@ -195,7 +195,7 @@ class DetTrainer(object):
         
         for period, data in tqdm(enumerate(dataloader), total=args.test_iter):
             inputs, targets, reset = data['data'], data['boxes'], data['resets']
-            images = inputs.clone().data.numpy()
+            images = inputs.cpu().clone().data.numpy()
 
             if args.cuda:
                 inputs = inputs.cuda()

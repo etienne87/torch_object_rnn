@@ -84,7 +84,7 @@ def main():
     args.width = 256
 
     coco_path = '/home/etienneperot/workspace/data/coco/'
-    # coco_path = '/home/prophesee/work/etienne/datasets/coco/'
+    coco_path = '/home/prophesee/work/etienne/datasets/coco/'
     # Dataset
     print('==> Preparing dataset..')
 

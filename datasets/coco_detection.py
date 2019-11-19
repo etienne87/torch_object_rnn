@@ -13,7 +13,7 @@ from torchvision import transforms
 from torch.utils.data.sampler import Sampler
 from datasets.coco_wrapper import COCO2 as COCO 
 
-from core.utils import vis
+from core.utils import vis, opts
 import cv2
 
 
@@ -158,7 +158,7 @@ def collater(data):
 
 class Resizer(object):
     """Convert ndarrays in sample to Tensors."""
-    def __init__(self, min_side=320, max_side=512, fixed_size=True):
+    def __init__(self, fixed_size=True, min_side=320, max_side=512):
         self.min_side = min_side
         self.max_side = max_side
         self.fixed_size = fixed_size
@@ -286,6 +286,7 @@ class AspectRatioBasedSampler(Sampler):
         return [[order[x % len(order)] for x in range(i, i + self.batch_size)] for i in
                 range(0, len(order), self.batch_size)]
 
+  
 
 def draw_caption(image, box, caption):
     b = np.array(box).astype(int)
@@ -309,7 +310,7 @@ def viz_batch(data, unnormalize, labelmap, label_offset=1):
         cv2.waitKey(0)
 
 
-def make_coco_dataset(root_dir, batchsize, num_workers, fixed_size=True):
+def make_coco_dataset(root_dir, batchsize, num_workers, fixed_size=False):
     dataset_train = CocoDataset(root_dir, set_name='train2017', transform=transforms.Compose([
         Normalizer(), Flipper(), Resizer(fixed_size=fixed_size)]))
     dataset_val = CocoDataset(root_dir, set_name='val2017',
@@ -322,6 +323,10 @@ def make_coco_dataset(root_dir, batchsize, num_workers, fixed_size=True):
     val_sampler = AspectRatioBasedSampler(dataset_val, batch_size=batchsize, drop_last=False)
     val_loader = DataLoader(dataset_val, num_workers=num_workers,
                             collate_fn=collater, batch_sampler=val_sampler, pin_memory=True)
+
+    # ensure preallocated cuda memory
+    train_loader = opts.WrapperSingleAllocation(train_loader, storage_size=batchsize*3*512*512)
+    val_loader = opts.WrapperSingleAllocation(val_loader, storage_size=batchsize*3*512*512)                       
     return train_loader, val_loader, len(dataset_train.labels)
 
 
@@ -329,30 +334,32 @@ if __name__ == '__main__':
     import time
 
     coco_path = '/home/etienneperot/workspace/data/coco/'
-    # coco_path = '/home/prophesee/work/etienne/datasets/coco/'
+    coco_path = '/home/prophesee/work/etienne/datasets/coco/'
 
     dataset_train = CocoDataset(coco_path, set_name='train2017',
                                 transform=transforms.Compose([
                                 Normalizer(), 
-                                Resizer()]))
+                                Resizer(fixed_size=False, max_side=512)]))
 
     # for i in range(118000, len(dataset_train)):
     #     print('i: ', i, '/', len(dataset_train), len(dataset_train.image_ids))
     #     _ = dataset_train[i]
 
-    sampler = AspectRatioBasedSampler(dataset_train, batch_size=64, drop_last=False)
+    sampler = AspectRatioBasedSampler(dataset_train, batch_size=16, drop_last=False)
     loader = torch.utils.data.DataLoader(dataset_train, num_workers=0,
-                                         collate_fn=collater, batch_sampler=sampler, pin_memory=False)
+                                         collate_fn=collater, batch_sampler=sampler, pin_memory=True)
 
+
+    superloader = WrapperSingleAllocation(loader, 16*3*512*512)
     # for i, data in enumerate(loader):
     #     print(i,'/',len(loader))
 
     unnormalize = UnNormalizer()
 
     start = time.time()
-    for data in loader:
+    for data in superloader:
 
-        data = {'img':data['data'][0], 'annot':data['boxes'][0]}
+        data = {'img':data['data'][0].cpu(), 'annot':data['boxes'][0]}
 
         end = time.time()
         print(end - start, ' time loading')
