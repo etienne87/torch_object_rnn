@@ -83,7 +83,7 @@ def sigmoid_focal_loss(x, y, reduction='none'):
     return loss
 
 
-def softmax_ohem_loss(cls_preds, cls_targets, pos, batchsize):
+def softmax_ohem_loss(cls_preds, cls_targets, reduction='none'):
     ''' hard-negative mining
 
     :param cls_preds:
@@ -91,6 +91,8 @@ def softmax_ohem_loss(cls_preds, cls_targets, pos, batchsize):
     :param neg:
     :return:
     '''
+    pos = cls_targets > 0
+    batchsize = cls_preds.shape[0]
     cls_loss = F.cross_entropy(cls_preds.view(-1, cls_preds.size(-1)),
                                cls_targets.view(-1), ignore_index=-1, reduction='none')
     cls_loss = cls_loss.view(batchsize, -1)
@@ -100,7 +102,7 @@ def softmax_ohem_loss(cls_preds, cls_targets, pos, batchsize):
     _, rank = idx.sort(1)  # [N,#anchors]
     num_neg = 3 * pos.sum(1)  # [N,]
     neg = rank < num_neg[:, None]
-    cls_loss = cls_loss[pos | neg].sum()
+    cls_loss = reduce(cls_loss[pos | neg], reduction)
     return cls_loss
 
 
