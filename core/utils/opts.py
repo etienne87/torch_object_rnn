@@ -69,7 +69,7 @@ class WrapperSingleAllocation(object):
     """ Receives batch from dataloader
         Applies list of functions at the batch level
     """
-    def __init__(self, dataloader, storage_size, dtype=torch.float32):
+    def __init__(self, dataloader, storage_size):
         self.storage = torch.Tensor(storage_size).cuda().fill_(0)
         self.dataloader = dataloader
         self.dataset = self.dataloader.dataset #short-cut

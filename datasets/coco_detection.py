@@ -13,7 +13,7 @@ from torchvision import transforms
 from torch.utils.data.sampler import Sampler
 from datasets.coco_wrapper import COCO2 as COCO 
 
-from core.utils import vis, opts
+from core.utils import vis, opts, image as imutil
 import cv2
 
 
@@ -143,7 +143,8 @@ def collater(data):
 
     for i in range(batch_size):
         img = imgs[i]
-        padded_imgs[i, :int(img.shape[0]), :int(img.shape[1]), :] = img
+        padded_imgs[i, :int(img.shape[0]), :int(img.shape[1]), :] = torch.from_numpy(img)
+        annots[i] = torch.from_numpy(annots[i])
 
     padded_imgs = padded_imgs.permute(0, 3, 1, 2)
 
@@ -156,9 +157,45 @@ def collater(data):
     return out
 
 
+class CameraMotion(object):
+    """Simulate a camera motion in front of the image plane"""
+    def __init__(self, max_time=1):
+        self.max_time = max_time
+        self.border_mode = cv2.BORDER_WRAP
+
+    def __call__(self, sample):
+        image = sample['img']
+        boxes = sample['annot']
+
+        height, width = image.shape[:2]
+        voyage = imutil.PlanarVoyage(height, width)
+
+        if self.border_mode == cv2.BORDER_WRAP:
+            boxes = imutil.wrap_boxes(boxes, height, width)
+
+        imseq = []
+        boxseq = []
+        for _ in range(self.max_time):
+            G_0to2 = voyage()
+            out = cv2.warpPerspective(image, G_0to2, dsize=(width, height), borderMode=self.border_mode)
+            labels = boxes[:, 4:5]
+            tboxes = imutil.cv2_apply_transform_boxes(boxes[:, :4], G_0to2)
+            tboxes = imutil.clamp_boxes(tboxes, height, width)
+            tboxes = np.concatenate([tboxes, labels], 1)
+            tboxes = imutil.discard_too_small(tboxes, 10)
+            imseq.append(out[None])
+            boxseq.append(tboxes)
+
+        if self.max_time == 1:
+            sample['img'] = imseq[0][0]
+            sample['annot'] = boxseq[0]
+        return sample
+    
+
+
 class Resizer(object):
     """Convert ndarrays in sample to Tensors."""
-    def __init__(self, fixed_size=True, min_side=320, max_side=512):
+    def __init__(self, fixed_size=True, min_side=512, max_side=768):
         self.min_side = min_side
         self.max_side = max_side
         self.fixed_size = fixed_size
@@ -196,7 +233,7 @@ class Resizer(object):
 
         annots[:, :4] *= scale
 
-        return {'img': torch.from_numpy(new_image), 'annot': torch.from_numpy(annots), 
+        return {'img': new_image, 'annot': annots, 
         'scale': scale, 'idx': sample['idx']}
 
 
@@ -295,7 +332,7 @@ def draw_caption(image, box, caption):
 
 
 def viz_batch(data, unnormalize, labelmap, label_offset=1):
-    print(data['img'].shape[-2:])
+    print('resolution: ', data['img'].shape[-2:])
     for i in range(data['img'].shape[0]):
         img = np.array(255 * unnormalize(data['img'][i, :, :, :])).copy()
         img[img < 0] = 0
@@ -335,31 +372,28 @@ if __name__ == '__main__':
 
     coco_path = '/home/etienneperot/workspace/data/coco/'
     coco_path = '/home/prophesee/work/etienne/datasets/coco/'
-
+    max_side = 768
+    
     dataset_train = CocoDataset(coco_path, set_name='train2017',
                                 transform=transforms.Compose([
                                 Normalizer(), 
-                                Resizer(fixed_size=False, max_side=512)]))
-
-    # for i in range(118000, len(dataset_train)):
-    #     print('i: ', i, '/', len(dataset_train), len(dataset_train.image_ids))
-    #     _ = dataset_train[i]
+                                Resizer(fixed_size=False, max_side=max_side),
+                                CameraMotion()
+                                ]))
 
     sampler = AspectRatioBasedSampler(dataset_train, batch_size=16, drop_last=False)
     loader = torch.utils.data.DataLoader(dataset_train, num_workers=0,
                                          collate_fn=collater, batch_sampler=sampler, pin_memory=True)
 
-
-    superloader = WrapperSingleAllocation(loader, 16*3*512*512)
-    # for i, data in enumerate(loader):
-    #     print(i,'/',len(loader))
-
+    superloader = opts.WrapperSingleAllocation(loader, 16*3*max_side*max_side)
+   
     unnormalize = UnNormalizer()
 
     start = time.time()
     for data in superloader:
 
         data = {'img':data['data'][0].cpu(), 'annot':data['boxes'][0]}
+        
 
         end = time.time()
         print(end - start, ' time loading')
