@@ -151,7 +151,7 @@ class DetTrainer(object):
         #compute actual mean_ap of coco
         mean_ap_levels = [map_50]
         for iou_threshold in np.linspace(0.55, 0.95, 9).tolist():
-            mean_ap_level, eval_results = mean_ap.eval_map(det_results,
+            mean_ap_level, _ = mean_ap.eval_map(det_results,
                                                 gt_bboxes,
                                                 gt_labels,
                                                 gt_ignore=None,
