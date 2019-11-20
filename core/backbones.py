@@ -89,14 +89,17 @@ from core.fpn import FeaturePyramidNetwork
 
 
 class BackboneWithFPN(nn.Module):
-    def __init__(self, backbone, out_channels=256):
+    def __init__(self, backbone, out_channels=256, no_fpn=False):
         super(BackboneWithFPN, self).__init__()
         self.base = 16
         self.bb = backbone
         self.p6 = ConvLayer(self.bb.out_channel_list[-1], out_channels, stride=2)
         self.p7 = ConvLayer(out_channels, out_channels, stride=2)
         out_channel_list = self.bb.out_channel_list + [out_channels, out_channels]
-        self.neck = FeaturePyramidNetwork(out_channel_list, out_channels)
+        if no_fpn:
+            self.neck = lambda x: x
+        else:
+            self.neck = FeaturePyramidNetwork(out_channel_list, out_channels)
         self.levels = 5
         self.cout = out_channels
 

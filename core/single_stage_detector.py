@@ -9,7 +9,7 @@ import torch.nn as nn
 from core.losses import DetectionLoss
 from core.backbones import FPN, MobileNetFPN, ResNet50FPN
 from core.anchors import Anchors
-from core.rpn import BoxHead
+from core.rpn import BoxHead, SSDBoxHead
 
 
 
@@ -19,7 +19,9 @@ class SingleStageDetector(nn.Module):
                  num_classes=2,  
                  act='sigmoid', 
                  ratios=[0.5,1.0,2.0], 
-                 scales=[1.0,2**1./3,2**2./3], nlayers=3):
+                 scales=[1.0,2**1./3,2**2./3], 
+                 nlayers=3,
+                 loss='_focal_loss'):
         super(SingleStageDetector, self).__init__()
         self.label_offset = 1 * (act=='softmax')
         self.num_classes = num_classes
@@ -37,7 +39,7 @@ class SingleStageDetector(nn.Module):
 
         self.rpn = rpn(self.feature_extractor.cout, self.box_coder.num_anchors, self.num_classes + self.label_offset, act, nlayers)
 
-        self.criterion = DetectionLoss(act + '_focal_loss')
+        self.criterion = DetectionLoss(act + loss) 
 
     def reset(self):
         self.feature_extractor.reset()
@@ -79,3 +81,9 @@ class SingleStageDetector(nn.Module):
     @classmethod
     def resnet50_fpn(cls, in_channels, num_classes, act='sigmoid'):
         return cls(ResNet50FPN, BoxHead, in_channels, num_classes, act)
+
+    @classmethod
+    def resnet50_ssd(cls, in_channels, num_classes, act='softmax', loss='_ohem_loss'):
+        backbone = lambda x: ResNet50FPN(x, no_fpn=True)
+        return cls(backbone, SSDBoxHead, in_channels, num_classes, act, 
+                    ratios=[1./3, 1./2, 1, 2, 3], scales=[1.0,1.5])

@@ -27,20 +27,6 @@ class DetTrainer(object):
     def __del__(self):
         self.writer.close()
 
-    def _progressive_resize(self, epoch, net, train_dataset, test_dataset):
-        if epoch < 4:
-            size = 128
-        elif epoch < 11:
-            size = 256
-        else:
-            size = 512
-
-        train_dataset.resize(size, size)
-        test_dataset.resize(size, size)
-        net.resize(size, size)
-        net.box_coder.cuda()
-        print('size: ', size)
-
     def train(self, epoch, dataloader, args):
         print('\nEpoch: %d (train)' % epoch)
         self.net.train()

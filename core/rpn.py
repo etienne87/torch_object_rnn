@@ -82,3 +82,45 @@ class BoxHead(nn.Module):
                 cls_preds = torch.sigmoid(cls_preds)
 
         return loc_preds, cls_preds
+
+
+class SSDBoxHead(BoxHead):
+    def __init__(self, in_channels_list, num_anchors, num_classes, act='sigmoid'):
+        super(SSDBoxHead, self).__init__()
+        self.num_classes = num_classes
+        self.num_anchors = num_anchors
+
+        self.aspect_ratios = []
+        self.act = act
+
+        conv_func = lambda x,y: ConvLayer(x, y, norm='none', activation='ReLU')
+        self.loc_head = nn.ModuleList()
+        self.cls_head = nn.ModuleList()
+        for in_channels in in_channels_list:
+            loc_head = self._make_head(in_channels, self.num_anchors * 4, conv_func)
+            cls_head = self._make_head(in_channels, self.num_anchors * self.num_classes, conv_func)
+           
+            torch.nn.init.normal_(loc_head.weight, std=0.01)
+            torch.nn.init.constant_(loc_head.bias, 0)
+            if self.act == 'softmax':
+                self.softmax_init(cls_head)
+            else:
+                self.sigmoid_init(cls_head)
+                
+            self.loc_head.append(loc_head)
+            self.cls_head.append(cls_head)
+        
+    def _make_head(self, in_planes, out_planes, conv_func):
+        return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=1, padding=1)
+
+    def reset(self):
+        self.feature_extractor.reset()
+
+    def _apply_head(self, layers, xs, ndims):
+        out = []
+        for x, layer in zip(xs, layers):
+            y = layer(x).permute(0, 2, 3, 1).contiguous()
+            y = y.view(y.size(0), -1, ndims)
+            out.append(y)
+        out = torch.cat(out, 1)
+        return out
