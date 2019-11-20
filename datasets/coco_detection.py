@@ -195,7 +195,7 @@ class CameraMotion(object):
 
 class Resizer(object):
     """Convert ndarrays in sample to Tensors."""
-    def __init__(self, fixed_size=True, min_side=512, max_side=768):
+    def __init__(self, fixed_size=True, min_side=512, max_side=512):
         self.min_side = min_side
         self.max_side = max_side
         self.fixed_size = fixed_size
@@ -345,6 +345,11 @@ def viz_batch(data, unnormalize, labelmap, label_offset=1):
         img_ann = vis.draw_bboxes(img, bboxes)
         cv2.imshow('im', img_ann)
         cv2.waitKey(0)
+
+    
+def change_resolution(dataloader, size, fixed_size=False):
+    dataloader.dataset.transform = transforms.Compose([
+    Normalizer(), Flipper(), Resizer(min_side=size, max_side=size, fixed_size=fixed_size)])
 
 
 def make_coco_dataset(root_dir, batchsize, num_workers, fixed_size=False):
