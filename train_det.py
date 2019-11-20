@@ -85,6 +85,7 @@ def main():
 
     coco_path = '/home/etienneperot/workspace/data/coco/'
     coco_path = '/home/prophesee/work/etienne/datasets/coco/'
+    coco_path = '/mnt/hdd1/coco/'
     # Dataset
     print('==> Preparing dataset..')
 
@@ -100,13 +101,13 @@ def main():
     print('==> Building model..')
     # net = SingleStageDetector.mobilenet_v2_fpn(cin, classes, act="softmax")
     net = SingleStageDetector.resnet50_fpn(cin, classes, act="softmax")
-
+	
     if args.cuda:
         net.cuda()
         cudnn.benchmark = True
 
 
-    optimizer = optim.Adam(net.parameters(), lr=args.lr, betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-4)
+    optimizer = optim.Adam(net.parameters(), lr=args.lr, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.0001)
 
     start_epoch = 0  # start from epoch 0 or last epoch
     if args.resume:
@@ -129,11 +130,10 @@ def main():
 
     for epoch in range(start_epoch, args.epochs):
         epoch_loss = trainer.train(epoch, train_dataset, args)
-        # mean_ap_50 = trainer.evaluate(epoch, test_dataset, args)
+        mean_ap_50 = trainer.evaluate(epoch, test_dataset, args)
 
         trainer.writer.add_scalar('learning rate', optimizer.param_groups[0]['lr'], epoch)
         # scheduler.step(mean_ap_50)
-
         scheduler.step(np.mean(epoch_loss))
 
         # if epoch%args.test_every == 0:
