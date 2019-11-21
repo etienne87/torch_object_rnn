@@ -124,7 +124,7 @@ class DetectionLoss(nn.Module):
     def __init__(self, cls_loss_func='softmax_focal_loss'):
         super(DetectionLoss, self).__init__()
         self.cls_loss_func = getattr(sys.modules[__name__], cls_loss_func)
-        self.reg_loss_func = smooth_l1_loss # can use F.smooth_l1_loss instead
+        self.reg_loss_func = smooth_l1_loss 
 
     def forward(self, loc_preds, loc_targets, cls_preds, cls_targets):
         pos = cls_targets > 0

@@ -132,6 +132,14 @@ class ResNet50FPN(BackboneWithFPN):
         )
 
 
+class ResNet50SSD(BackboneWithFPN):
+    def __init__(self, in_channels=3, out_channels=256):
+        super(ResNet50SSD, self).__init__(
+            pbb.resnet50(in_channels, True, frozen_stages=1, norm_eval=True),
+            no_fpn=True
+        )
+
+
 if __name__ == '__main__':
     t, n, c, h, w = 10, 3, 3, 128, 128
     x = torch.rand(t, n, c, h, w)

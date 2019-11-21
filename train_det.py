@@ -100,8 +100,8 @@ def main():
     # Model
     print('==> Building model..')
     # net = SingleStageDetector.mobilenet_v2_fpn(cin, classes, act="softmax")
-    net = SingleStageDetector.resnet50_fpn(cin, classes, act="softmax")
-	
+    net = SingleStageDetector.resnet50_fpn(cin, classes, act="softmax", loss='_ohem_loss')
+
     if args.cuda:
         net.cuda()
         cudnn.benchmark = True

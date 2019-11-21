@@ -32,6 +32,7 @@ class SingleStageDetector(nn.Module):
         self.box_coder = Anchors(pyramid_levels=[i for i in range(3,3+self.feature_extractor.levels)],
                                  scales=scales,
                                  ratios=ratios,
+                                 allow_low_quality_matches=True,
                                  fg_iou_threshold=0.5, bg_iou_threshold=0.4)
 
         self.num_anchors = self.box_coder.num_anchors
@@ -71,19 +72,19 @@ class SingleStageDetector(nn.Module):
         return targets
 
     @classmethod
-    def tiny_rnn_fpn(cls, in_channels, num_classes, act='sigmoid'):
+    def tiny_rnn_fpn(cls, in_channels, num_classes, act='sigmoid', loss='_focal_loss'):
         return cls(FPN, BoxHead, in_channels, num_classes, act, ratios=[1.0], scales=[1.0, 1.5])
 
     @classmethod
-    def mobilenet_v2_fpn(cls, in_channels, num_classes, act='sigmoid'):
+    def mobilenet_v2_fpn(cls, in_channels, num_classes, act='sigmoid', loss='_focal_loss'):
         return cls(MobileNetFPN, BoxHead, in_channels, num_classes, act)
 
     @classmethod
-    def resnet50_fpn(cls, in_channels, num_classes, act='sigmoid'):
+    def resnet50_fpn(cls, in_channels, num_classes, act='sigmoid', loss='_focal_loss'):
         return cls(ResNet50FPN, BoxHead, in_channels, num_classes, act)
 
     @classmethod
     def resnet50_ssd(cls, in_channels, num_classes, act='softmax', loss='_ohem_loss'):
-        backbone = lambda x: ResNet50FPN(x, no_fpn=True)
+        backbone = lambda x: ResNet50SSD(x)
         return cls(backbone, SSDBoxHead, in_channels, num_classes, act, 
                     ratios=[1./3, 1./2, 1, 2, 3], scales=[1.0,1.5])

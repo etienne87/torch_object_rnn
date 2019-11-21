@@ -352,7 +352,7 @@ def change_resolution(dataloader, size, fixed_size=False):
     Normalizer(), Flipper(), Resizer(min_side=size, max_side=size, fixed_size=fixed_size)])
 
 
-def make_coco_dataset(root_dir, batchsize, num_workers, fixed_size=False):
+def make_coco_dataset(root_dir, batchsize, num_workers, fixed_size=True):
     dataset_train = CocoDataset(root_dir, set_name='train2017', transform=transforms.Compose([
         Normalizer(), Flipper(), Resizer(fixed_size=fixed_size)]))
     dataset_val = CocoDataset(root_dir, set_name='val2017',
@@ -367,8 +367,8 @@ def make_coco_dataset(root_dir, batchsize, num_workers, fixed_size=False):
                             collate_fn=collater, batch_sampler=val_sampler, pin_memory=True)
 
     # ensure preallocated cuda memory
-    train_loader = opts.WrapperSingleAllocation(train_loader, storage_size=batchsize*3*512*512)
-    val_loader = opts.WrapperSingleAllocation(val_loader, storage_size=batchsize*3*512*512)                       
+    # train_loader = opts.WrapperSingleAllocation(train_loader, storage_size=batchsize*3*512*512)
+    # val_loader = opts.WrapperSingleAllocation(val_loader, storage_size=batchsize*3*512*512)                   
     return train_loader, val_loader, len(dataset_train.labels)
 
 
