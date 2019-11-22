@@ -11,6 +11,7 @@ from torchvision import datasets, transforms
 
 from core.utils import opts
 import datasets.moving_box_detection as toy
+from functools import partial
 
 
 TRAIN_DATASET = datasets.MNIST('../data', train=True, download=True,
@@ -71,6 +72,7 @@ class MovingMnistDataset(toy.SquaresVideos):
                                                 normalize, max_stops, max_objects,
                                                 max_classes, 'none', True)
         self.labelmap = [str(i) for i in range(10)]
+        self.label_offset = 1
 
     def build(self):
         num_sets = max(1, self.num_batches // self.max_consecutive_batches)
