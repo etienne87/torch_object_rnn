@@ -127,6 +127,7 @@ class CocoDataset(Dataset):
 
 
 def collater(data):
+    """collate images"""
     imgs = [s['img'] for s in data]
     annots = [s['annot'] for s in data]
     scales = [s['scale'] for s in data]
@@ -157,8 +158,42 @@ def collater(data):
     return out
 
 
+def video_collater(data):
+    """collate videos of different sizes"""
+    videos = [torch.from_numpy(s['img']).permute(0, 3, 1, 2) for s in data]
+    batch_size = len(data)
+    tbins = videos[0].shape[0]
+    
+    annots = [[torch.from_numpy(s['annot'][t]) for s in data] for t in range(tbins)]
+
+    scales = [s['scale'] for s in data]
+    indices = [s['idx'] for s in data]
+
+    widths = [int(s.shape[-1]) for s in videos]
+    heights = [int(s.shape[-2]) for s in videos]
+
+    max_width = np.array(widths).max()
+    max_height = np.array(heights).max()
+
+    padded_videos = torch.zeros(tbins, batch_size, 3, max_height, max_width)
+
+    for i in range(batch_size):
+        height, width = heights[i], widths[i]
+        padded_videos[:, i, :, :height, :width] = videos[i]
+   
+    out = {'data':padded_videos, 
+           'boxes': annots, 
+           'resets': 1, 
+           'indices': indices,
+           'scales':  scales
+           }
+    return out
+    
+
 class CameraMotion(object):
-    """Simulate a camera motion in front of the image plane"""
+    """Simulate a camera motion in front of the image plane
+       This Allows to make a fake video
+    """
     def __init__(self, max_time=1):
         self.max_time = max_time
         self.border_mode = cv2.BORDER_WRAP
@@ -189,6 +224,9 @@ class CameraMotion(object):
         if self.max_time == 1:
             sample['img'] = imseq[0][0]
             sample['annot'] = boxseq[0]
+        else:
+            sample['img'] = np.concatenate(imseq)
+            sample['annot'] = boxseq
         return sample
     
 
@@ -346,13 +384,31 @@ def viz_batch(data, unnormalize, labelmap, label_offset=1):
         cv2.imshow('im', img_ann)
         cv2.waitKey(0)
 
+
+def viz_batch_video(data, unnormalize, labelmap, label_offset=1):
+    data['data'] = data['data'].cpu()
+    print('resolution: ', data['data'].shape[-2:])
+    for i in range(data['data'].shape[1]):
+        for t in range(data['data'].shape[0]):
+            img = data['data'][t, i, :, :, :]
+            img = np.array(255 * unnormalize(img)).copy()
+            img[img < 0] = 0
+            img[img > 255] = 255
+            img = np.transpose(img, (1, 2, 0))
+            img = img.astype(np.uint8)
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            boxes = data['boxes'][t][i].cpu().numpy().astype(np.int32)
+            bboxes = vis.boxarray_to_boxes(boxes, boxes[:, -1] - label_offset, labelmap)
+            img_ann = vis.draw_bboxes(img, bboxes)
+            cv2.imshow('im', img_ann)
+            cv2.waitKey(0)
     
 def change_resolution(dataloader, size, fixed_size=False):
     dataloader.dataset.transform = transforms.Compose([
     Normalizer(), Flipper(), Resizer(min_side=size, max_side=size, fixed_size=fixed_size)])
 
 
-def make_coco_dataset(root_dir, batchsize, num_workers, fixed_size=True):
+def make_still_coco(root_dir, batchsize, num_workers, fixed_size=True):
     dataset_train = CocoDataset(root_dir, set_name='train2017', transform=transforms.Compose([
         Normalizer(), Flipper(), Resizer(fixed_size=fixed_size)]))
     dataset_val = CocoDataset(root_dir, set_name='val2017',
@@ -372,23 +428,40 @@ def make_coco_dataset(root_dir, batchsize, num_workers, fixed_size=True):
     return train_loader, val_loader, len(dataset_train.labels)
 
 
+def make_moving_coco(root_dir, batchsize, num_workers, fixed_size=True):
+    dataset_train = CocoDataset(root_dir, set_name='train2017', transform=transforms.Compose([
+        Normalizer(), Flipper(), Resizer(fixed_size=fixed_size), CameraMotion(10)]))
+    dataset_val = CocoDataset(root_dir, set_name='val2017',
+                              transform=transforms.Compose([Normalizer(), Resizer(fixed_size=fixed_size)]))
+
+    train_sampler = AspectRatioBasedSampler(dataset_train, batch_size=batchsize, drop_last=False)
+    train_loader = DataLoader(dataset_train, num_workers=num_workers,
+                              collate_fn=video_collater, batch_sampler=train_sampler, pin_memory=True)
+
+    val_sampler = AspectRatioBasedSampler(dataset_val, batch_size=batchsize, drop_last=False)
+    val_loader = DataLoader(dataset_val, num_workers=num_workers,
+                            collate_fn=video_collater, batch_sampler=val_sampler, pin_memory=True)
+                
+    return train_loader, val_loader, len(dataset_train.labels)
+
+
 if __name__ == '__main__':
     import time
 
     coco_path = '/home/etienneperot/workspace/data/coco/'
-    coco_path = '/home/prophesee/work/etienne/datasets/coco/'
+    # coco_path = '/home/prophesee/work/etienne/datasets/coco/'
     max_side = 768
     
     dataset_train = CocoDataset(coco_path, set_name='train2017',
                                 transform=transforms.Compose([
                                 Normalizer(), 
                                 Resizer(fixed_size=False, max_side=max_side),
-                                CameraMotion()
+                                CameraMotion(10)
                                 ]))
 
     sampler = AspectRatioBasedSampler(dataset_train, batch_size=16, drop_last=False)
     loader = torch.utils.data.DataLoader(dataset_train, num_workers=0,
-                                         collate_fn=collater, batch_sampler=sampler, pin_memory=True)
+                                         collate_fn=video_collater, batch_sampler=sampler, pin_memory=True)
 
     superloader = opts.WrapperSingleAllocation(loader, 16*3*max_side*max_side)
    
@@ -397,14 +470,14 @@ if __name__ == '__main__':
     start = time.time()
     for data in superloader:
 
-        data = {'img':data['data'][0].cpu(), 'annot':data['boxes'][0]}
+        # data = {'img':data['data'][0].cpu(), 'annot':data['boxes'][0]}
         
 
         end = time.time()
         print(end - start, ' time loading')
 
-        print(data['img'].shape)
-        viz_batch(data, unnormalize, dataset_train.labels)
+        # print(data['img'].shape)
+        viz_batch_video(data, unnormalize, dataset_train.labels)
 
         start = time.time()
         print(start - end, ' time showing')
