@@ -9,7 +9,7 @@ import torch.nn as nn
 from core.losses import DetectionLoss
 from core.backbones import FPN, MobileNetFPN, ResNet50FPN
 from core.anchors import Anchors
-from core.rpn import BoxHead, SSDBoxHead
+from core.rpn import BoxHead
 
 
 
@@ -73,18 +73,12 @@ class SingleStageDetector(nn.Module):
 
     @classmethod
     def tiny_rnn_fpn(cls, in_channels, num_classes, act='sigmoid', loss='_focal_loss'):
-        return cls(FPN, BoxHead, in_channels, num_classes, act, ratios=[1.0], scales=[1.0, 1.5])
+        return cls(FPN, BoxHead, in_channels, num_classes, act, ratios=[1.0], scales=[1.0, 1.5], loss=loss)
 
     @classmethod
     def mobilenet_v2_fpn(cls, in_channels, num_classes, act='sigmoid', loss='_focal_loss'):
-        return cls(MobileNetFPN, BoxHead, in_channels, num_classes, act)
+        return cls(MobileNetFPN, BoxHead, in_channels, num_classes, act, loss=loss)
 
     @classmethod
     def resnet50_fpn(cls, in_channels, num_classes, act='sigmoid', loss='_focal_loss'):
-        return cls(ResNet50FPN, BoxHead, in_channels, num_classes, act)
-
-    @classmethod
-    def resnet50_ssd(cls, in_channels, num_classes, act='softmax', loss='_ohem_loss'):
-        backbone = lambda x: ResNet50SSD(x)
-        return cls(backbone, SSDBoxHead, in_channels, num_classes, act, 
-                    ratios=[1./3, 1./2, 1, 2, 3], scales=[1.0,1.5])
+        return cls(ResNet50FPN, BoxHead, in_channels, num_classes, act, loss=loss)
