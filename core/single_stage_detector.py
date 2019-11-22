@@ -20,7 +20,7 @@ class SingleStageDetector(nn.Module):
                  act='sigmoid', 
                  ratios=[0.5,1.0,2.0], 
                  scales=[1.0,2**1./3,2**2./3], 
-                 nlayers=3,
+                 nlayers=0,
                  loss='_focal_loss'):
         super(SingleStageDetector, self).__init__()
         self.label_offset = 1 * (act=='softmax')

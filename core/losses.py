@@ -125,6 +125,7 @@ class DetectionLoss(nn.Module):
         super(DetectionLoss, self).__init__()
         self.cls_loss_func = getattr(sys.modules[__name__], cls_loss_func)
         self.reg_loss_func = smooth_l1_loss 
+        print('cls function: ', self.cls_loss_func)
 
     def forward(self, loc_preds, loc_targets, cls_preds, cls_targets):
         pos = cls_targets > 0

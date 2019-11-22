@@ -81,6 +81,20 @@ class MovingMnistDataset(toy.SquaresVideos):
                            for _ in range(num_sets)]
 
 
+def make_moving_mnist(args):
+    # won't work with several workers
+    datafunc = partial(torch.utils.data.DataLoader, batch_size=args.batchsize, num_workers=0,
+                       shuffle=False, collate_fn=opts.video_collate_fn_with_reset_info, pin_memory=True)
+    train_dataset = MovingMnistDataset(args.batchsize,
+                                       args.time, args.height, args.width, 3, train=True, max_objects=5)
+    test_dataset = MovingMnistDataset(args.batchsize,
+                                      args.time, args.height, args.width, 3, train=False, max_objects=5)
+    train_dataset.num_batches = args.train_iter
+    test_dataset.num_batches = args.test_iter
+    train_dataset = datafunc(train_dataset)
+    test_dataset = datafunc(test_dataset)
+    classes = 10
+    return train_dataset, test_dataset, classes
 
 
 if __name__ == '__main__':

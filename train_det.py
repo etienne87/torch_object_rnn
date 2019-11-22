@@ -10,12 +10,12 @@ import torch.optim as optim
 import torch.backends.cudnn as cudnn
 from functools import partial
 
-# from core.ssd.model import SSD
+
 from core.single_stage_detector import SingleStageDetector
 from core.trainer import DetTrainer
 from core.utils import opts
 
-from datasets.moving_mnist_detection import MovingMnistDataset
+from datasets.moving_mnist_detection import make_moving_mnist
 from datasets.coco_detection import make_still_coco
 
 
@@ -42,35 +42,6 @@ def parse_args():
     return parser.parse_args()
 
 
-def make_moving_mnist(args):
-    # won't work with several workers
-    datafunc = partial(torch.utils.data.DataLoader, batch_size=args.batchsize, num_workers=0,
-                       shuffle=False, collate_fn=opts.video_collate_fn_with_reset_info, pin_memory=True)
-    train_dataset = MovingMnistDataset(args.batchsize,
-                                       args.time, args.height, args.width, 3, train=True, max_objects=5)
-    test_dataset = MovingMnistDataset(args.batchsize,
-                                      args.time, args.height, args.width, 3, train=False, max_objects=5)
-    train_dataset.num_batches = args.train_iter
-    test_dataset.num_batches = args.test_iter
-    train_dataset = datafunc(train_dataset)
-    test_dataset = datafunc(test_dataset)
-    classes = 10
-    return train_dataset, test_dataset, classes
-
-
-def make_moving_coco(args):
-    dataDir = '/home/etienneperot/workspace/data/coco'
-    datafunc = partial(torch.utils.data.DataLoader, batch_size=args.batchsize, num_workers=args.num_workers,
-                                         shuffle=True, collate_fn=opts.video_collate_fn, pin_memory=True)
-
-    train_dataset = MovingCOCODataset(dataDir, dataType='train2017', time=args.time, height=args.height, width=args.width)
-    test_dataset = MovingCOCODataset(dataDir, dataType='val2017', time=args.time, height=args.height, width=args.width)
-    train_dataset = datafunc(train_dataset)
-    test_dataset = datafunc(test_dataset)
-    classes = len(train_dataset.dataset.catNms) + 1
-    return train_dataset, test_dataset, classes
-
-
 def main():
     args = parse_args()
 
@@ -82,16 +53,12 @@ def main():
     args.height = 256
     args.width = 256
 
-    coco_path = '/home/etienneperot/workspace/data/coco/'
-    coco_path = '/home/prophesee/work/etienne/datasets/coco/'
-    coco_path = '/mnt/hdd1/coco/'
     # Dataset
     print('==> Preparing dataset..')
 
 
     # train_dataset, test_dataset, classes = make_moving_mnist(args)
-    # train_dataset, test_dataset, classes = make_moving_coco(time, height, width, args)
-    train_dataset, test_dataset, classes = make_still_coco(coco_path, args.batchsize, args.num_workers)
+    train_dataset, test_dataset, classes = make_still_coco(args.path, args.batchsize, args.num_workers)
 
     args.is_video_dataset = False
 
@@ -99,7 +66,7 @@ def main():
     # Model
     print('==> Building model..')
     # net = SingleStageDetector.mobilenet_v2_fpn(cin, classes, act="softmax")
-    net = SingleStageDetector.resnet50_fpn(cin, classes, act="softmax", loss='_ohem_loss')
+    net = SingleStageDetector.mobilenet_v2_fpn(cin, classes, act="sigmoid", loss='_focal_loss')
 
     if args.cuda:
         net.cuda()
