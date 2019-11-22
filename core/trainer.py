@@ -5,6 +5,7 @@ from __future__ import print_function
 import time
 import collections
 import torch
+import math
 import numpy as np
 from tensorboardX import SummaryWriter
 from core.utils import vis, tbx, plot, image
@@ -174,7 +175,7 @@ class DetTrainer(object):
         batchsize = args.batchsize
         time = args.time
         nrows = 2 ** ((batchsize.bit_length() - 1) // 2)
-        ncols = batchsize // nrows
+        ncols = int(math.ceil(batchsize / nrows))
         
         if args.is_video_dataset:
             grid = np.zeros((args.test_iter * time, nrows, ncols, args.height, args.width, 3), dtype=np.uint8)

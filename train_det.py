@@ -16,8 +16,7 @@ from core.trainer import DetTrainer
 from core.utils import opts
 
 from datasets.moving_mnist_detection import MovingMnistDataset
-from datasets.moving_coco_detection import MovingCOCODataset
-from datasets.coco_detection import make_coco_dataset as make_still_coco
+from datasets.coco_detection import make_still_coco
 
 
 def parse_args():
