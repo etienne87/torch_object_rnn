@@ -76,7 +76,7 @@ def main():
     print('==> Building model..')
     # net = SingleStageDetector.mobilenet_v2_fpn(cin, classes, act="softmax")
     # net = SingleStageDetector.resnet50_fpn(cin, classes, act="softmax", loss='_ohem_loss', nlayers=0)
-    net = SingleStageDetector.resnet50_fpn(cin, classes, act="softmax", loss='_ohem_loss', nlayers=3)
+    net = SingleStageDetector.resnet50_fpn(cin, classes, act="sigmoid", loss='_focal_loss', nlayers=3)
     
 
     if args.cuda:
@@ -84,7 +84,7 @@ def main():
         cudnn.benchmark = True
 
 
-    optimizer = optim.Adam(net.parameters(), lr=args.lr, betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-4)
+    optimizer = optim.Adam(net.parameters(), lr=args.lr, weight_decay=2e-6)
 
     if args.half:
         net, optimizer = amp.initialize(net, optimizer, opt_level="O1", verbosity=0)

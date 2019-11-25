@@ -61,7 +61,7 @@ class ConvLayer(nn.Sequential):
 
     def __init__(self, in_channels, out_channels,
                  kernel_size=3, stride=1, padding=1, dilation=1,
-                 bias=True, norm='InstanceNorm2d', activation='LeakyReLU', separable=False):
+                 bias=True, norm='BatchNorm2d', activation='LeakyReLU', separable=False):
 
         conv_func = SeparableConv2d if separable else nn.Conv2d
         super(ConvLayer, self).__init__(
