@@ -233,7 +233,7 @@ class CameraMotion(object):
 
 class Resizer(object):
     """Convert ndarrays in sample to Tensors."""
-    def __init__(self, fixed_size=True, min_side=512, max_side=512):
+    def __init__(self, fixed_size=True, min_side=768, max_side=1024):
         self.min_side = min_side
         self.max_side = max_side
         self.fixed_size = fixed_size

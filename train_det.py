@@ -66,7 +66,8 @@ def main():
     # Model
     print('==> Building model..')
     # net = SingleStageDetector.mobilenet_v2_fpn(cin, classes, act="softmax")
-    net = SingleStageDetector.mobilenet_v2_fpn(cin, classes, act="sigmoid", loss='_focal_loss')
+    net = SingleStageDetector.resnet50_fpn(cin, classes, act="softmax", loss='_ohem_loss')
+    
 
     if args.cuda:
         net.cuda()
@@ -82,8 +83,8 @@ def main():
 
 
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.99)
-    # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min') 
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3, verbose=True)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min') 
+    # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3, verbose=True)
     trainer = DetTrainer(args.logdir, net, optimizer)
 
     if args.just_test: 
@@ -96,7 +97,11 @@ def main():
 
     for epoch in range(start_epoch, args.epochs):
         epoch_loss = trainer.train(epoch, train_dataset, args)
-        mean_ap_50 = trainer.evaluate(epoch, test_dataset, args)
+
+        if epoch%args.save_every == 0:
+            trainer.save_ckpt(epoch, 'checkpoint#'+str(epoch))
+            
+        # mean_ap_50 = trainer.evaluate(epoch, test_dataset, args)
 
         trainer.writer.add_scalar('learning rate', optimizer.param_groups[0]['lr'], epoch)
         # scheduler.step(mean_ap_50)
@@ -105,8 +110,6 @@ def main():
         # if epoch%args.test_every == 0:
         #     trainer.test(epoch, test_dataset, args)
 
-        if epoch%args.save_every == 0:
-            trainer.save_ckpt(epoch, 'checkpoint#'+str(epoch))
 
 if __name__ == '__main__':
     main()
