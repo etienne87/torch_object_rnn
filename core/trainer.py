@@ -13,6 +13,12 @@ from core.eval import mean_ap
 import cv2
 from tqdm import tqdm
 
+try:
+    from apex import amp
+except ImportError:
+    print('Apex not installed')
+
+
 class DetTrainer(object):
     """
     class wrapping training/ validation/ testing
@@ -55,6 +61,13 @@ class DetTrainer(object):
 
 
             loss = sum([value for key, value in loss_dict.items()])
+
+            if args.half:
+                with amp.scale_loss(loss, self.optimizer) as scaled_loss:
+                    scaled_loss.backward()
+            else:
+                loss.backward()
+                
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.net.parameters(), 0.1)
             self.optimizer.step()

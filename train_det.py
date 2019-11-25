@@ -19,6 +19,12 @@ from datasets.moving_mnist_detection import make_moving_mnist
 from datasets.coco_detection import make_still_coco
 
 
+try:
+    from apex import amp
+except ImportError:
+    print('WARNING apex not installed, half precision will not be available')
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description='PyTorch SSD Training')
     parser.add_argument('logdir', type=str, help='where to save')
@@ -31,14 +37,16 @@ def parse_args():
     parser.add_argument('--train_iter', type=int, default=500, help='#iter / train epoch')
     parser.add_argument('--test_iter', type=int, default=50, help='#iter / test epoch')
     parser.add_argument('--epochs', type=int, default=100, help='num epochs to train')
-    parser.add_argument('--cuda', action='store_true', help='use cuda')
+    
     parser.add_argument('--log_every', type=int, default=10, help='log every')
-    parser.add_argument('--save_video', action='store_true')
+    
     parser.add_argument('--test_every', type=int, default=1, help='test_every')
     parser.add_argument('--save_every', type=int, default=2, help='save_every')
     parser.add_argument('--num_workers', type=int, default=2, help='save_every')
     parser.add_argument('--just_test', action='store_true')
     parser.add_argument('--just_val', action='store_true')
+    parser.add_argument('--save_video', action='store_true')
+    parser.add_argument('--cuda', action='store_true', help='use cuda')
     return parser.parse_args()
 
 
@@ -66,7 +74,8 @@ def main():
     # Model
     print('==> Building model..')
     # net = SingleStageDetector.mobilenet_v2_fpn(cin, classes, act="softmax")
-    net = SingleStageDetector.resnet50_fpn(cin, classes, act="softmax", loss='_ohem_loss')
+    # net = SingleStageDetector.resnet50_fpn(cin, classes, act="softmax", loss='_ohem_loss', nlayers=0)
+    net = SingleStageDetector.resnet50_fpn(cin, classes, act="softmax", loss='_ohem_loss', nlayers=3)
     
 
     if args.cuda:
@@ -74,13 +83,17 @@ def main():
         cudnn.benchmark = True
 
 
-    optimizer = optim.Adam(net.parameters(), lr=args.lr, betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-5)
+    optimizer = optim.Adam(net.parameters(), lr=args.lr, betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-4)
+
+    if args.half:
+            net, optimizer = amp.initialize(net, optimizer, opt_level="O1", verbosity=0)
 
     start_epoch = 0  # start from epoch 0 or last epoch
     if args.resume:
         print('==> Resuming from checkpoint..')
         start_epoch = opts.load_last_checkpoint(args.logdir, net, optimizer) + 1
 
+    print('Current learning rate: ', optimizer.param_groups[0]['lr'])
 
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.99)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min') 
@@ -100,7 +113,7 @@ def main():
 
         if epoch%args.save_every == 0:
             trainer.save_ckpt(epoch, 'checkpoint#'+str(epoch))
-            
+
         # mean_ap_50 = trainer.evaluate(epoch, test_dataset, args)
 
         trainer.writer.add_scalar('learning rate', optimizer.param_groups[0]['lr'], epoch)
