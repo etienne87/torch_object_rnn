@@ -47,6 +47,7 @@ def parse_args():
     parser.add_argument('--just_val', action='store_true')
     parser.add_argument('--save_video', action='store_true')
     parser.add_argument('--cuda', action='store_true', help='use cuda')
+    parser.add_argument('--half', action='store_true', help='use fp16')
     return parser.parse_args()
 
 
@@ -86,7 +87,8 @@ def main():
     optimizer = optim.Adam(net.parameters(), lr=args.lr, betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-4)
 
     if args.half:
-            net, optimizer = amp.initialize(net, optimizer, opt_level="O1", verbosity=0)
+        net, optimizer = amp.initialize(net, optimizer, opt_level="O1", verbosity=0)
+        print('FP16 activated')
 
     start_epoch = 0  # start from epoch 0 or last epoch
     if args.resume:

@@ -68,7 +68,6 @@ class DetTrainer(object):
             else:
                 loss.backward()
                 
-            loss.backward()
             torch.nn.utils.clip_grad_norm_(self.net.parameters(), 0.1)
             self.optimizer.step()
 
