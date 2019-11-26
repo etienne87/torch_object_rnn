@@ -11,6 +11,7 @@ from tensorboardX import SummaryWriter
 from core.utils import vis, tbx, plot, image
 from core.eval import mean_ap
 import cv2
+import json
 from tqdm import tqdm
 
 try:
@@ -101,6 +102,7 @@ class DetTrainer(object):
 
         gts = [] #list of K array of size 5
         proposals = [] #list of K array of size 6
+      
         start = 0
         runtime_stats = {'dataloader': 0, 'network': 0}
         for batch_idx, data in tqdm(enumerate(dataloader), total=len(dataloader)):
@@ -117,14 +119,14 @@ class DetTrainer(object):
                 start = time.time()
                 preds = self.net.get_boxes(inputs, score_thresh=0.1)
                 runtime_stats['network'] += time.time() - start
-
+         
             for t in range(len(targets)):
                 for i in range(len(targets[t])):
-                    gt_boxes = targets[t][i]
+                    gt_boxes = targets[t][i].cpu().numpy().copy()
                     gt_boxes[..., 4] -= dataloader.dataset.label_offset
                     boxes, labels, scores = preds[t][i]
 
-                    gts.append(gt_boxes.cpu().numpy())
+                    gts.append(gt_boxes)
                     if boxes is None:
                         pred = np.zeros((0, 6), dtype=np.float32)
                     else:
@@ -132,8 +134,7 @@ class DetTrainer(object):
                         pred = torch.cat([boxes, scores, labels], dim=1).numpy()
 
                     proposals.append(pred)
-
-            start = time.time()
+        start = time.time()
 
         det_results, gt_bboxes, gt_labels = mean_ap.convert(gts, proposals, self.net.num_classes)
 
@@ -172,8 +173,10 @@ class DetTrainer(object):
 
         aps = np.array([item['ap'] for item in eval_results])
         fig2 = plot.bar(aps)
-        self.writer.add_figure('aps', fig2, epoch)
+        self.writer.add_figure('aps', fig2, epoch) 
         return map_50
+
+        return 0
 
 
     def test(self, epoch, dataloader, args):

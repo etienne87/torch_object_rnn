@@ -95,7 +95,7 @@ class Anchors(nn.Module):
         self.idxs = None
         self.last_shapes = []
         self.set_low_quality_matches = self.set_low_quality_matches_v1
-        self.decode_func = self.decode_per_image
+        self.decode_func = self.batched_decode
         self.max_decode = kwargs.get("max_decode", False)
 
     def forward(self, features):
@@ -166,7 +166,7 @@ class Anchors(nn.Module):
         matches[batch_index, pred_index] = gt_index
         match_vals[batch_index, pred_index] = 2.0
 
-    #@opts.cuda_time
+    # @opts.cuda_time
     def decode(self, anchors, loc_preds, cls_preds, batchsize, score_thresh, nms_thresh=0.6):
         # loc_preds [N, C] (do not include background column)
         box_preds = box.deltas_to_bbox(loc_preds, anchors)
@@ -215,7 +215,7 @@ class Anchors(nn.Module):
         boxesf = boxes[mask].contiguous()
         scoresf = scores[mask].contiguous()
         idxsf = idxs[mask].contiguous()
-        topk = int(1e5)
+        topk = int(1e4)
         if len(boxesf) > topk:
             scoresf, idx = torch.sort(scoresf, descending=True)
             scoresf = scoresf[:topk]
