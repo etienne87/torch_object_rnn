@@ -105,10 +105,10 @@ class BackboneWithFPN(nn.Module):
         x1 = self.bb(x)
         p6 = self.p6(x1[-1])
         p7 = self.p7(p6)
-        x1 += [p6, p7]
         x1 = [batch_to_time(item, n) for item in x1]
         outs = self.neck(x1)
         sources = [time_to_batch(item)[0] for item in outs][::-1]
+        sources += [p6, p7]
         return sources
 
     def reset(self):
