@@ -131,7 +131,7 @@ class DetTrainer(object):
                         pred = np.zeros((0, 6), dtype=np.float32)
                     else:
                         boxes, labels, scores = boxes.cpu(), labels.cpu()[:,None].float(), scores.cpu()[:,None]
-                        pred = torch.cat([boxes, scores, labels], dim=1).numpy()
+                        pred = torch.cat([boxes, scores, labels], dim=1).numpy().copy()
 
                     proposals.append(pred)
         start = time.time()
@@ -175,9 +175,6 @@ class DetTrainer(object):
         fig2 = plot.bar(aps)
         self.writer.add_figure('aps', fig2, epoch) 
         return map_50
-
-        return 0
-
 
     def test(self, epoch, dataloader, args):
         print('\nEpoch: %d (test)' % epoch)
