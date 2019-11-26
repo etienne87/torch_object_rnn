@@ -66,17 +66,18 @@ def main():
     print('==> Preparing dataset..')
 
 
-    # train_dataset, test_dataset, classes = make_moving_mnist(args)
-    train_dataset, test_dataset, classes = make_still_coco(args.path, args.batchsize, args.num_workers)
+    train_dataset, test_dataset, classes = make_moving_mnist(args)
+    # train_dataset, test_dataset, classes = make_still_coco(args.path, args.batchsize, args.num_workers)
 
     args.is_video_dataset = False
 
     print('classes: ', classes)
     # Model
     print('==> Building model..')
-    # net = SingleStageDetector.mobilenet_v2_fpn(cin, classes, act="softmax")
+    net = SingleStageDetector.tiny_rnn_fpn(cin, classes, act='sigmoid', loss='_focal_loss')
+    # net = SingleStageDetector.mobilenet_v2_fpn(cin, classes, act="sigmoid", loss="_focal_loss", nlayers=0)
     # net = SingleStageDetector.resnet50_fpn(cin, classes, act="softmax", loss='_ohem_loss', nlayers=0)
-    net = SingleStageDetector.resnet50_fpn(cin, classes, act="sigmoid", loss='_focal_loss', nlayers=3)
+    # net = SingleStageDetector.resnet50_fpn(cin, classes, act="sigmoid", loss='_focal_loss', nlayers=3)
     
 
     if args.cuda:
@@ -116,11 +117,11 @@ def main():
         if epoch%args.save_every == 0:
             trainer.save_ckpt(epoch, 'checkpoint#'+str(epoch))
 
-        # mean_ap_50 = trainer.evaluate(epoch, test_dataset, args)
+        mean_ap_50 = trainer.evaluate(epoch, test_dataset, args)
 
         trainer.writer.add_scalar('learning rate', optimizer.param_groups[0]['lr'], epoch)
-        # scheduler.step(mean_ap_50)
-        scheduler.step(np.mean(epoch_loss))
+        scheduler.step(mean_ap_50)
+        # scheduler.step(np.mean(epoch_loss))
 
         # if epoch%args.test_every == 0:
         #     trainer.test(epoch, test_dataset, args)
