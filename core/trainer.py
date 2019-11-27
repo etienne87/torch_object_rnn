@@ -68,8 +68,9 @@ class DetTrainer(object):
                     scaled_loss.backward()
             else:
                 loss.backward()
-                
-            torch.nn.utils.clip_grad_norm_(self.net.parameters(), 0.1)
+            
+            if args.clip_grad_norm:
+                torch.nn.utils.clip_grad_norm_(self.net.parameters(), 0.1)
             self.optimizer.step()
 
             runtime_stats['network'] += time.time() - start
@@ -117,7 +118,7 @@ class DetTrainer(object):
 
             with torch.no_grad():
                 start = time.time()
-                preds = self.net.get_boxes(inputs, score_thresh=0.1)
+                preds = self.net.get_boxes(inputs, score_thresh=0.05)
                 runtime_stats['network'] += time.time() - start
          
             for t in range(len(targets)):
