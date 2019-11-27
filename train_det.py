@@ -3,17 +3,12 @@ from __future__ import division
 from __future__ import print_function
 
 import argparse
-import os
-import numpy as np
-import torch
-
-from core.trainer import DetTrainer
-
 import train_configs as cfg 
+from core.trainer import DetTrainer
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='PyTorch SSD Training')
+    parser = argparse.ArgumentParser(description='PyTorch Detection Training')
     parser.add_argument('logdir', type=str, help='where to save')
 
     parser.add_argument('--config', type=str, default='mnist_rnn')

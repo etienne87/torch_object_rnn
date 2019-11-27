@@ -24,8 +24,17 @@ class BoxHead(nn.Module):
         self.loc_head = self._make_head(in_channels, self.num_anchors * 4, n_layers, conv_func)
         self.cls_head = self._make_head(in_channels, self.num_anchors * self.num_classes, n_layers, conv_func)
 
-        torch.nn.init.normal_(self.loc_head[-1].weight, std=0.01)
-        torch.nn.init.constant_(self.loc_head[-1].bias, 0)
+
+        def initialize_layer(layer):
+            if isinstance(layer, nn.Conv2d):
+                nn.init.normal_(layer.weight, std=0.01)
+                if layer.bias is not None:
+                    nn.init.constant_(layer.bias, val=0)
+        self.cls_head.apply(initialize_layer)
+        self.box_head.apply(initialize_layer)
+
+        # torch.nn.init.normal_(self.loc_head[-1].weight, std=0.01)
+        # torch.nn.init.constant_(self.loc_head[-1].bias, 0)
 
         if self.act == 'softmax':
             self.softmax_init(self.cls_head[-1])
