@@ -51,6 +51,7 @@ def parse_args():
     parser.add_argument('--save_video', action='store_true')
     parser.add_argument('--cuda', action='store_true', help='use cuda')
     parser.add_argument('--half', action='store_true', help='use fp16')
+    parser.add_argument('--clip_grad_norm', action='store_true', help='clip gradient')
     return parser.parse_args()
 
 
@@ -66,7 +67,7 @@ def main():
     args.width = 256
 
     # Get Config Automatically
-    net, train, val = getattr(cfg, args.config)(args)
+    net, train_dataset, test_dataset = getattr(cfg, args.config)(args)
    
     if args.cuda:
         net.cuda()
@@ -87,7 +88,6 @@ def main():
 
     
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min') 
-    # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3, verbose=True)
     trainer = DetTrainer(args.logdir, net, optimizer, scheduler)
 
     if args.just_test: 
