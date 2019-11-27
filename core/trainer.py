@@ -25,12 +25,14 @@ class DetTrainer(object):
     class wrapping training/ validation/ testing
     """
 
-    def __init__(self, logdir, net, optimizer):
+    def __init__(self, logdir, net, optimizer, scheduler):
         self.net = net
         self.optimizer = optimizer
+        self.scheduler = scheduler
         self.make_image = vis.general_frame_display
         self.logdir = logdir
         self.writer = SummaryWriter(logdir)
+        self.iteration = 0
 
     def __del__(self):
         self.writer.close()
@@ -89,6 +91,10 @@ class DetTrainer(object):
 
             start = time.time()
             loss_hist.append(loss.item())
+
+            self.iteration += 1
+            self.scheduler.step(self.iteration)
+
         return loss_hist
 
     def evaluate(self, epoch, dataloader, args):
@@ -234,7 +240,9 @@ class DetTrainer(object):
         state = {
             'net': self.net.state_dict(),
             'epoch': epoch,
-            'optimizer': self.optimizer.state_dict()
+            'optimizer': self.optimizer.state_dict(),
+            'scheduler': self.scheduler.state_dict(),
+            'iteration': self.iteration
         }
         ckpt_file = self.logdir + '/checkpoints/' + name + '.pth'
         tbx.prepare_ckpt_dir(ckpt_file)

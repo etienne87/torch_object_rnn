@@ -66,18 +66,18 @@ def main():
     print('==> Preparing dataset..')
 
 
-    train_dataset, test_dataset, classes = make_moving_mnist(args)
-    # train_dataset, test_dataset, classes = make_still_coco(args.path, args.batchsize, args.num_workers)
+    # train_dataset, test_dataset, classes = make_moving_mnist(args)
+    train_dataset, test_dataset, classes = make_still_coco(args.path, args.batchsize, args.num_workers)
 
     args.is_video_dataset = False
 
     print('classes: ', classes)
     # Model
     print('==> Building model..')
-    net = SingleStageDetector.tiny_rnn_fpn(cin, classes, act='sigmoid', loss='_focal_loss')
+    # net = SingleStageDetector.tiny_rnn_fpn(cin, classes, act='sigmoid', loss='_focal_loss')
     # net = SingleStageDetector.mobilenet_v2_fpn(cin, classes, act="sigmoid", loss="_focal_loss", nlayers=0)
     # net = SingleStageDetector.resnet50_fpn(cin, classes, act="softmax", loss='_ohem_loss', nlayers=0)
-    # net = SingleStageDetector.resnet50_fpn(cin, classes, act="sigmoid", loss='_focal_loss', nlayers=3)
+    net = SingleStageDetector.resnet50_fpn(cin, classes, act="sigmoid", loss='_focal_loss', nlayers=0)
     
 
     if args.cuda:
@@ -85,7 +85,9 @@ def main():
         cudnn.benchmark = True
 
 
-    optimizer = optim.Adam(net.parameters(), lr=args.lr, weight_decay=2e-6)
+    # optimizer = optim.Adam(net.parameters(), lr=args.lr, weight_decay=1e-4)
+
+    optimizer = optim.SGD(net.parameters(), lr=args.lr, weight_decay=0.0001, momentum=0.9) 
 
     if args.half:
         net, optimizer = amp.initialize(net, optimizer, opt_level="O1", verbosity=0)
@@ -99,9 +101,17 @@ def main():
     print('Current learning rate: ', optimizer.param_groups[0]['lr'])
 
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.99)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min') 
+    # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min') 
     # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3, verbose=True)
-    trainer = DetTrainer(args.logdir, net, optimizer)
+    
+    def schedule(train_iter, warmup=1000, gamma=0.1, milestones=[60000, 80000]):
+        if warmup and train_iter <= warmup:
+            return 0.9 * train_iter / warmup + 0.1
+        return gamma ** len([m for m in milestones if m <= train_iter])
+    scheduler = optim.lr_scheduler.LambdaLR(optimizer, schedule)
+
+
+    trainer = DetTrainer(args.logdir, net, optimizer, scheduler)
 
     if args.just_test: 
         trainer.test(start_epoch + 1, test_dataset, args)
@@ -113,14 +123,15 @@ def main():
 
     for epoch in range(start_epoch, args.epochs):
         epoch_loss = trainer.train(epoch, train_dataset, args)
-
+       
         if epoch%args.save_every == 0:
             trainer.save_ckpt(epoch, 'checkpoint#'+str(epoch))
 
         mean_ap_50 = trainer.evaluate(epoch, test_dataset, args)
 
         trainer.writer.add_scalar('learning rate', optimizer.param_groups[0]['lr'], epoch)
-        scheduler.step(mean_ap_50)
+        
+        # scheduler.step(mean_ap_50)
         # scheduler.step(np.mean(epoch_loss))
 
         # if epoch%args.test_every == 0:
