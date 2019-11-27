@@ -6,22 +6,10 @@ import argparse
 import os
 import numpy as np
 import torch
-import torch.optim as optim
-import torch.backends.cudnn as cudnn
-from functools import partial
 
-
-from core.single_stage_detector import SingleStageDetector
 from core.trainer import DetTrainer
-from core.utils import opts
 
 import train_configs as cfg 
-
-
-try:
-    from apex import amp
-except ImportError:
-    print('WARNING apex not installed, half precision will not be available')
 
 
 def parse_args():
@@ -58,36 +46,8 @@ def parse_args():
 def main():
     args = parse_args()
 
-    os.environ['OMP_NUM_THREADS'] = '1'
+    net, optimizer, scheduler, train_dataset, test_dataset, start_epoch = getattr(cfg, args.config)(args)
 
-    cin, height, width = 3, 256, 256
-
-    args.cin = 3
-    args.height = 256
-    args.width = 256
-
-    # Get Config Automatically
-    net, train_dataset, test_dataset = getattr(cfg, args.config)(args)
-   
-    if args.cuda:
-        net.cuda()
-        cudnn.benchmark = True
-
-    optimizer = optim.Adam(net.parameters(), lr=args.lr, weight_decay=args.wd)
-
-    if args.half:
-        net, optimizer = amp.initialize(net, optimizer, opt_level="O1", verbosity=0)
-        print('FP16 activated')
-
-    start_epoch = 0  # start from epoch 0 or last epoch
-    if args.resume:
-        print('==> Resuming from checkpoint..')
-        start_epoch = opts.load_last_checkpoint(args.logdir, net, optimizer) + 1
-
-    print('Current learning rate: ', optimizer.param_groups[0]['lr'])
-
-    
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min') 
     trainer = DetTrainer(args.logdir, net, optimizer, scheduler)
 
     if args.just_test: 
@@ -99,7 +59,7 @@ def main():
         exit()
 
     for epoch in range(start_epoch, args.epochs):
-        epoch_loss = trainer.train(epoch, train_dataset, args)
+        trainer.train(epoch, train_dataset, args)
 
         if epoch%args.save_every == 0:
             trainer.save_ckpt(epoch, 'checkpoint#'+str(epoch))
@@ -108,8 +68,7 @@ def main():
 
         trainer.writer.add_scalar('learning rate', optimizer.param_groups[0]['lr'], epoch)
         scheduler.step(mean_ap_50)
-        # scheduler.step(np.mean(epoch_loss))
-
+      
         # if epoch%args.test_every == 0:
         #     trainer.test(epoch, test_dataset, args)
 

@@ -5,8 +5,12 @@ from __future__ import print_function
 import torch
 import torch.nn as nn
 from core.utils.opts import time_to_batch, batch_to_time
+
 from core.modules import ConvLayer, SequenceWise, ConvRNN, Bottleneck, BottleneckLSTM
 from core.unet import UNet
+
+# from core.modules_v2 import ConvLayer, SequenceWise, Bottleneck, RNNWise
+# from core.unet_v2 import ONet
 
 
 
@@ -16,19 +20,26 @@ class FPN(nn.Module):
     def __init__(self, cin=1, cout=256, nmaps=3):
         super(FPN, self).__init__()
         self.cin = cin
-        self.base = 16
+        self.base = 8
         self.cout = cout
         self.nmaps = nmaps
+        self.levels = 4
 
         self.conv1 = SequenceWise(nn.Sequential(
             Bottleneck(cin, self.base * 2, 2),
             Bottleneck(self.base * 2, self.base * 4, 2),
             Bottleneck(self.base * 4, self.base * 8, 2),
-        ))
-
-        self.levels = 4
+        )) 
         self.conv2 = UNet([self.base * 8] * (self.levels-1) + [cout] * self.levels)
 
+        """
+        self.conv1 = SequenceWise(
+            Bottleneck(cin, self.base * 2, 2),
+            Bottleneck(self.base * 2, self.base * 4, 2),
+            Bottleneck(self.base * 4, self.base * 8, 2),
+        )
+        self.conv2 = RNNWise(ONet([self.base * 8] * (self.levels-1) + [cout] * self.levels))
+        """
 
     def forward(self, x):
         x1 = self.conv1(x)
@@ -91,29 +102,22 @@ from core.fpn import FeaturePyramidNetwork
 class BackboneWithFPN(nn.Module):
     def __init__(self, backbone, out_channels=256):
         super(BackboneWithFPN, self).__init__()
-        #TODO: hide p6, p7 in FeaturePyramidNetwork
         self.bb = backbone
-        self.p6 = ConvLayer(self.bb.out_channel_list[-1], out_channels, stride=2)
-        self.p7 = ConvLayer(out_channels, out_channels, stride=2)
         self.neck = FeaturePyramidNetwork(self.bb.out_channel_list, out_channels)
         self.levels = 5
         self.cout = out_channels
 
     def forward(self, x):
-        x, n = time_to_batch(x)
         x1 = self.bb(x)
-        p6 = self.p6(x1[-1])
-        p7 = self.p7(p6)
-        x1 = [batch_to_time(item, n) for item in x1]
         outs = self.neck(x1)
-        sources = [time_to_batch(item)[0] for item in outs][::-1]
-        sources += [p6, p7]
+        sources = [time_to_batch(item)[0] for item in outs]
         return sources
 
     def reset(self):
         for name, module in self._modules.items():
             if hasattr(module, "reset"):
                 module.reset()
+
 
 class MobileNetFPN(BackboneWithFPN):
     def __init__(self, in_channels=3, out_channels=256):
@@ -123,6 +127,7 @@ class MobileNetFPN(BackboneWithFPN):
 
 class ResNet50FPN(BackboneWithFPN):
     def __init__(self, in_channels=3, out_channels=256):
+        net = pbb.resnet50(in_channels, True, frozen_stages=3, norm_eval=True)
         super(ResNet50FPN, self).__init__(
             pbb.resnet50(in_channels, True, frozen_stages=3, norm_eval=True)
         )

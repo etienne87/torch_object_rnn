@@ -171,7 +171,9 @@ class ConvLSTM(RNN):
         super(ConvLSTM, self).__init__(hard)
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.conv_h2h = conv_func(in_channels=in_channels + self.out_channels,
+        self.conv_x2h = ConvLayer(in_channels, self.out_channels * 4, stride=stride)
+
+        self.conv_h2h = conv_func(in_channels=self.out_channels,
                                   out_channels=4 * self.out_channels,
                                   kernel_size=kernel_size,
                                   stride=1,
@@ -184,15 +186,15 @@ class ConvLSTM(RNN):
         self.reset()
 
     def forward(self, x):
+        x = self.conv_x2h(x)
+
         if self.prev_h is None:
             shape = list(x.shape)
             shape[1] = self.out_channels
             self.prev_h = torch.zeros(shape, dtype=torch.float32, device=x.device)
             self.prev_c = torch.zeros(shape, dtype=torch.float32, device=x.device)
 
-        xh = torch.cat([x,self.prev_h], dim=1)
-        tmp = self.conv_h2h(xh)
-
+        tmp = self.conv_h2h(self.prev_h) + x
         cc_i, cc_f, cc_o, cc_g = torch.split(tmp, self.out_channels, dim=1)
         i = self.sigmoid(cc_i)
         f = self.sigmoid(cc_f)
@@ -202,9 +204,6 @@ class ConvLSTM(RNN):
         h = o * self.tanh(c)
         self.prev_c = c
         self.prev_h = h
-
-        if self.stride > 1:
-            h = F.interpolate(h, scale_factor=1./self.stride, mode='bilinear', align_corners=True)
 
         return h
 

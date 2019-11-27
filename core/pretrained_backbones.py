@@ -5,6 +5,7 @@ from __future__ import print_function
 import torch
 import torch.nn as nn
 import torchvision.models as models
+from core.modules import batch_to_time, time_to_batch
 
 
 class BackBone(nn.Module):
@@ -19,8 +20,13 @@ class BackBone(nn.Module):
         self.add_collect_hooks()
 
     def forward(self, x):
+        ndim = x.dim()
+        if ndim == 5:
+            x, n = time_to_batch(x)
         self.outputs = []
         self.features(x)
+        if ndim == 5:
+            self.outputs = [batch_to_time(item, n) for item in self.outputs]
         return self.outputs
 
     def copy_features(self, module):
