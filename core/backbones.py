@@ -96,14 +96,18 @@ class Trident(nn.Module):
 
 
 from core import pretrained_backbones as pbb
-from core.fpn import FeaturePyramidNetwork
+from core.fpn import FeaturePyramidNetwork, FeaturePlug
 
 
 class BackboneWithFPN(nn.Module):
-    def __init__(self, backbone, out_channels=256):
+    """Backbone with or without FPN"""
+    def __init__(self, backbone, out_channels=256, no_fpn=False):
         super(BackboneWithFPN, self).__init__()
         self.bb = backbone
-        self.neck = FeaturePyramidNetwork(self.bb.out_channel_list, out_channels)
+        if no_fpn:
+            self.neck = FeaturePlug(self.bb.out_channel_list, out_channels)
+        else:
+            self.neck = FeaturePyramidNetwork(self.bb.out_channel_list, out_channels)
         self.levels = 5
         self.cout = out_channels
 
@@ -131,6 +135,22 @@ class ResNet50FPN(BackboneWithFPN):
         super(ResNet50FPN, self).__init__(
             pbb.resnet50(in_channels, True, frozen_stages=3, norm_eval=True)
         )
+
+class MobileNetSSD(BackboneWithFPN):
+    def __init__(self, in_channels=3, out_channels=256):
+        super(MobileNetSSD, self).__init__(
+            pbb.MobileNet(in_channels, frozen_stages=1, norm_eval=True),
+            no_fpn=True
+        )
+
+class ResNet50SSD(BackboneWithFPN):
+    def __init__(self, in_channels=3, out_channels=256):
+        net = pbb.resnet50(in_channels, True, frozen_stages=3, norm_eval=True)
+        super(ResNet50SSD, self).__init__(
+            pbb.resnet50(in_channels, True, frozen_stages=3, norm_eval=True),
+            no_fpn=True
+        )
+
 
 if __name__ == '__main__':
     t, n, c, h, w = 10, 3, 3, 128, 128
