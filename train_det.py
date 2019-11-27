@@ -25,7 +25,7 @@ except ImportError:
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='PyTorch Detector Training')
+    parser = argparse.ArgumentParser(description='PyTorch SSD Training')
     parser.add_argument('logdir', type=str, help='where to save')
 
     parser.add_argument('--config', type=str, default='mnist_rnn')
@@ -51,7 +51,6 @@ def parse_args():
     parser.add_argument('--save_video', action='store_true')
     parser.add_argument('--cuda', action='store_true', help='use cuda')
     parser.add_argument('--half', action='store_true', help='use fp16')
-    parser.add_argument('--clip_grad_norm', action='store_true', help='clip gradient to 0.1')
     return parser.parse_args()
 
 
@@ -89,7 +88,7 @@ def main():
     
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min') 
     # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3, verbose=True)
-    trainer = DetTrainer(args.logdir, net, optimizer)
+    trainer = DetTrainer(args.logdir, net, optimizer, scheduler)
 
     if args.just_test: 
         trainer.test(start_epoch + 1, test_dataset, args)
