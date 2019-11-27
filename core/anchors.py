@@ -86,7 +86,7 @@ class Anchors(nn.Module):
         self.bg_iou_threshold = kwargs.get("bg_iou_threshold", 0.4)
         self.num_anchors = len(self.scales) * len(self.ratios)
         self.allow_low_quality_matches = kwargs.get("allow_low_quality_matches", False)
-        self.variances = (0.1, 0.2)
+        self.variances = kwargs.get("variances", [0.1, 0.2]) #TODO: remove if we can learn with variances=[1,1]
         self.anchor_generators = nn.ModuleList()
         for i, (box_size, stride) in enumerate(zip(self.sizes, self.strides)):
             self.anchor_generators.append(AnchorLayer(box_size, stride, self.ratios, self.scales))
@@ -143,7 +143,7 @@ class Anchors(nn.Module):
         index = batch_best_target_per_prior_index[...,None].expand(total, len(anchors), 4)
         boxes = torch.gather(gt_boxes, 1, index)
 
-        loc_targets = box.bbox_to_deltas(boxes, anchors[None])
+        loc_targets = box.bbox_to_deltas(boxes, anchors[None], self.variances)
         cls_targets = labels.view(-1, len(anchors))
 
         return loc_targets, cls_targets
@@ -169,7 +169,7 @@ class Anchors(nn.Module):
     # @opts.cuda_time
     def decode(self, anchors, loc_preds, cls_preds, batchsize, score_thresh, nms_thresh=0.6):
         # loc_preds [N, C] (do not include background column)
-        box_preds = box.deltas_to_bbox(loc_preds, anchors)
+        box_preds = box.deltas_to_bbox(loc_preds, anchors, self.variances)
 
         # batch decoding
         num_classes = cls_preds.shape[-1]
