@@ -9,7 +9,7 @@ import torch.nn as nn
 from core.losses import DetectionLoss
 from core.backbones import FPN, MobileNetFPN, ResNet50FPN, ResNet50SSD
 from core.anchors import Anchors
-from core.rpn import BoxHead
+from core.rpn import BoxHead, SSDHead
 
 
 
@@ -39,8 +39,10 @@ class SingleStageDetector(nn.Module):
         self.num_anchors = self.box_coder.num_anchors
         self.act = act
 
-        self.rpn = rpn(self.feature_extractor.cout, self.box_coder.num_anchors, self.num_classes + self.label_offset, act, nlayers)
-
+        if rpn == BoxHead:
+            self.rpn = BoxHead(self.feature_extractor.cout, self.box_coder.num_anchors, self.num_classes + self.label_offset, act, nlayers)
+        else:
+            self.rpn = SSDHead()
         self.criterion = DetectionLoss(act + loss) 
 
     def reset(self):
@@ -86,4 +88,4 @@ class SingleStageDetector(nn.Module):
 
     @classmethod
     def resnet50_ssd(cls, in_channels, num_classes, nlayers=0):
-        return cls(ResNet50SSD, BoxHead, in_channels, num_classes, 'softmax', loss='_ohem_loss', nlayers=nlayers)
+        return cls(ResNet50SSD, SSDHead, in_channels, num_classes, 'softmax', loss='_ohem_loss', nlayers=nlayers)

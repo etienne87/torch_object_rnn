@@ -101,13 +101,10 @@ from core.fpn import FeaturePyramidNetwork, FeaturePlug
 
 class BackboneWithFPN(nn.Module):
     """Backbone with or without FPN"""
-    def __init__(self, backbone, out_channels=256, no_fpn=False):
+    def __init__(self, backbone, out_channels=256):
         super(BackboneWithFPN, self).__init__()
         self.bb = backbone
-        if no_fpn:
-            self.neck = FeaturePlug(self.bb.out_channel_list, out_channels)
-        else:
-            self.neck = FeaturePyramidNetwork(self.bb.out_channel_list, out_channels)
+        self.neck = FeaturePyramidNetwork(self.bb.out_channel_list, out_channels)
         self.levels = 5
         self.cout = out_channels
 
@@ -135,18 +132,44 @@ class ResNet50FPN(BackboneWithFPN):
             pbb.resnet50(in_channels, True, frozen_stages=-1, norm_eval=True)
         )
 
-class MobileNetSSD(BackboneWithFPN):
+
+class BackboneWithP6P7(nn.Module):
+    """Backbone for SSD"""
+    def __init__(self, backbone, out_channels=256, add_p6p7=True):
+        super(BackboneWithP6P7, self).__init__()
+        self.bb = backbone
+        self.levels = 5
+        self.add_p6p7 = add_p6p7
+        if add_p6p7:
+            self.p6 = SequenceWise(ConvLayer(backbone.out_channel_list[-1], out_channels, stride=2))
+            self.p7 = SequenceWise(ConvLayer(out_channels, out_channels, stride=2))
+        self.out_channel_list = backbone.out_channel_list + [out_channels, out_channels]
+
+    def forward(self, x):
+        x1 = self.bb(x)
+        p6 = self.p6(x1[-1]))
+        p7 = self.p7(p6)
+        outs = x1 + [p6, p7]
+        sources = [time_to_batch(item)[0] for item in outs]
+        return sources
+
+    def reset(self):
+        for name, module in self._modules.items():
+            if hasattr(module, "reset"):
+                module.reset()
+
+
+class MobileNetSSD(BackboneWithP6P7):
     def __init__(self, in_channels=3, out_channels=256):
         super(MobileNetSSD, self).__init__(
             pbb.MobileNet(in_channels, frozen_stages=1, norm_eval=True),
             no_fpn=True
         )
 
-class ResNet50SSD(BackboneWithFPN):
+class ResNet50SSD(BackboneWithP6P7):
     def __init__(self, in_channels=3, out_channels=256):
-        net = pbb.resnet50(in_channels, True, frozen_stages=3, norm_eval=True)
         super(ResNet50SSD, self).__init__(
-            pbb.resnet50(in_channels, True, frozen_stages=3, norm_eval=True),
+            pbb.resnet50(in_channels, True, frozen_stages=-1, norm_eval=True),
             no_fpn=True
         )
 

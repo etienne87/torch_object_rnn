@@ -9,37 +9,6 @@ from core.utils.opts import time_to_batch, batch_to_time
 from core.modules import SequenceWise, ConvLayer
 
 
-class FeaturePlug(nn.Module):
-    """No Top-down path"""
-    def __init__(in_channels_list, out_channels, add_p6p7=True):
-        super(FeaturePlug, self).__init__()
-
-        skip = lambda x, y: SequenceWise(nn.Conv2d(x, y, 1, 1, 0))
-
-        self.skip_blocks = nn.ModuleList()
-        for in_channels, in in_channels_list:
-            self.skip_blocks.append(in_channels, out_channels)
-        
-        self.add_p6p7 = add_p6p7
-        if add_p6p7:
-            self.p6 = SequenceWise(ConvLayer(in_channels_list[-1], out_channels, stride=2))
-            self.p7 = SequenceWise(ConvLayer(out_channels, out_channels, stride=2))
-
-        for m in self.children():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_uniform_(m.weight, a=1)
-                nn.init.constant_(m.bias, 0)
-
-    def forward(self, xs):
-        result = []
-        for x, skip_block in zip(xs, self.skip_blocks):
-            result.append(skip_block(x))
-        if self.add_p6p7:
-            p6 = self.p6(x[-1])
-            p7 = self.p7(p6)
-            results += [p6, p7]
-
-
 class FeaturePyramidNetwork(nn.Module):
     """Top-down path"""
     def __init__(self, in_channels_list, out_channels, up=lambda x, y: SequenceWise(nn.Conv2d(x, y, 3, 1, 1)),
