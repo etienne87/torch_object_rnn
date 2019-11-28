@@ -411,19 +411,27 @@ def change_resolution(dataloader, size, fixed_size=False):
 def make_still_coco(root_dir, batchsize, num_workers, fixed_size=True):
     dataset_train = CocoDataset(root_dir, set_name='train2017', transform=transforms.Compose([
         da.DictWrapper(da.PhotometricDistort()), 
-        Normalizer(), Flipper(), da.DictWrapper(da.CenterCrop()), Resizer(fixed_size=fixed_size)]))
+        Normalizer(), 
+        Flipper(), 
+        da.DictWrapper(da.CenterCrop()), 
+        Resizer(fixed_size=fixed_size)]))
     dataset_val = CocoDataset(root_dir, set_name='val2017', 
                               transform=transforms.Compose([Normalizer(), Resizer(fixed_size=fixed_size)]))
 
+    if fixed_size:
+        train_loader = DataLoader(dataset_train, num_workers=num_workers, batch_size=batchsize,
+                                collate_fn=collater, pin_memory=True)
 
-    train_sampler = AspectRatioBasedSampler(dataset_train, batch_size=batchsize, drop_last=False) if not fixed_size else None
-    train_loader = DataLoader(dataset_train, num_workers=num_workers, shuffle=True,
-                              collate_fn=collater, batch_sampler=train_sampler, pin_memory=True)
+        val_loader = DataLoader(dataset_val, num_workers=num_workers, batch_size=batchsize,
+                                collate_fn=collater, pin_memory=True)
+    else:
+        train_sampler = AspectRatioBasedSampler(dataset_train, batch_size=batchsize, drop_last=False)
+        train_loader = DataLoader(dataset_train, num_workers=num_workers, 
+                                collate_fn=collater, batch_sampler=train_sampler, pin_memory=True)
 
-    val_sampler = AspectRatioBasedSampler(dataset_val, batch_size=batchsize, drop_last=False) if not fixed_size else None
-    val_loader = DataLoader(dataset_val, num_workers=num_workers, shuffle=True,
-                            collate_fn=collater, batch_sampler=val_sampler, pin_memory=True)
-
+        val_sampler = AspectRatioBasedSampler(dataset_val, batch_size=batchsize, drop_last=False)
+        val_loader = DataLoader(dataset_val, num_workers=num_workers, 
+                                collate_fn=collater, batch_sampler=val_sampler, pin_memory=True)
     # ensure preallocated cuda memory
     # train_loader = opts.WrapperSingleAllocation(train_loader, storage_size=batchsize*3*512*512)
     # val_loader = opts.WrapperSingleAllocation(val_loader, storage_size=batchsize*3*512*512)                   

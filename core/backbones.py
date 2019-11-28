@@ -131,9 +131,8 @@ class MobileNetFPN(BackboneWithFPN):
 
 class ResNet50FPN(BackboneWithFPN):
     def __init__(self, in_channels=3, out_channels=256):
-        net = pbb.resnet50(in_channels, True, frozen_stages=3, norm_eval=True)
         super(ResNet50FPN, self).__init__(
-            pbb.resnet50(in_channels, True, frozen_stages=3, norm_eval=True)
+            pbb.resnet50(in_channels, True, frozen_stages=-1, norm_eval=True)
         )
 
 class MobileNetSSD(BackboneWithFPN):
