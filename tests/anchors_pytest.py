@@ -114,7 +114,7 @@ class TestAnchors(object):
         return t
 
     def pytestcase_batched_decode_boxes(self):
-        self.init(1, 1, allow_low_quality_matches=True, bg_iou_threshold=0.3, fg_iou_threshold=0.3)
+        self.init(1, 1, allow_low_quality_matches=True, bg_iou_threshold=0.4, fg_iou_threshold=0.5)
         targets = [self.box_generator[i][1] for i in range(self.batchsize)]
         targets = [[targets[i][t] for i in range(self.batchsize)] for t in range(self.time)]
         anchors, anchors_xyxy = self.box_coder(self.fmaps)
@@ -137,3 +137,20 @@ class TestAnchors(object):
                 self.assert_equal(b, b2)
                 self.assert_equal(s, s2)
                 self.assert_equal(l, l2)
+
+    def pytestcase_all_gt_should_be_matched_even_low_iou(self):
+        """
+        Boxes with small iou should be matched
+        :return:
+        """
+        box_coder = Anchors(allow_low_quality_matches=True)
+        anchors_xyxy = torch.tensor([[25, 25, 250, 250],
+                                                         [20, 20, 50, 50],
+                                                         [3, 3, 4, 4]], dtype=torch.float32)
+        anchors = box.change_box_order(anchors_xyxy, 'xyxy2xywh')
+
+        targets = torch.tensor([[120, 120, 250, 250, 1], [20, 20, 22, 22, 2]], dtype=torch.float32)
+        targets = [[targets]]
+
+        _, cls_targets = box_coder.encode(anchors, anchors_xyxy, targets)
+        assert len(torch.unique(cls_targets)) == 3   # first box and +1 is for background class
