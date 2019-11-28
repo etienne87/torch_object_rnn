@@ -11,7 +11,7 @@ from core.modules import SequenceWise, ConvLayer
 
 class FeaturePlug(nn.Module):
     """No Top-down path"""
-    def __init__(in_channels_list, out_channels, add_p6p7=True)
+    def __init__(in_channels_list, out_channels, add_p6p7=True):
         super(FeaturePlug, self).__init__()
 
         skip = lambda x, y: SequenceWise(nn.Conv2d(x, y, 1, 1, 0))

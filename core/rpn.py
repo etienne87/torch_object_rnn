@@ -21,7 +21,7 @@ class BoxHead(nn.Module):
 
         conv_func = lambda x,y: ConvLayer(x, y, norm='none', activation='ReLU')
         # conv_func = lambda x, y: Bottleneck(x, y)
-        self.loc_head = self._make_head(in_channels, self.num_anchors * 4, n_layers, conv_func)
+        self.box_head = self._make_head(in_channels, self.num_anchors * 4, n_layers, conv_func)
         self.cls_head = self._make_head(in_channels, self.num_anchors * self.num_classes, n_layers, conv_func)
 
 
@@ -33,8 +33,8 @@ class BoxHead(nn.Module):
         self.cls_head.apply(initialize_layer)
         self.box_head.apply(initialize_layer)
 
-        # torch.nn.init.normal_(self.loc_head[-1].weight, std=0.01)
-        # torch.nn.init.constant_(self.loc_head[-1].bias, 0)
+        # torch.nn.init.normal_(self.box_head[-1].weight, std=0.01)
+        # torch.nn.init.constant_(self.box_head[-1].bias, 0)
 
         if self.act == 'softmax':
             self.softmax_init(self.cls_head[-1])
@@ -81,7 +81,7 @@ class BoxHead(nn.Module):
         return out
 
     def forward(self, xs):
-        loc_preds = self._apply_head(self.loc_head, xs, 4)
+        loc_preds = self._apply_head(self.box_head, xs, 4)
         cls_preds = self._apply_head(self.cls_head, xs, self.num_classes)
 
         if not self.training:

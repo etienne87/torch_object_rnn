@@ -33,6 +33,7 @@ class SingleStageDetector(nn.Module):
                                  scales=scales,
                                  ratios=ratios,
                                  allow_low_quality_matches=False,
+                                 variances=[1.0,1.0],
                                  fg_iou_threshold=0.5, bg_iou_threshold=0.4)
 
         self.num_anchors = self.box_coder.num_anchors
