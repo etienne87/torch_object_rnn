@@ -410,8 +410,11 @@ def change_resolution(dataloader, size, fixed_size=False):
 
 def make_still_coco(root_dir, batchsize, num_workers, fixed_size=True):
     dataset_train = CocoDataset(root_dir, set_name='train2017', transform=transforms.Compose([
-        da.DictWrapper(da.PhotometricDistort()), 
-        Normalizer(), Flipper(), da.DictWrapper(da.CenterCrop()), Resizer(fixed_size=fixed_size)]))
+        #da.DictWrapper(da.PhotometricDistort()), 
+        Normalizer(), 
+        Flipper(), 
+        da.DictWrapper(da.CenterCrop()), 
+        Resizer(fixed_size=fixed_size)]))
     dataset_val = CocoDataset(root_dir, set_name='val2017', 
                               transform=transforms.Compose([Normalizer(), Resizer(fixed_size=fixed_size)]))
 
