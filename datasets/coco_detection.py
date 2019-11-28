@@ -13,7 +13,7 @@ from torchvision import transforms
 from torch.utils.data.sampler import Sampler
 from datasets.coco_wrapper import COCO2 as COCO 
 
-from core.utils import vis, opts, image as imutil
+from core.utils import vis, opts, image as imutil, data_augment as da
 import cv2
 
 
@@ -196,7 +196,7 @@ class CameraMotion(object):
     """
     def __init__(self, max_time=1):
         self.max_time = max_time
-        self.border_mode = cv2.BORDER_WRAP
+        self.border_mode = cv2.BORDER_CONSTANT
 
     def __call__(self, sample):
         image = sample['img']
@@ -228,7 +228,6 @@ class CameraMotion(object):
             sample['img'] = np.concatenate(imseq)
             sample['annot'] = boxseq
         return sample
-    
 
 
 class Resizer(object):
@@ -411,16 +410,18 @@ def change_resolution(dataloader, size, fixed_size=False):
 
 def make_still_coco(root_dir, batchsize, num_workers, fixed_size=True):
     dataset_train = CocoDataset(root_dir, set_name='train2017', transform=transforms.Compose([
-        Normalizer(), Flipper(), Resizer(fixed_size=fixed_size)]))
-    dataset_val = CocoDataset(root_dir, set_name='val2017',
+        da.DictWrapper(da.PhotometricDistort()), 
+        Normalizer(), Flipper(), da.DictWrapper(da.CenterCrop()), Resizer(fixed_size=fixed_size)]))
+    dataset_val = CocoDataset(root_dir, set_name='val2017', 
                               transform=transforms.Compose([Normalizer(), Resizer(fixed_size=fixed_size)]))
 
-    train_sampler = AspectRatioBasedSampler(dataset_train, batch_size=batchsize, drop_last=False)
-    train_loader = DataLoader(dataset_train, num_workers=num_workers,
+
+    train_sampler = AspectRatioBasedSampler(dataset_train, batch_size=batchsize, drop_last=False) if not fixed_size else None
+    train_loader = DataLoader(dataset_train, num_workers=num_workers, shuffle=True,
                               collate_fn=collater, batch_sampler=train_sampler, pin_memory=True)
 
-    val_sampler = AspectRatioBasedSampler(dataset_val, batch_size=batchsize, drop_last=False)
-    val_loader = DataLoader(dataset_val, num_workers=num_workers,
+    val_sampler = AspectRatioBasedSampler(dataset_val, batch_size=batchsize, drop_last=False) if not fixed_size else None
+    val_loader = DataLoader(dataset_val, num_workers=num_workers, shuffle=True,
                             collate_fn=collater, batch_sampler=val_sampler, pin_memory=True)
 
     # ensure preallocated cuda memory
@@ -458,7 +459,7 @@ def parse_args():
 
 if __name__ == '__main__':
     args = parse_args()
-    dataset_train, _, _ = make_still_coco(args.path, args.batchsize, 1)
+    dataset_train, _, _ = make_still_coco(args.path, args.batchsize, 0)
 
     unnormalize = UnNormalizer()
 
