@@ -39,13 +39,13 @@ class SingleStageDetector(nn.Module):
         self.num_anchors = self.box_coder.num_anchors
         self.act = act
 
-        if isinstance(rpn, BoxHead):
+        if rpn == BoxHead:
             self.rpn = BoxHead(self.feature_extractor.cout, self.box_coder.num_anchors, self.num_classes + self.label_offset, act, nlayers)
-        elif isinstance(rpn, SSDHead):
+        elif rpn == SSDHead:
             self.rpn = SSDHead(self.feature_extractor.out_channel_list, self.box_coder.num_anchors, self.num_classes + self.label_offset, act)
         else:
             raise NotImplementedError()
-        
+
         self.criterion = DetectionLoss(act + loss) 
 
     def reset(self):

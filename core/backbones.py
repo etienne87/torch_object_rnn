@@ -96,7 +96,7 @@ class Trident(nn.Module):
 
 
 from core import pretrained_backbones as pbb
-from core.fpn import FeaturePyramidNetwork, FeaturePlug
+from core.fpn import FeaturePyramidNetwork
 
 
 class BackboneWithFPN(nn.Module):
@@ -147,7 +147,7 @@ class BackboneWithP6P7(nn.Module):
 
     def forward(self, x):
         x1 = self.bb(x)
-        p6 = self.p6(x1[-1]))
+        p6 = self.p6(x1[-1])
         p7 = self.p7(p6)
         outs = x1 + [p6, p7]
         sources = [time_to_batch(item)[0] for item in outs]
@@ -162,15 +162,13 @@ class BackboneWithP6P7(nn.Module):
 class MobileNetSSD(BackboneWithP6P7):
     def __init__(self, in_channels=3, out_channels=256):
         super(MobileNetSSD, self).__init__(
-            pbb.MobileNet(in_channels, frozen_stages=1, norm_eval=True),
-            no_fpn=True
+            pbb.MobileNet(in_channels, frozen_stages=1, norm_eval=True)
         )
 
 class ResNet50SSD(BackboneWithP6P7):
     def __init__(self, in_channels=3, out_channels=256):
         super(ResNet50SSD, self).__init__(
-            pbb.resnet50(in_channels, True, frozen_stages=-1, norm_eval=True),
-            no_fpn=True
+            pbb.resnet50(in_channels, True, frozen_stages=-1, norm_eval=True)
         )
 
 

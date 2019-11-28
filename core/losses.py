@@ -21,17 +21,6 @@ def reduce(loss, mode='none'):
         loss = loss.sum()
     return loss
 
-def cast(x, dtype):
-    ''' cast in float or float16
-
-    :param x: tensor to cast
-    :param dtype: dst dtype
-    '''
-    if x.dtype == torch.float:
-        return x.float()
-    elif x.dtype == torch.float16:
-        return x.half()
-
 
 def softmax_focal_loss(x, y, reduction='none'):
     ''' softmax focal loss
@@ -120,15 +109,10 @@ def softmax_ohem_loss(cls_preds, cls_targets, reduction='none'):
 
 def smooth_l1_loss(pred, target, beta=0.11, reduction='sum'):
     """ smooth l1 loss
-def cast(x, dtype):
-    if x.dtype() == torch.float:
-        return x.float()
-    elif x.dtype() == torch.float16:
-        return x.half()
     """
     x = (pred - target).abs()
     l1 = x - 0.5 * beta
-    l2 = 0.5 * x ** 2 / beta
+    l2 = (0.5 * x ** 2 / beta).to(l1)
     reg_loss = torch.where(x >= beta, l1, l2)
     return reduce(reg_loss, reduction)
 
@@ -148,6 +132,5 @@ class DetectionLoss(nn.Module):
         cls_loss = self.cls_loss_func(cls_preds, cls_targets, 'sum') / num_pos
 
         mask = pos.unsqueeze(2).expand_as(loc_preds)  # [N,#anchors,4]
-        # loc_targets = cast(loc_targets[mask], loc_preds.dtype)
         loc_loss = self.reg_loss_func(loc_preds[mask], loc_targets[mask].to(loc_preds), reduction='sum') / num_pos
         return loc_loss, cls_loss
