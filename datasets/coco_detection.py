@@ -237,6 +237,7 @@ class Resizer(object):
         self.min_side = min_side
         self.max_side = max_side
         self.fixed_size = fixed_size
+        self.interpolation = cv2.INTER_CUBIC
 
     def __call__(self, sample):
         image, annots = sample['img'], sample['annot']
@@ -257,7 +258,7 @@ class Resizer(object):
 
         # resize the image with the computed scale
         height, width =  (int(round(rows * scale)), int(round((cols * scale))))
-        image = cv2.resize(image, (width, height), interpolation=cv2.INTER_LINEAR)
+        image = cv2.resize(image, (width, height), interpolation=self.interpolation)
         rows, cols, cns = image.shape
 
         if self.fixed_size:
@@ -445,39 +446,32 @@ def make_moving_coco(root_dir, batchsize, num_workers, fixed_size=True):
     return train_loader, val_loader, len(dataset_train.labels)
 
 
+import time
+import argparse
+
+def parse_args():
+    parser = argparse.ArgumentParser(description='Coco Reader')
+    parser.add_argument('path', type=str, help='where to save')
+    parser.add_argument('--batchsize', type=int, default=8, help='batchsize')
+    parser.add_argument('--video', action='store_true', help="viz videos or images")
+    return parser.parse_args()
+
 if __name__ == '__main__':
-    import time
+    args = parse_args()
+    dataset_train, _, _ = make_still_coco(args.path, args.batchsize, 1)
 
-    coco_path = '/home/etienneperot/workspace/data/coco/'
-    # coco_path = '/home/prophesee/work/etienne/datasets/coco/'
-    max_side = 768
-    
-    dataset_train = CocoDataset(coco_path, set_name='train2017',
-                                transform=transforms.Compose([
-                                Normalizer(), 
-                                Resizer(fixed_size=False, max_side=max_side),
-                                CameraMotion(10)
-                                ]))
-
-    sampler = AspectRatioBasedSampler(dataset_train, batch_size=16, drop_last=False)
-    loader = torch.utils.data.DataLoader(dataset_train, num_workers=0,
-                                         collate_fn=video_collater, batch_sampler=sampler, pin_memory=True)
-
-    superloader = opts.WrapperSingleAllocation(loader, 16*3*max_side*max_side)
-   
     unnormalize = UnNormalizer()
 
     start = time.time()
-    for data in superloader:
-
-        # data = {'img':data['data'][0].cpu(), 'annot':data['boxes'][0]}
-        
-
+    for data in dataset_train:
         end = time.time()
         print(end - start, ' time loading')
 
-        # print(data['img'].shape)
-        viz_batch_video(data, unnormalize, dataset_train.labels)
+        if args.video:
+            viz_batch_video(data, unnormalize, dataset_train.dataset.labels)
+        else:
+            data = {'img':data['data'][0].cpu(), 'annot':data['boxes'][0]}
+            viz_batch(data, unnormalize, dataset_train.dataset.labelmap)
 
         start = time.time()
         print(start - end, ' time showing')
