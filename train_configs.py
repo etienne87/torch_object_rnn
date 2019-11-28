@@ -50,12 +50,23 @@ def mnist_rnn(args):
     return net, optimizer, scheduler, train, val, start_epoch
 
 
-def coco_resnet(args):
+def coco_resnet_fpn(args):
     args.lr = 1e-5
     args.wd = 1e-4
     print('==> Preparing dataset..')
     train, val, num_classes = make_still_coco(args.path, args.batchsize, args.num_workers)
     print('==> Building model..')
     net = SingleStageDetector.resnet50_fpn(3, num_classes, act="sigmoid", loss='_focal_loss', nlayers=3)
+    net, optimizer, scheduler, start_epoch = adam_optim(net, args)
+    return net, optimizer, scheduler, train, val, start_epoch
+
+
+def coco_resnet_ssd(args):
+    args.lr = 1e-5
+    args.wd = 1e-4
+    print('==> Preparing dataset..')
+    train, val, num_classes = make_still_coco(args.path, args.batchsize, args.num_workers)
+    print('==> Building model..')
+    net = SingleStageDetector.resnet50_ssd(3, num_classes)
     net, optimizer, scheduler, start_epoch = adam_optim(net, args)
     return net, optimizer, scheduler, train, val, start_epoch

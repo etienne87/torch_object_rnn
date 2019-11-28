@@ -27,24 +27,6 @@ def clip_box(bbox, labels, clip_box, alpha):
 
     return bbox, new_labels
 
-class Compose(object):
-    def __init__(self, transfroms):
-        self.transfroms = transfroms
-
-    def __call__(self, img, boxes=None, labels=None):
-        for t in self.transfroms:
-            img, boxes, labels = t(img, boxes, labels)
-        return img, boxes, labels
-
-
-class ConvertFromInts(object):
-    def __call__(self, img, boxes=None, labels=None):
-        return img.astype(np.float32), boxes.astype(np.float32), labels
-
-class ConvertFromFloats(object):
-    def __call__(self, img, boxes=None, labels=None):
-        return img.astype(np.int32), boxes.astype(np.int32), labels
-
 
 class LetterBox(object):
     """Resize the image in accordance to 'image_letter_box' function in darknet
