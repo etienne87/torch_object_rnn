@@ -370,7 +370,6 @@ def draw_caption(image, box, caption):
 
 
 def viz_batch(data, unnormalize, labelmap, label_offset=1):
-    print('resolution: ', data['img'].shape[-2:])
     for i in range(data['img'].shape[0]):
         img = np.array(255 * unnormalize(data['img'][i, :, :, :])).copy()
         img[img < 0] = 0
@@ -387,7 +386,6 @@ def viz_batch(data, unnormalize, labelmap, label_offset=1):
 
 def viz_batch_video(data, unnormalize, labelmap, label_offset=1):
     data['data'] = data['data'].cpu()
-    print('resolution: ', data['data'].shape[-2:])
     for i in range(data['data'].shape[1]):
         for t in range(data['data'].shape[0]):
             img = data['data'][t, i, :, :, :]
@@ -457,6 +455,7 @@ def make_moving_coco(root_dir, batchsize, num_workers, fixed_size=True):
 
 import time
 import argparse
+from tqdm import tqdm
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Coco Reader')
@@ -472,15 +471,18 @@ if __name__ == '__main__':
     unnormalize = UnNormalizer()
 
     start = time.time()
-    for data in dataset_train:
-        end = time.time()
-        print(end - start, ' time loading')
-
-        if args.video:
-            viz_batch_video(data, unnormalize, dataset_train.dataset.labels)
-        else:
-            data = {'img':data['data'][0].cpu(), 'annot':data['boxes'][0]}
-            viz_batch(data, unnormalize, dataset_train.dataset.labelmap)
-
-        start = time.time()
-        print(start - end, ' time showing')
+    #t = tqdm(dataset_train, total=len(dataset_train))
+    with tqdm(dataset_train, total=len(dataset_train)) as t:
+        for batch_idx, data in enumerate(t):
+            end = time.time()
+            rt1 = end-start
+            """ 
+            if args.video:
+                viz_batch_video(data, unnormalize, dataset_train.dataset.labels)
+            else:
+                data = {'img':data['data'][0].cpu(), 'annot':data['boxes'][0]}
+                viz_batch(data, unnormalize, dataset_train.dataset.labelmap)
+            """
+            start = time.time()
+            rt2 = start-end
+            t.set_description('Loading Time %f Viz %f' % (rt1, rt2))

@@ -3,16 +3,15 @@ from __future__ import division
 from __future__ import print_function
 
 import time
-import collections
 import torch
 import math
 import numpy as np
 from tensorboardX import SummaryWriter
-from core.utils import vis, tbx, plot, image
+from core.utils import vis, tbx, plot, image, hist
 from core.eval import mean_ap
 import cv2
 import json
-from tqdm import tqdm
+from tqdm import tqdm, trange
 
 try:
     from apex import amp
@@ -41,68 +40,68 @@ class DetTrainer(object):
         print('\nEpoch: %d (train)' % epoch)
         self.net.train()
         self.net.reset()
-        train_loss = 0
         dataloader.dataset.max_consecutive_batches = 4 #(2 ** epoch)
         dataloader.dataset.build()
 
-        loss_hist = collections.deque(maxlen=500)
+        stats = {'runtime':{'dataloader': hist.HistoryBuffer(),'network': hist.HistoryBuffer()},
+                 'loss': hist.HistoryBuffer()}
+
         start = 0
-        runtime_stats = {'dataloader': 0, 'network': 0}
-        for batch_idx, data in enumerate(dataloader):
-            if batch_idx > 0:
-                runtime_stats['dataloader'] += time.time() - start
-            inputs, targets, reset = data['data'], data['boxes'], data['resets']
-            if args.cuda:
-                inputs = inputs.cuda()
+        with tqdm(dataloader, total=len(dataloader)) as t:
+            for batch_idx, data in enumerate(t):
+                if batch_idx > 0:
+                    stats['runtime']['dataloader'].update(time.time() - start)
+                inputs, targets, reset = data['data'], data['boxes'], data['resets']
+                if args.cuda:
+                    inputs = inputs.cuda()
 
-            if reset:
-                self.net.reset()
+                if reset:
+                    self.net.reset()
 
-            start = time.time()
-            self.optimizer.zero_grad()
-            loss_dict = self.net.compute_loss(inputs, targets)
+                start = time.time()
+                self.optimizer.zero_grad()
+                loss_dict = self.net.compute_loss(inputs, targets)
 
 
-            loss = sum([value for key, value in loss_dict.items()])
+                loss = sum([value for key, value in loss_dict.items()])
 
-            if args.half:
-                with amp.scale_loss(loss, self.optimizer) as scaled_loss:
-                    scaled_loss.backward()
-            else:
-                loss.backward()
-            
-            if args.clip_grad_norm:
-                torch.nn.utils.clip_grad_norm_(self.net.parameters(), 0.1)
-            self.optimizer.step()
+                if args.half:
+                    with amp.scale_loss(loss, self.optimizer) as scaled_loss:
+                        scaled_loss.backward()
+                else:
+                    loss.backward()
+                
+                if args.clip_grad_norm:
+                    torch.nn.utils.clip_grad_norm_(self.net.parameters(), 0.1)
+                self.optimizer.step()
 
-            runtime_stats['network'] += time.time() - start
 
-            train_loss += loss.item()
-            for key, value in loss_dict.items():
-                self.writer.add_scalar('train_'+key, value.data.item(),
-                                       batch_idx + epoch * len(dataloader) )
+                stats['runtime']['network'].update(time.time() - start)
+                stats['loss'].update(loss.item())
 
-            if batch_idx % args.log_every == 0:
-                print('\rtrain_loss: %.3f | avg_loss: %.3f [%d/%d] | @data: %.3f | @net: %.3f'
-                      % (loss, train_loss / (batch_idx + 1),
-                         batch_idx + 1, len(dataloader),
-                         runtime_stats['dataloader'] / (batch_idx + 1),
-                         runtime_stats['network'] / (batch_idx + 1)
-                         ), ' ')
+                for key, value in loss_dict.items():
+                    self.writer.add_scalar('train_'+key, value.data.item(),
+                                        batch_idx + epoch * len(dataloader) )
 
-            start = time.time()
-            loss_hist.append(loss.item())
+                if batch_idx % args.log_every == 0:
+                    t.set_description('\rtrain_loss: %.3f | avg_loss: %.3f [%d/%d] | @data: %.3f | @net: %.3f'
+                        % (stats['loss'].latest(), stats['loss'].avg(100),
+                            batch_idx + 1, len(dataloader),
+                            stats['runtime']['dataloader'].avg(100),
+                            stats['runtime']['network'].avg(100)
+                            ), ' ')
 
-            self.iteration += 1
-            # self.scheduler.step(self.iteration)
+                start = time.time()
+                
+                # self.iteration += 1
+                # self.scheduler.step(self.iteration)
 
-        return loss_hist
+        return stats['loss'].avg()
 
     def evaluate(self, epoch, dataloader, args):
         print('\nEpoch: %d (val)' % epoch)
         self.net.eval()
         self.net.reset()
-        val_loss = 0
         #TODO: set this depending on curriculum argument
         dataloader.dataset.max_consecutive_batches = 4 #(2 ** epoch)
         dataloader.dataset.build()
@@ -111,10 +110,11 @@ class DetTrainer(object):
         proposals = [] #list of K array of size 6
       
         start = 0
-        runtime_stats = {'dataloader': 0, 'network': 0}
+        stats = {'runtime':{'dataloader': hist.HistoryBuffer(),'network': hist.HistoryBuffer()},
+                 'loss': hist.HistoryBuffer()}
         for batch_idx, data in tqdm(enumerate(dataloader), total=len(dataloader)):
             if batch_idx > 0:
-                runtime_stats['dataloader'] += time.time() - start
+                stats['runtime']['dataloader'].update(time.time() - start)
             inputs, targets, reset = data['data'], data['boxes'], data['resets']
             if args.cuda:
                 inputs = inputs.cuda()
@@ -125,7 +125,7 @@ class DetTrainer(object):
             with torch.no_grad():
                 start = time.time()
                 preds = self.net.get_boxes(inputs, score_thresh=0.05)
-                runtime_stats['network'] += time.time() - start
+                stats['runtime']['network'].update(time.time() - start)
          
             for t in range(len(targets)):
                 for i in range(len(targets[t])):
