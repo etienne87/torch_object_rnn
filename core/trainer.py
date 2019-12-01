@@ -143,8 +143,6 @@ class DetTrainer(object):
 
                     proposals.append(pred)
             
-            if batch_idx > 10:
-                break
         start = time.time()
 
         tmp_path = os.path.join(self.logdir, "eval")
@@ -153,48 +151,11 @@ class DetTrainer(object):
 
         stats = coco_eval.coco_eval(gts, proposals, dataloader.dataset.labelmap, 1024, 1024, tmp_path, epoch)
 
-        print(stats)
+        for k, v in stats.items():
+            print(k, ': ', v)
+            self.writer.add_scalar(k, v, epoch)
 
-        det_results, gt_bboxes, gt_labels = mean_ap.convert(gts, proposals, self.net.num_classes)
-
-
-        map_50, eval_results = mean_ap.eval_map(det_results,
-                                                 gt_bboxes,
-                                                 gt_labels,
-                                                 gt_ignore=None,
-                                                 scale_ranges=None,
-                                                 iou_thr=0.5,
-                                                 dataset=None,
-                                                 print_summary=True)
-        
-        #compute actual mean_ap of coco
-        mean_ap_levels = [map_50]
-        for iou_threshold in np.linspace(0.55, 0.95, 9).tolist():
-            mean_ap_level, _ = mean_ap.eval_map(det_results,
-                                                gt_bboxes,
-                                                gt_labels,
-                                                gt_ignore=None,
-                                                scale_ranges=None,
-                                                iou_thr=iou_threshold,
-                                                dataset=None,
-                                                print_summary=False)
-
-            print('iou_threshold: ', iou_threshold, mean_ap_level)
-            mean_ap_levels.append(mean_ap_level)
-        mean_ap_coco = sum(mean_ap_levels)/len(mean_ap_levels)
-        print('mean_ap_coco: ', mean_ap_coco)
-
-        self.writer.add_scalar('mean_ap_coco', mean_ap_coco, epoch)
-        self.writer.add_scalar('mean_ap_50', map_50, epoch)
-        xs = [item['recall'] for item in eval_results]
-        ys = [item['precision'] for item in eval_results]
-        fig = plot.xy_curves(xs, ys)
-        self.writer.add_figure('pr_curves', fig, epoch)
-
-        aps = np.array([item['ap'] for item in eval_results])
-        fig2 = plot.bar(aps)
-        self.writer.add_figure('aps', fig2, epoch) 
-        return map_50
+        return stats['mean_ap']
 
     def test(self, epoch, dataloader, args):
         print('\nEpoch: %d (test)' % epoch)
@@ -261,3 +222,42 @@ class DetTrainer(object):
         ckpt_file = self.logdir + '/checkpoints/' + name + '.pth'
         tbx.prepare_ckpt_dir(ckpt_file)
         torch.save(state, ckpt_file)
+
+
+    def eval_v0(self, gts, proposals, epoch):
+        """ evaluation using mean_ap custom code instead of coco api """
+        det_results, gt_bboxes, gt_labels = mean_ap.convert(gts, proposals, self.net.num_classes)
+        map_50, eval_results = mean_ap.eval_map(det_results,
+                                                 gt_bboxes,
+                                                 gt_labels,
+                                                 gt_ignore=None,
+                                                 scale_ranges=None,
+                                                 iou_thr=0.5,
+                                                 dataset=None,
+                                                 print_summary=True)
+        mean_ap_levels = [map_50]
+        for iou_threshold in np.linspace(0.55, 0.95, 9).tolist():
+            mean_ap_level, _ = mean_ap.eval_map(det_results,
+                                                gt_bboxes,
+                                                gt_labels,
+                                                gt_ignore=None,
+                                                scale_ranges=None,
+                                                iou_thr=iou_threshold,
+                                                dataset=None,
+                                                print_summary=False)
+
+            print('iou_threshold: ', iou_threshold, mean_ap_level)
+            mean_ap_levels.append(mean_ap_level)
+        mean_ap_coco = sum(mean_ap_levels)/len(mean_ap_levels)
+        print('mean_ap_coco: ', mean_ap_coco) 
+
+        self.writer.add_scalar('mean_ap_coco', mean_ap_coco, epoch)
+        self.writer.add_scalar('mean_ap_50', map_50, epoch)
+        xs = [item['recall'] for item in eval_results]
+        ys = [item['precision'] for item in eval_results]
+        fig = plot.xy_curves(xs, ys)
+        self.writer.add_figure('pr_curves', fig, epoch)
+        aps = np.array([item['ap'] for item in eval_results])
+        fig2 = plot.bar(aps)
+        self.writer.add_figure('aps', fig2, epoch) 
+        
