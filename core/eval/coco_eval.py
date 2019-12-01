@@ -84,7 +84,7 @@ def summarize(coco_eval):
     
 
 
-def coco_eval(gts, proposals, labelmap, height, width, tmp_path):
+def coco_eval(gts, proposals, labelmap, height, width, tmp_path, epoch):
     categories = [{"id": id + 1, "name": class_name, "supercategory": "none"}
                                 for id, class_name in enumerate(labelmap)]
 
@@ -148,8 +148,8 @@ def coco_eval(gts, proposals, labelmap, height, width, tmp_path):
                 "annotations" : annotations,
                 "categories" : categories}
 
-    gt_filename = os.path.join(tmp_path, 'gt.json')
-    result_filename = os.path.join(tmp_path, 'res.json')
+    gt_filename = os.path.join(tmp_path, 'gt_'+str(epoch)+'.json')
+    result_filename = os.path.join(tmp_path, 'res_'+str(epoch) +'.json')
     json.dump(json_data, open(gt_filename, 'w'), sort_keys=True, indent=4)
     json.dump(results, open(result_filename, 'w'), indent=4)
 

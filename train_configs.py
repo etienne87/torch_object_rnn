@@ -53,6 +53,7 @@ def mnist_rnn(args):
 def coco_resnet_fpn(args):
     args.lr = 1e-5
     args.wd = 1e-4
+    args.is_video_dataset = False
     print('==> Preparing dataset..')
     train, val, num_classes = make_still_coco(args.path, args.batchsize, args.num_workers)
     print('==> Building model..')
@@ -64,6 +65,7 @@ def coco_resnet_fpn(args):
 def coco_resnet_ssd(args):
     args.lr = 1e-5
     args.wd = 1e-4
+    args.is_video_dataset = False
     print('==> Preparing dataset..')
     train, val, num_classes = make_still_coco(args.path, args.batchsize, args.num_workers)
     print('==> Building model..')

@@ -2,13 +2,14 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import os
 import time
 import torch
 import math
 import numpy as np
 from tensorboardX import SummaryWriter
 from core.utils import vis, tbx, plot, image, hist
-from core.eval import mean_ap
+from core.eval import mean_ap, coco_eval
 import cv2
 import json
 from tqdm import tqdm, trange
@@ -141,7 +142,18 @@ class DetTrainer(object):
                         pred = torch.cat([boxes, scores, labels], dim=1).numpy().copy()
 
                     proposals.append(pred)
+            
+            if batch_idx > 10:
+                break
         start = time.time()
+
+        tmp_path = os.path.join(self.logdir, "eval")
+        if not os.path.isdir(tmp_path):
+            os.mkdir(tmp_path)
+
+        stats = coco_eval.coco_eval(gts, proposals, dataloader.dataset.labelmap, 1024, 1024, tmp_path, epoch)
+
+        print(stats)
 
         det_results, gt_bboxes, gt_labels = mean_ap.convert(gts, proposals, self.net.num_classes)
 
@@ -170,6 +182,7 @@ class DetTrainer(object):
             print('iou_threshold: ', iou_threshold, mean_ap_level)
             mean_ap_levels.append(mean_ap_level)
         mean_ap_coco = sum(mean_ap_levels)/len(mean_ap_levels)
+        print('mean_ap_coco: ', mean_ap_coco)
 
         self.writer.add_scalar('mean_ap_coco', mean_ap_coco, epoch)
         self.writer.add_scalar('mean_ap_50', map_50, epoch)
