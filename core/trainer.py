@@ -97,7 +97,7 @@ class DetTrainer(object):
                 # self.iteration += 1
                 # self.scheduler.step(self.iteration)
 
-        return stats['loss'].avg()
+        return stats['loss'].avg(500)
 
     def evaluate(self, epoch, dataloader, args):
         print('\nEpoch: %d (val)' % epoch)
