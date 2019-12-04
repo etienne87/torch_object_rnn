@@ -30,8 +30,8 @@ class FeaturePyramidNetwork(nn.Module):
         self.add_p6p7 = add_p6p7
 
         if add_p6p7:
-            self.p6 = SequenceWise(ConvLayer(in_channels_list[-1], out_channels, stride=2, norm='none', activation='ReLU'))
-            self.p7 = SequenceWise(ConvLayer(out_channels, out_channels, stride=2, norm='none', activation='Identity'))
+            self.p6 = SequenceWise(ConvLayer(in_channels_list[-1], out_channels, stride=2, norm='InstanceNorm2d', activation='ReLU'))
+            self.p7 = SequenceWise(ConvLayer(out_channels, out_channels, stride=2, norm='InstanceNorm2d', activation='Identity'))
 
         # initialize parameters now to avoid modifying the initialization of top_blocks
         for m in self.children():

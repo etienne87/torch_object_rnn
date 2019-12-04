@@ -141,8 +141,8 @@ class BackboneWithP6P7(nn.Module):
         self.levels = 5
         self.add_p6p7 = add_p6p7
         if add_p6p7:
-            self.p6 = SequenceWise(ConvLayer(backbone.out_channel_list[-1], out_channels, stride=2, norm='none', activation='ReLU'))
-            self.p7 = SequenceWise(ConvLayer(out_channels, out_channels, stride=2, norm='none', activation='Identity'))
+            self.p6 = SequenceWise(ConvLayer(backbone.out_channel_list[-1], out_channels, norm='InstanceNorm2d', stride=2))
+            self.p7 = SequenceWise(ConvLayer(out_channels, out_channels, stride=2, norm='InstanceNorm2d',  activation='Identity'))
         self.out_channel_list = backbone.out_channel_list + [out_channels, out_channels]
 
     def forward(self, x):
