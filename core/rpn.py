@@ -9,6 +9,28 @@ from core.modules import Bottleneck, ConvLayer
 import math
 
 
+class FCHead(nn.Module):
+    def __init__(self, in_channels, num_classes, act='sigmoid', n_layers=0):
+        super(FCHead, self).__init__()
+        self.num_classes = num_classes
+        self.in_channels = in_channels
+        self.box_head = self._make_head(in_channels, 4, n_layers)
+        self.cls_head = self._make_head(in_channels, self.num_classes, n_layers)
+
+    def _make_head(self, in_channels, out_channels, n_layers): 
+        layers = [nn.Linear(in_channels, 256), nn.ReLU()]
+        for i in range(n_layers):
+            layers += [nn.Linear(256, 256), nn.ReLU()]
+        layers += [nn.Linear(256, out_channels)]   
+        return nn.Sequential(*layers)
+
+    def forward(self, x):
+        x = x.view(x.size(0), -1)
+        loc_preds = self.box_head(x)
+        cls_preds = self.cls_head(x)
+        return loc_preds, cls_preds
+
+
 class BoxHead(nn.Module):
     def __init__(self, in_channels, num_anchors, num_classes, act='sigmoid', n_layers=0):
         super(BoxHead, self).__init__()
@@ -90,9 +112,7 @@ class BoxHead(nn.Module):
             else:
                 cls_preds = torch.sigmoid(cls_preds)
 
-        return loc_preds, cls_preds
-
-
+        return loc_preds, cls_preds  
 
 
 class SSDHead(nn.Module):

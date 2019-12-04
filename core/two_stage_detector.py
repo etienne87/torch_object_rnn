@@ -5,11 +5,12 @@ from __future__ import print_function
 import torch
 import torch.nn as nn
 import torchvision.ops.poolers as pool
+import copy
 from core.utils import box
 from core.losses import DetectionLoss
 from core.backbones import FPN
 from core.anchors import Anchors
-from core.rpn import BoxHead
+from core.rpn import BoxHead, FCHead
 
 
 class TwoStageDetector(nn.Module):
@@ -30,15 +31,11 @@ class TwoStageDetector(nn.Module):
         self.num_anchors = self.box_coder.num_anchors
         self.act = act
 
-        self.first_stage = rpn(self.feature_extractor.cout, self.box_coder.num_anchors, 1, 'sigmoid')
+        self.first_stage = rpn(self.feature_extractor.cout, self.box_coder.num_anchors, 1, 'sigmoid', n_layers=0)
 
         feat_names = ['feat'+str(i) for i in range(self.feature_extractor.levels)]
         self.roi_pool = pool.MultiScaleRoIAlign(feat_names, 5, 2)
-        self.second_stage = rpn(self.feature_extractor.cout,
-                                         self.box_coder.num_anchors,
-                                         self.num_classes + self.label_offset, act)
-
-
+        self.second_stage = FCHead(self.feature_extractor.cout * 5 * 5, self.num_classes + self.label_offset, act)
         self.criterion = DetectionLoss('sigmoid_focal_loss')
 
 
@@ -71,8 +68,8 @@ class TwoStageDetector(nn.Module):
         #this expects list of tensor of shape N, 4
         sizes = []
         allboxes = []
-        for t in range(x.size(0)):
-            for i in range(x.size(1)):
+        for t in range(len(rois)):
+            for i in range(len(rois[t])):
                 boxes, _, _ = rois[t][i]
                 num = len(boxes) if boxes is not None else 0
                 sizes += [num]
@@ -86,8 +83,7 @@ class TwoStageDetector(nn.Module):
        
         with torch.no_grad():
             anchors, anchors_xyxy = out_dic['anchors']
-            #binarize targets (whatever y => 1)
-            loc_targets, cls_targets = self.box_coder.encode(anchors, anchors_xyxy, targets)
+            loc_targets, cls_targets = self.box_coder.encode(anchors, anchors_xyxy, self.binarize_targets(targets))
 
         #first stage
         loc_preds, cls_preds = out_dic['first_stage']['loc'], out_dic['first_stage']['cls']
@@ -96,10 +92,22 @@ class TwoStageDetector(nn.Module):
 
         #second stage
         loc_preds2, cls_preds2 = out_dic['second_stage']['loc'], out_dic['second_stage']['cls']
-        if loc_preds is not None:
-
+        #TODO: call rois = self.box_coder.encode(out_dic['first_stage']['rois']
+        #TODO: refactor anchors to handle certain parameters of matching during encode(...) (or Refactor to Anchors & "Matcher")
+        #loc_targets2, cls_targets2 = self.box_coder.encode(out_dic['first_stage']['rois'], //.xyxy, targets)!!
+        if loc_preds2 is not None:
+            print(loc_preds2.shape, loc_targets.shape)
+            loc_loss, cls_loss = self.criterion(loc_preds2, loc_targets, cls_preds2, cls_targets)
+            loss_dict.update({'loc2': loc_loss, 'cls2': cls_loss})
 
         return loss_dict
+
+    def binarize_targets(self, targets):
+        targets2 = copy.deepcopy(targets)
+        for i in range(len(targets2)):
+            for j in range(len(targets2[i])):
+                targets2[i][j][:, 4] = 1
+        return targets2
 
     """ def get_boxes(self, x, score_thresh=0.4):
         xs = self.feature_extractor(x)

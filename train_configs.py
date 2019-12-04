@@ -9,6 +9,7 @@ import torch.backends.cudnn as cudnn
 from datasets.moving_mnist_detection import make_moving_mnist
 from datasets.coco_detection import make_still_coco
 from core.single_stage_detector import SingleStageDetector
+from core.two_stage_detector import TwoStageDetector
 from core.utils import opts
 
 try:
@@ -33,6 +34,21 @@ def adam_optim(net, args):
     print('Current learning rate: ', optimizer.param_groups[0]['lr'])
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min') 
     return net, optimizer, scheduler, start_epoch
+
+
+def mnist_two_stage_rnn(args):
+    args.lr = 1e-3
+    args.wd = 1e-6
+    args.cin = 3
+    args.height = 256
+    args.width = 256
+    args.epochs = 20
+    print('==> Preparing dataset..')
+    train, val, num_classes = make_moving_mnist(args)
+    print('==> Building model..')
+    net = TwoStageDetector(cin=3, num_classes=num_classes, act='sigmoid')
+    net, optimizer, scheduler, start_epoch = adam_optim(net, args)
+    return net, optimizer, scheduler, train, val, start_epoch
 
 
 def mnist_rnn(args):
