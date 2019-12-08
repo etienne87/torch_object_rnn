@@ -7,7 +7,7 @@ import torch.optim as optim
 import torch.backends.cudnn as cudnn
 
 from datasets.moving_mnist_detection import make_moving_mnist
-from datasets.coco_detection import make_still_coco
+from datasets.coco_detection import make_still_coco, make_moving_coco
 from core.single_stage_detector import SingleStageDetector
 from core.two_stage_detector import TwoStageDetector
 from core.utils import opts
@@ -86,5 +86,17 @@ def coco_resnet_ssd(args):
     train, val, num_classes = make_still_coco(args.path, args.batchsize, args.num_workers)
     print('==> Building model..')
     net = SingleStageDetector.resnet50_ssd(3, num_classes)
+    net, optimizer, scheduler, start_epoch = adam_optim(net, args)
+    return net, optimizer, scheduler, train, val, start_epoch
+
+
+def movin_coco_rnn_fpn(args):
+    args.lr = 1e-5
+    args.wd = 1e-4
+    args.is_video_dataset = False
+    print('==> Preparing dataset..')
+    train, val, num_classes = make_moving_coco(args.path, args.batchsize, args.num_workers)
+    print('==> Building model..')
+    net = SingleStageDetector.tiny_rnn_fpn(3, num_classes)
     net, optimizer, scheduler, start_epoch = adam_optim(net, args)
     return net, optimizer, scheduler, train, val, start_epoch

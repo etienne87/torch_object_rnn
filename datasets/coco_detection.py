@@ -408,10 +408,10 @@ def change_resolution(dataloader, size, fixed_size=False):
 
 def make_still_coco(root_dir, batchsize, num_workers, fixed_size=True):
     dataset_train = CocoDataset(root_dir, set_name='train2017', transform=transforms.Compose([
-        da.DictWrapper(da.PhotometricDistort()), 
+        # da.DictWrapper(da.PhotometricDistort()), 
         Normalizer(), 
         Flipper(), 
-        da.DictWrapper(da.CenterCrop()), 
+        # da.DictWrapper(da.CenterCrop()), 
         Resizer(fixed_size=fixed_size)]))
     dataset_val = CocoDataset(root_dir, set_name='val2017', 
                               transform=transforms.Compose([Normalizer(), Resizer(fixed_size=fixed_size)]))
@@ -436,20 +436,18 @@ def make_still_coco(root_dir, batchsize, num_workers, fixed_size=True):
     return train_loader, val_loader, len(dataset_train.labels)
 
 
-def make_moving_coco(root_dir, batchsize, num_workers, fixed_size=True):
+def make_moving_coco(root_dir, batchsize, num_workers):
     dataset_train = CocoDataset(root_dir, set_name='train2017', transform=transforms.Compose([
-        Normalizer(), Flipper(), Resizer(fixed_size=fixed_size), CameraMotion(10)]))
+        Normalizer(), Flipper(), Resizer(fixed_size=True), CameraMotion(10)]))
     dataset_val = CocoDataset(root_dir, set_name='val2017',
-                              transform=transforms.Compose([Normalizer(), Resizer(fixed_size=fixed_size)]))
+                              transform=transforms.Compose([Normalizer(), Resizer(fixed_size=True), CameraMotion(10)]))
 
-    train_sampler = AspectRatioBasedSampler(dataset_train, batch_size=batchsize, drop_last=False)
-    train_loader = DataLoader(dataset_train, num_workers=num_workers,
-                              collate_fn=video_collater, batch_sampler=train_sampler, pin_memory=True)
+    train_loader = DataLoader(dataset_train, num_workers=num_workers, batch_size=batchsize,
+                                collate_fn=video_collater, pin_memory=True)
 
-    val_sampler = AspectRatioBasedSampler(dataset_val, batch_size=batchsize, drop_last=False)
-    val_loader = DataLoader(dataset_val, num_workers=num_workers,
-                            collate_fn=video_collater, batch_sampler=val_sampler, pin_memory=True)
-                
+    val_loader = DataLoader(dataset_val, num_workers=num_workers, batch_size=batchsize,
+                            collate_fn=video_collater, pin_memory=True)
+            
     return train_loader, val_loader, len(dataset_train.labels)
 
 
@@ -466,7 +464,10 @@ def parse_args():
 
 if __name__ == '__main__':
     args = parse_args()
-    dataset_train, _, _ = make_still_coco(args.path, args.batchsize, 0)
+    if args.video:
+        dataset_train, _, _ = make_moving_coco(args.path, args.batchsize, 0)
+    else:
+        dataset_train, _, _ = make_still_coco(args.path, args.batchsize, 0)
 
     unnormalize = UnNormalizer()
 
@@ -476,13 +477,11 @@ if __name__ == '__main__':
         for batch_idx, data in enumerate(t):
             end = time.time()
             rt1 = end-start
-            """ 
             if args.video:
                 viz_batch_video(data, unnormalize, dataset_train.dataset.labels)
             else:
                 data = {'img':data['data'][0].cpu(), 'annot':data['boxes'][0]}
                 viz_batch(data, unnormalize, dataset_train.dataset.labelmap)
-            """
             start = time.time()
             rt2 = start-end
             t.set_description('Loading Time %f Viz %f' % (rt1, rt2))
