@@ -84,79 +84,88 @@ def summarize(coco_eval):
     
 
 
-def coco_eval(gts, proposals, labelmap, height, width, tmp_path, epoch):
+def coco_eval(gts, proposals, labelmap, height, width, tmp_path, epoch, dump=False):
     categories = [{"id": id + 1, "name": class_name, "supercategory": "none"}
-                                for id, class_name in enumerate(labelmap)]
+                  for id, class_name in enumerate(labelmap)]
 
     annotations = []
     results = []
     image_ids = []
     images = []
     box_type = np.float32
+
+    # to dictionary
     for image_id, (gt, pred) in enumerate(zip(gts, proposals)):
         im_id = image_id + 1
 
         images.append(
-            {"date_captured" : "2019",
-            "file_name" : "n.a", 
-            "id" : im_id,
-            "license" : 1,
-            "url" : "",
-            "height" : height,
-            "width" : width})
+            {"date_captured": "2019",
+             "file_name": "n.a",
+             "id": im_id,
+             "license": 1,
+             "url": "",
+             "height": height,
+             "width": width})
 
-        
         for i in range(len(gt)):
             bbox = gt[i]
             segmentation = []
             x1, y1, x2, y2 = bbox[:4].astype(box_type).tolist()
-            w, h = (x2-x1), (y2-y1)
+            w, h = (x2 - x1), (y2 - y1)
             area = w * h
-            category_id = bbox[4] 
+            category_id = bbox[4]
             annotation = {
-                "area" : float(area),
-                "iscrowd" : False,
-                "image_id" : im_id,
-                "bbox" : [x1, y1, w, h],
-                "category_id" : int(category_id) + 1,
-                "id": len(annotations) + 1 
+                "area": float(area),
+                "iscrowd": False,
+                "image_id": im_id,
+                "bbox": [x1, y1, w, h],
+                "category_id": int(category_id) + 1,
+                "id": len(annotations) + 1
             }
             annotations.append(annotation)
-        
+
         for i in range(len(pred)):
             bbox = pred[i, :4]
 
             x1, y1, x2, y2 = bbox[:4].astype(box_type).tolist()
-            w, h = (x2-x1), (y2-y1)
+            w, h = (x2 - x1), (y2 - y1)
 
             score = pred[i, 4]
             category_id = pred[i, 5]
             image_result = {
-                            'image_id': im_id,
-                            'category_id': int(category_id) + 1,
-                            'score': float(score),
-                            'bbox': [x1, y1, w, h],
-                        }
+                'image_id': im_id,
+                'category_id': int(category_id) + 1,
+                'score': float(score),
+                'bbox': [x1, y1, w, h],
+            }
             results.append(image_result)
 
         image_ids.append(im_id)
 
-    json_data = {"info" : {},
-                "licenses" : [],
-                "type" : 'instances',
-                "images" : images,
-                "annotations" : annotations,
-                "categories" : categories}
+    json_data = {"info": {},
+                 "licenses": [],
+                 "type": 'instances',
+                 "images": images,
+                 "annotations": annotations,
+                 "categories": categories}
 
-    gt_filename = os.path.join(tmp_path, 'gt.json')
-    result_filename = os.path.join(tmp_path, 'res.json')
-    json.dump(json_data, open(gt_filename, 'w'), sort_keys=True, indent=4)
-    json.dump(results, open(result_filename, 'w'), indent=4)
+    # Writing the file is time-consuming
+    if dump:
+        gt_filename = os.path.join(tmp_path, 'gt.json')
+        result_filename = os.path.join(tmp_path, 'res.json')
+        json.dump(json_data, open(gt_filename, 'w'), sort_keys=True, indent=4)
+        json.dump(results, open(result_filename, 'w'), indent=4)
+        coco_true = COCO(gt_filename)
+        coco_pred = coco_true.loadRes(result_filename)
+    else:    
+        coco_true = COCO()
+        coco_true.dataset = json_data 
+        coco_true.createIndex()
+        coco_pred = coco_true.loadRes(results)    
 
-    coco_true = COCO(gt_filename)
-    coco_pred = coco_true.loadRes(result_filename)
+    
     coco_eval = COCOeval(coco_true, coco_pred, 'bbox')
-    coco_eval.params.imgIds = image_ids 
+    coco_eval.params.imgIds = image_ids
     coco_eval.evaluate()
     coco_eval.accumulate()
     coco_eval.stats = summarize(coco_eval)
@@ -166,11 +175,10 @@ def coco_eval(gts, proposals, labelmap, height, width, tmp_path, epoch):
         "mean_ap50": coco_eval.stats[1],
         "mean_ap75": coco_eval.stats[2],
         "mean_ap_small": coco_eval.stats[3],
-        "mean_ap_medium":coco_eval.stats[4],
+        "mean_ap_medium": coco_eval.stats[4],
         "mean_ap_big": coco_eval.stats[5]
     }
     return stats
-
 
 if __name__ == '__main__':
     from core.eval.test import generate_dummy_imgs, show_gt_pred
