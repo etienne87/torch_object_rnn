@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 from core.utils.opts import time_to_batch, batch_to_time
 
-from core.modules import ConvLayer, SequenceWise, ConvRNN, Bottleneck, BottleneckLSTM
+from core.modules import ConvLayer, SequenceWise, ConvLSTM, Bottleneck, BottleneckLSTM
 from core.unet import UNet
 
 # from core.modules_v2 import ConvLayer, SequenceWise, Bottleneck, RNNWise
@@ -29,8 +29,11 @@ class FPN(nn.Module):
             Bottleneck(cin, self.base * 2, 2),
             Bottleneck(self.base * 2, self.base * 4, 2),
             Bottleneck(self.base * 4, self.base * 8, 2),
-        )) 
-        self.conv2 = UNet([self.base * 8] * (self.levels-1) + [cout] * self.levels)
+        ))  
+
+        self.conv2 = UNet([self.base * 8] * (self.levels-1) + [cout] * self.levels, 
+        
+        down_func=ConvLSTM, up_func=ConvLSTM)
 
         """
         self.conv1 = SequenceWise(
@@ -49,10 +52,10 @@ class FPN(nn.Module):
 
         return sources
 
-    def reset(self):
+    def reset(self, mask=None):
         for name, module in self._modules.items():
             if hasattr(module, "reset"):
-                module.reset()
+                module.reset(mask)
 
 
 class Trident(nn.Module):

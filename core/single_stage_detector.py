@@ -48,8 +48,8 @@ class SingleStageDetector(nn.Module):
 
         self.criterion = DetectionLoss(act + loss) 
 
-    def reset(self):
-        self.feature_extractor.reset()
+    def reset(self, mask=None):
+        self.feature_extractor.reset(mask)
 
     def forward(self, x):
         xs = self.feature_extractor(x)

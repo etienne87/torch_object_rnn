@@ -52,13 +52,11 @@ class DetTrainer(object):
             for batch_idx, data in enumerate(t):
                 if batch_idx > 0:
                     stats['runtime']['dataloader'].update(time.time() - start)
-                inputs, targets, reset = data['data'], data['boxes'], data['resets']
+                inputs, targets, mask = data['data'], data['boxes'], data['resets']
                 if args.cuda:
                     inputs = inputs.cuda()
-
-                if reset:
-                    self.net.reset()
-
+         
+                self.net.reset(mask)
                 start = time.time()
                 self.optimizer.zero_grad()
                 loss_dict = self.net.compute_loss(inputs, targets)
@@ -116,12 +114,11 @@ class DetTrainer(object):
         for batch_idx, data in tqdm(enumerate(dataloader), total=len(dataloader)):
             if batch_idx > 0:
                 stats['runtime']['dataloader'].update(time.time() - start)
-            inputs, targets, reset = data['data'], data['boxes'], data['resets']
+            inputs, targets, mask = data['data'], data['boxes'], data['resets']
             if args.cuda:
                 inputs = inputs.cuda()
 
-            if reset:
-                self.net.reset()
+            self.net.reset(mask)
 
             with torch.no_grad():
                 start = time.time()
@@ -174,14 +171,13 @@ class DetTrainer(object):
             grid = np.zeros((args.test_iter * time, nrows, ncols, args.height, args.width, 3), dtype=np.uint8)
         
         for period, data in tqdm(enumerate(dataloader), total=args.test_iter):
-            inputs, targets, reset = data['data'], data['boxes'], data['resets']
+            inputs, targets, mask = data['data'], data['boxes'], data['resets']
             images = inputs.cpu().clone().data.numpy()
 
             if args.cuda:
                 inputs = inputs.cuda()
 
-            if reset:
-                self.net.reset()
+            self.net.reset(mask)
 
             with torch.no_grad():
                 targets = self.net.get_boxes(inputs)
