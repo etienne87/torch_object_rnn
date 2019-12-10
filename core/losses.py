@@ -128,7 +128,7 @@ class DetectionLoss(nn.Module):
 
     def forward(self, loc_preds, loc_targets, cls_preds, cls_targets):
         pos = cls_targets > 0
-        num_pos = pos.sum().item()
+        num_pos = max(1, pos.sum().item())
         cls_loss = self.cls_loss_func(cls_preds, cls_targets, 'sum') / num_pos
 
         mask = pos.unsqueeze(2).expand_as(loc_preds)  # [N,#anchors,4]
