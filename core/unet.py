@@ -10,6 +10,7 @@ from core.modules import ConvLayer, SequenceWise, ConvLSTM, Bottleneck, PyramidP
 from functools import partial
 
 
+
 class UNet(nn.Module):
     def __init__(self, channel_list, mode='sum', stride=2, down_func=ConvLSTM, up_func=ConvLSTM):
         """
@@ -26,9 +27,10 @@ class UNet(nn.Module):
         super(UNet, self).__init__()
 
         down = partial(down_func, kernel_size=3, stride=stride, dilation=1)
-        up = partial(up_func, kernel_size=3, stride=1, dilation=1)
-        skip = lambda x, y: SequenceWise(PyramidPooling(), nn.Conv2d(x*4, y, 1, 1, 0))
-        # skip = lambda x, y: SequenceWise(nn.Conv2d(x, y, 1, 1, 0))
+        # up = partial(up_func, kernel_size=3, stride=1, dilation=1)
+
+        up = lambda x, y: SequenceWise(nn.Conv2d(x, y, kernel_size=3, stride=1, padding=1))
+        skip =  lambda x, y: SequenceWise(nn.Conv2d(x, y, kernel_size=1, stride=1, padding=1))
 
         self.downs = nn.ModuleList()
         self.ups = nn.ModuleList()
@@ -45,9 +47,9 @@ class UNet(nn.Module):
             self.skips += [skip(item[0], item[1]) for item in skip_list]
         else:
             self.skips = [lambda x:x for _ in up_list][:-1]
-        
+
         self.down_list = down_list
-        self.up_list = up_list 
+        self.up_list = up_list
         self.skip_list = skip_list
 
     @staticmethod
@@ -92,28 +94,28 @@ class UNet(nn.Module):
         else:
             return x + y
 
-    def upsample(self, x):
+    def upsample(self, x, size):
         x, n = time_to_batch(x)
-        x = F.interpolate(x, scale_factor=self.downstride, mode='nearest')
+        x = F.interpolate(x, size=size, mode='nearest')
         x = batch_to_time(x, n)
         return x
 
     def forward(self, x):
+        xin = x
         outs = []
         for down_layer in self.downs:
             x = down_layer(x)
             outs.append(x)
 
-        middle = len(outs)-1
+        middle = len(outs) - 1
 
         for i, (skip_layer, up_layer) in enumerate(zip(self.skips, self.ups)):
-            top = up_layer(self.upsample(outs[-1]))
             side = skip_layer(outs[middle - i - 1])
-            # print('side: ', side.shape, ' top: ', top.shape)
+            top = up_layer(self.upsample(outs[-1], side.shape[-2:]))
             x = self.fuse(top, side)
             outs.append(x)
 
-        x = self.ups[-1](self.upsample(outs[-1]))
+        x = self.ups[-1](self.upsample(outs[-1], xin.shape[-2:]))
         outs.append(x)
 
         return outs
@@ -121,16 +123,16 @@ class UNet(nn.Module):
     def reset(self, mask=None):
         for module in self.downs:
             if hasattr(module, "reset"):
-                module.reset()
+                module.reset(mask)
 
         for module in self.ups:
             if hasattr(module, "reset"):
-                module.reset()
+                module.reset(mask)
 
     def _repr_module_list(self, module_list):
         repr = ''
         for i, module in enumerate(module_list):
-            repr += str(i)+': '+str(module[0])+";"+str(module[1])+'\n'
+            repr += str(i) + ': ' + str(module[0]) + ";" + str(module[1]) + '\n'
         return repr
 
     def __repr__(self):
@@ -144,9 +146,9 @@ class UNet(nn.Module):
         return repr
 
 
-
 if __name__ == '__main__':
-    t, n, c, h, w = 10, 3, 3, 128, 128
+    t, n, c, h, w = 10, 3, 3, 327, 243
     x = torch.rand(t, n, c, h, w)
     net = UNet([3, 32, 64, 128, 64, 32, 16], mode='sum')
     out = net(x)
+    print([item.shape[-2:] for item in out])
