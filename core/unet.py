@@ -6,13 +6,12 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from core.utils.opts import time_to_batch, batch_to_time
-from core.modules import ConvLayer, SequenceWise, ConvLSTM, Bottleneck, PyramidPooling
+from core.modules_bkup import ConvLayer, SequenceWise, ConvRNN, Bottleneck
 from functools import partial
 
 
-
 class UNet(nn.Module):
-    def __init__(self, channel_list, mode='sum', stride=2, down_func=ConvLSTM, up_func=ConvLSTM):
+    def __init__(self, channel_list, mode='sum', stride=2, down_func=ConvRNN, up_func=ConvRNN):
         """
         UNET generic
 
@@ -26,12 +25,10 @@ class UNet(nn.Module):
         """
         super(UNet, self).__init__()
 
-        down = partial(down_func, kernel_size=3, stride=stride, dilation=1)
-        up = partial(up_func, kernel_size=3, stride=1, dilation=1)
-
-        # down = lambda x, y: SequenceWise(nn.Conv2d(x, y, kernel_size=3, stride=2, padding=1), nn.ReLU())
-        # up = lambda x, y: SequenceWise(nn.Conv2d(x, y, kernel_size=3, stride=1, padding=1), nn.ReLU())
-        skip =  lambda x, y: SequenceWise(nn.Conv2d(x, y, kernel_size=1, stride=1, padding=1))
+        down = partial(down_func, kernel_size=3, stride=stride, padding=1, dilation=1)
+        up = partial(up_func, kernel_size=3, stride=1, padding=1, dilation=1)
+        # up = lambda x, y: SequenceWise(nn.Conv2d(x, y, kernel_size=3, stride=1, padding=1))
+        skip = lambda x, y: SequenceWise(nn.Conv2d(x, y, 1, 1, 0))
 
         self.downs = nn.ModuleList()
         self.ups = nn.ModuleList()
@@ -48,10 +45,6 @@ class UNet(nn.Module):
             self.skips += [skip(item[0], item[1]) for item in skip_list]
         else:
             self.skips = [lambda x:x for _ in up_list][:-1]
-
-        self.down_list = down_list
-        self.up_list = up_list
-        self.skip_list = skip_list
 
     @staticmethod
     def print_shapes(activation_list):
@@ -121,7 +114,7 @@ class UNet(nn.Module):
 
         return outs
 
-    def reset(self, mask=None):
+    def reset(self, mask):
         for module in self.downs:
             if hasattr(module, "reset"):
                 module.reset(mask)
@@ -133,23 +126,22 @@ class UNet(nn.Module):
     def _repr_module_list(self, module_list):
         repr = ''
         for i, module in enumerate(module_list):
-            repr += str(i) + ': ' + str(module[0]) + ";" + str(module[1]) + '\n'
+            repr += str(i)+': '+str(module.in_channels)+";"+str(module.out_channels)+'\n'
         return repr
 
     def __repr__(self):
         repr = ''
         repr += 'downs: ' + '\n'
-        repr += self._repr_module_list(self.down_list)
+        repr += self._repr_module_list(self.downs)
         repr += 'skips: ' + '\n'
-        repr += self._repr_module_list(self.skip_list)
+        repr += self._repr_module_list(self.skips)
         repr += 'ups: ' + '\n'
-        repr += self._repr_module_list(self.up_list)
+        repr += self._repr_module_list(self.ups)
         return repr
 
 
 if __name__ == '__main__':
-    t, n, c, h, w = 10, 3, 3, 327, 243
+    t, n, c, h, w = 10, 3, 3, 128, 128
     x = torch.rand(t, n, c, h, w)
     net = UNet([3, 32, 64, 128, 64, 32, 16], mode='sum')
     out = net(x)
-    print([item.shape[-2:] for item in out])

@@ -6,13 +6,8 @@ import torch
 import torch.nn as nn
 from core.utils.opts import time_to_batch, batch_to_time
 
-from core.modules import ConvLayer, SequenceWise, ConvLSTM, Bottleneck, BottleneckLSTM
+from core.modules import ConvLayer, SequenceWise, ConvRNN, Bottleneck, BottleneckLSTM
 from core.unet import UNet
-
-# from core.modules_v2 import ConvLayer, SequenceWise, Bottleneck, RNNWise
-# from core.unet_v2 import ONet
-
-
 
 
 
@@ -33,7 +28,7 @@ class FPN(nn.Module):
 
         self.conv2 = UNet([self.base * 8] * (self.levels-1) + [cout] * self.levels, 
         
-        down_func=ConvLSTM, up_func=ConvLSTM)
+        down_func=ConvRNN, up_func=ConvRNN)
 
         """
         self.conv1 = SequenceWise(
