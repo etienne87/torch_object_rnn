@@ -7,7 +7,9 @@ import os
 import glob
 import sys
 import time
-import multiprocessing as mp
+# import multiprocessing as mp
+import torch.multiprocessing as mp
+import torch.utils.data._utils as _utils
 import numpy as np
 import random
 import cv2
@@ -55,7 +57,7 @@ TEST_DATASET = datasets.MNIST('../data', train=False, download=True,
 
 
 class MovingMnistAnimation(toy.Animation):
-    def __init__(self, t=10, h=128, w=128, c=3, max_stop=15,
+    def __init__(self, t=20, h=128, w=128, c=3, max_stop=15,
                 max_objects=3, train=True):
         self.dataset_ = TRAIN_DATASET if train else TEST_DATASET
         self.label_offset = 1
@@ -95,7 +97,7 @@ class MnistEnv(object):
         self.envs = [MovingMnistAnimation(t=10, h=128, w=128, c=3) for i in range(num)]
         self.niter = niter
         self.reset() 
-        self.max_steps = 5000
+        self.max_steps = 50
         self.step = 0
 
     def reset(self):
@@ -151,31 +153,31 @@ class MultiStreamer(object):
         j = 0
         while 1:
             m.acquire()
-            boxes, resets = group.next(n[j])
-            self.readyQs[i].put((j, resets, boxes))
+            info = group.next(n[j])
+            self.readyQs[i].put((j, info))
             j = (j+1)%self.max_q_size
 
     def __iter__(self):
-        procs = [mp.Process(target=self.multi_frame_stream, args=(i, m, n, self.array_dim)) for i, (m, n) in
+        procs = [mp.Process(target=self.multi_frame_stream, args=(i, m, n, self.array_dim), daemon=True) for i, (m, n) in
                  enumerate(self.arrays)]
-
         [p.start() for p in procs]
+        _utils.signal_handling._set_worker_pids(id(self), tuple(w.pid for w in procs))
+        _utils.signal_handling._set_SIGCHLD_handler()
         print('Start Streaming')
         for i in range(self.max_iter):
+            start = time.time()
             targets = []
             for n in range(self.num_threads):
-                j, resets, boxes = self.readyQs[n].get() #TODO zip as add info
+                j, infos = self.readyQs[n].get() #TODO zip as add info
+                boxes, _ = infos
                 m, arr = self.arrays[n]
                 self.batch[n] = arr[j]
-                targets.append( [boxt for boxt in boxes])
+                targets += boxes
                 m.release()
-
-            targets = [item for sublist in targets for item in sublist]
-            
             data = self.batch.reshape(self.batchsize, *array_dim)
             yield data, targets
 
-        [p.terminate() for p in procs]
+        [p.terminate() for p in procs] 
 
 
 if __name__ == '__main__':
@@ -185,7 +187,7 @@ if __name__ == '__main__':
     show_batchsize = 4
     tbins, height, width, cin = 10, 128, 128, 3
     array_dim = (tbins, height, width, cin)
-    dataloader = MultiStreamer(MnistEnv, array_dim, batchsize=8, max_q_size=4, num_threads=1)
+    dataloader = MultiStreamer(MnistEnv, array_dim, batchsize=16, max_q_size=4, num_threads=4)
 
     dataloader.max_iter = 1000
 
@@ -213,9 +215,11 @@ if __name__ == '__main__':
                 grid[n//ncols, n%ncols] = img
             im = grid.swapaxes(1, 2).reshape(nrows * height, ncols * width, 3)
             cv2.imshow('dataset', im)
-            key = cv2.waitKey(50)
+            key = cv2.waitKey(5)
             if key == 27:
                 break
-        sys.stdout.write('\rtime: %f' % (runtime))
+        
+        print('runtime: ', runtime)
+        #sys.stdout.write('\rtime: %f' % (runtime))
         sys.stdout.flush()
         start = time.time()
