@@ -51,6 +51,7 @@ def video_collate_fn_with_reset_info(data_list):
     t, n = videos.shape[:2]
     boxes = [[boxes[i][t] for i in range(n)] for t in range(t)]
     resets = 1-torch.FloatTensor(resets)
+    resets = resets[:,None,None,None]
     return {'data': videos, 'boxes': boxes, 'resets': resets}
 
 def cuda_tick():

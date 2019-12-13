@@ -112,6 +112,19 @@ def draw_txn_boxes_on_grid(images, targets, grid, make_img_fun, labelmap):
             grid[t, y, x] = img
 
 
+def draw_txn_boxes_on_grid2(images, targets, grid, make_img_fun, labelmap):
+    for t in range(len(targets)):
+        for i in range(len(targets[t])):
+            img = make_img_fun(images[t, i])
+            boxes, labels, scores = targets[t][i]
+            if boxes is not None:
+                boxes = boxes.cpu().numpy().astype(np.int32)
+                labels = labels.cpu().numpy().astype(np.int32)
+                bboxes = boxarray_to_boxes(boxes, labels, labelmap)
+                img = draw_bboxes(img, bboxes)
+            grid[i, t] = img
+
+
 def draw_det_boxes(
         img,
         boxes,

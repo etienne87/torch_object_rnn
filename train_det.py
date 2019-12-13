@@ -64,8 +64,8 @@ def main():
         trainer.writer.add_scalar('learning rate', optimizer.param_groups[0]['lr'], epoch)
         scheduler.step(mean_ap_50)
       
-        # if epoch%args.test_every == 0:
-        #     trainer.test(epoch, test_dataset, args)
+        if epoch%args.test_every == 0:
+            trainer.test(epoch, test_dataset, args)
 
 
 if __name__ == '__main__':

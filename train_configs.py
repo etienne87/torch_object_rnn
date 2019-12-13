@@ -43,6 +43,7 @@ def mnist_two_stage_rnn(args):
     args.height = 256
     args.width = 256
     args.epochs = 20
+    args.is_video_dataset = True
     print('==> Preparing dataset..')
     train, val, num_classes = make_moving_mnist(args)
     print('==> Building model..')
@@ -58,6 +59,7 @@ def mnist_rnn(args):
     args.height = 256
     args.width = 256
     args.epochs = 20
+    args.is_video_dataset = True
     print('==> Preparing dataset..')
     train, val, num_classes = make_moving_mnist(args)
     print('==> Building model..')
@@ -91,9 +93,9 @@ def coco_resnet_ssd(args):
 
 
 def movin_coco_rnn_fpn(args):
-    args.lr = 1e-5
+    args.lr = 1e-4
     args.wd = 1e-4
-    args.is_video_dataset = False
+    args.is_video_dataset = True
     print('==> Preparing dataset..')
     train, val, num_classes = make_moving_coco(args.path, args.batchsize, args.num_workers)
     print('==> Building model..')
