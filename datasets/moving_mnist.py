@@ -24,14 +24,15 @@ TEST_DATASET = datasets.MNIST('../data', train=False, download=True,
 
 class MovingMnistAnimation(toy.Animation):
     def __init__(self, t=20, h=128, w=128, c=3, max_stop=15,
-                max_objects=3, train=True):
+                max_objects=1, proc_id = 0, train=True):
         self.dataset_ = TRAIN_DATASET if train else TEST_DATASET
         self.label_offset = 1
+        self.proc_id = proc_id
+        np.random.seed(proc_id)
         super(MovingMnistAnimation, self).__init__(t, h, w, c, max_stop, 'none', 10, max_objects, True)
 
     def reset(self):
         super(MovingMnistAnimation, self).reset()
-
         for i in range(len(self.objects)):
             idx = np.random.randint(0, len(self.dataset_))
             x, y = self.dataset_[idx]
@@ -58,13 +59,16 @@ class MovingMnistAnimation(toy.Animation):
 
 
 class MnistEnv(object):
-    def __init__(self, num=3, niter=1000):
-        self.envs = [MovingMnistAnimation(t=10, h=128, w=128, c=3) for i in range(num)]
+    def __init__(self, proc_id=0, num=3, niter=1000):
+        print('proc_id: ', proc_id)
+        self.envs = [MovingMnistAnimation(t=10, h=128, w=128, c=3, proc_id=proc_id+i) for i in range(num)]
         self.niter = niter
         self.reset() 
-        self.max_steps = 50
+        self.max_steps = 500
         self.step = 0
-        self.max_rounds = niter
+        self.max_iter = niter
+        self.proc_id = proc_id
+        np.random.seed(proc_id)
 
     def reset(self):
         for env in self.envs:
@@ -98,10 +102,11 @@ if __name__ == '__main__':
     from core.utils.vis import boxarray_to_boxes, draw_bboxes, make_single_channel_display
 
     labelmap = [str(i) for i in range(10)]
-    show_batchsize = 4
+    
     tbins, height, width, cin = 10, 128, 128, 3
     array_dim = (tbins, height, width, cin)
-    dataloader = MultiStreamer(MnistEnv, array_dim, batchsize=16, max_q_size=4, num_threads=4)
+    dataloader = MultiStreamer(MnistEnv, array_dim, batchsize=16, max_q_size=2, num_threads=2)
+    show_batchsize = dataloader.batchsize
 
     start = 0
 
@@ -115,7 +120,7 @@ if __name__ == '__main__':
         runtime = time.time() - start
         for t in range(tbins):
             grid[...] = 0
-            for n in range(show_batchsize):
+            for n in range(dataloader.batchsize):
                 img = batch[n, t]
 
                 boxes = targets[n][t] 
@@ -127,7 +132,7 @@ if __name__ == '__main__':
                 grid[n//ncols, n%ncols] = img
             im = grid.swapaxes(1, 2).reshape(nrows * height, ncols * width, 3)
             cv2.imshow('dataset', im)
-            key = cv2.waitKey(5)
+            key = cv2.waitKey(30)
             if key == 27:
                 break
         

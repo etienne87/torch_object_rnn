@@ -33,12 +33,13 @@ class MultiStreamer(object):
 
         self.m_arrays = (mp.Array('f', int(np.prod(array_dim2)), lock=mp.Lock()) for _ in range(num_threads))
         self.arrays = [(m, np.frombuffer(m.get_obj(), dtype='f').reshape(array_dim2)) for m in self.m_arrays]
-        self.max_iter = make_env(0).max_rounds
+        self.max_iter = 100
+        print('num queues: ', len(self.readyQs))
 
     def multi_stream(self, i, m, n, shape):
-        group = self.make_env(num=self.num_videos_per_thread)
+        group = self.make_env(proc_id=i+1, num=self.num_videos_per_thread)
         j = 0
-        while 1:
+        for _ in range(group.max_iter):
             m.acquire()
             info = group.next(n[j])
             self.readyQs[i].put((j, info))
@@ -51,10 +52,10 @@ class MultiStreamer(object):
         print('Start Streaming')
         for i in range(self.max_iter):
             batch = defaultdict(list)
-            for n in range(self.num_threads):
-                j, infos = self.readyQs[n].get() 
-                m, arr = self.arrays[n]
-                self.batch[n] = arr[j]
+            for t in range(self.num_threads):
+                j, infos = self.readyQs[t].get() 
+                m, arr = self.arrays[t]
+                self.batch[t] = arr[j]
                 for k, v in infos.items():
                     batch[k] += v
                 m.release()
