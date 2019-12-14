@@ -17,7 +17,8 @@ class MultiStreamer(object):
     uses the multiprocessing package
     expects the "data" in tensor form with array_dim shape per thread.
     """
-    def __init__(self, make_env, array_dim, batchsize, max_q_size, num_threads):
+    def __init__(self, make_env, array_dim, batchsize, max_q_size, num_threads, collate_fn):
+        num_threads = max(num_threads, 1)
         self.readyQs = [mp.Queue(maxsize=max_q_size) for i in range(num_threads)]
         self.array_dim = array_dim
         self.num_threads = num_threads
@@ -33,11 +34,12 @@ class MultiStreamer(object):
 
         self.m_arrays = (mp.Array('f', int(np.prod(array_dim2)), lock=mp.Lock()) for _ in range(num_threads))
         self.arrays = [(m, np.frombuffer(m.get_obj(), dtype='f').reshape(array_dim2)) for m in self.m_arrays]
-        self.max_iter = 100
-        print('num queues: ', len(self.readyQs))
+        self.dataset = make_env(proc_id=0, num_procs=0, num_envs=0)
+        self.max_iter = self.dataset.max_iter
+        self.collate_fn = collate_fn
 
     def multi_stream(self, i, m, n, shape):
-        group = self.make_env(proc_id=i+1, num=self.num_videos_per_thread)
+        group = self.make_env(proc_id=i+1, num_procs=self.num_threads, num_envs=self.num_videos_per_thread)
         j = 0
         for _ in range(group.max_iter):
             m.acquire()
@@ -60,5 +62,5 @@ class MultiStreamer(object):
                     batch[k] += v
                 m.release()
             batch['data'] = self.batch.reshape(self.batchsize, *self.array_dim)
-            yield batch
+            yield self.collate_fn(batch)
         [p.terminate() for p in procs]

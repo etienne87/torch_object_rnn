@@ -2,12 +2,23 @@ from __future__ import print_function
 from __future__ import absolute_import
 from __future__ import division 
 
+import argparse 
+import sys
+import time
 
+import torch
 import numpy as np
 import random
 import cv2
 import datasets.moving_box_detection as toy
+from datasets.multistreamer import MultiStreamer
+
 from torchvision import datasets, transforms
+from functools import partial 
+
+
+from core.utils.vis import boxarray_to_boxes, draw_bboxes, make_single_channel_display
+
 
 TRAIN_DATASET = datasets.MNIST('../data', train=True, download=True,
                                        transform=transforms.Compose([
@@ -24,7 +35,7 @@ TEST_DATASET = datasets.MNIST('../data', train=False, download=True,
 
 class MovingMnistAnimation(toy.Animation):
     def __init__(self, t=20, h=128, w=128, c=3, max_stop=15,
-                max_objects=1, proc_id = 0, train=True):
+                max_objects=2, proc_id = 0, train=True):
         self.dataset_ = TRAIN_DATASET if train else TEST_DATASET
         self.label_offset = 1
         self.proc_id = proc_id
@@ -54,21 +65,20 @@ class MovingMnistAnimation(toy.Animation):
             boxes[i] = np.array([x1, y1, x2, y2, object.class_id + self.label_offset])
             thumbnail = cv2.resize(object.img, (x2-x1, y2-y1), cv2.INTER_LINEAR)
             self.img[y1:y2, x1:x2] = np.maximum(self.img[y1:y2, x1:x2], thumbnail)
-        output = self.img * 255
+        output = self.img 
         return output, boxes
 
 
 class MnistEnv(object):
-    def __init__(self, proc_id=0, num=3, niter=1000):
-        print('proc_id: ', proc_id)
-        self.envs = [MovingMnistAnimation(t=10, h=128, w=128, c=3, proc_id=proc_id+i) for i in range(num)]
+    def __init__(self, proc_id=0, num_procs=1, num_envs=3, niter=100, **kwargs):
+        self.envs = [MovingMnistAnimation(proc_id=proc_id+i, **kwargs) for i in range(num_envs)]
         self.niter = niter
         self.reset() 
         self.max_steps = 500
         self.step = 0
         self.max_iter = niter
         self.proc_id = proc_id
-        np.random.seed(proc_id)
+        self.labelmap = [str(i) for i in range(10)]
 
     def reset(self):
         for env in self.envs:
@@ -79,7 +89,7 @@ class MnistEnv(object):
         all_boxes = []
         reset = self.step > self.max_steps
         if reset: 
-            self.step
+            self.step = 0
             for env in self.envs:
                 env.reset()    
         for i, env in enumerate(self.envs):
@@ -91,21 +101,44 @@ class MnistEnv(object):
             all_boxes.append(env_boxes)
 
         self.step += tbins
-        return {'boxes': all_boxes, 'reset': [reset]*len(self.envs)}
+        return {'boxes': all_boxes, 'resets': [reset]*len(self.envs)}
 
+
+def collate_fn(data):
+    #permute NTCHW - TNCHW
+    batch, boxes, resets = data['data'], data['boxes'], data['resets']
+    batch = torch.from_numpy(batch).permute(1,0,4,2,3)
+    t, n = batch.shape[:2]
+    boxes = [[torch.from_numpy(boxes[i][t]) for i in range(n)] for t in range(t)]
+    resets = 1-torch.FloatTensor(resets)
+    return {'data': batch, 'boxes': boxes, 'resets': resets}
+
+
+def make_moving_mnist(args):
+    tbins, height, width, cin = 10, 256, 256, 3
+    array_dim = (tbins, height, width, cin)
+    env_train = partial(MnistEnv, t=tbins, h=height, w=width, c=cin, train=True)
+    env_val = partial(MnistEnv, t=tbins, h=height, w=width, c=cin, train=False)
+    train_dataset = MultiStreamer(env_train, array_dim, batchsize=args.batchsize, max_q_size=4, num_threads=args.num_workers, collate_fn=collate_fn)
+    test_dataset = MultiStreamer(env_val, array_dim, batchsize=args.batchsize, max_q_size=4, num_threads=args.num_workers, collate_fn=collate_fn)
+    classes = 10
+    return train_dataset, test_dataset, classes
+
+
+
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description='Mnist Reader')
+    parser.add_argument('--batchsize', type=int, default=8, help='batchsize')
+    parser.add_argument('--num_workers', action='store_true', help="viz videos or images")
+    return parser.parse_args()
 
 
 if __name__ == '__main__':
-    import sys
-    import time
-    from datasets.multistreamer import MultiStreamer
-    from core.utils.vis import boxarray_to_boxes, draw_bboxes, make_single_channel_display
-
-    labelmap = [str(i) for i in range(10)]
-    
-    tbins, height, width, cin = 10, 128, 128, 3
-    array_dim = (tbins, height, width, cin)
-    dataloader = MultiStreamer(MnistEnv, array_dim, batchsize=16, max_q_size=2, num_threads=2)
+   
+    args = parse_args()
+    dataloader, _, _ = make_moving_mnist(args)
     show_batchsize = dataloader.batchsize
 
     start = 0
@@ -113,26 +146,24 @@ if __name__ == '__main__':
     nrows = 2 ** ((show_batchsize.bit_length() - 1) // 2)
     ncols = show_batchsize // nrows
 
-    grid = np.zeros((nrows, ncols, height, width, 3), dtype=np.uint8)
+    grid = np.zeros((nrows, ncols, 256, 256, 3), dtype=np.uint8)
 
     for i, data in enumerate(dataloader):
         batch, targets = data['data'], data['boxes']
+        height, width = batch.shape[-2], batch.shape[-1]
         runtime = time.time() - start
-        for t in range(tbins):
+        for t in range(10):
             grid[...] = 0
             for n in range(dataloader.batchsize):
-                img = batch[n, t]
-
-                boxes = targets[n][t] 
+                img = batch[t,n].permute(1, 2, 0).cpu().numpy()*255
+                boxes = targets[t][n].numpy() 
                 boxes = boxes.astype(np.int32)
-                bboxes = boxarray_to_boxes(boxes[:, :4], boxes[:, 4]-1, labelmap)
-                img = draw_bboxes(img, bboxes)
-
-                
+                bboxes = boxarray_to_boxes(boxes[:, :4], boxes[:, 4]-1, dataloader.dataset.labelmap)
+                img = draw_bboxes(img, bboxes) 
                 grid[n//ncols, n%ncols] = img
             im = grid.swapaxes(1, 2).reshape(nrows * height, ncols * width, 3)
             cv2.imshow('dataset', im)
-            key = cv2.waitKey(30)
+            key = cv2.waitKey(5)
             if key == 27:
                 break
         
