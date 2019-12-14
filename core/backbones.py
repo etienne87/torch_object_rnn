@@ -15,7 +15,7 @@ class FPN(nn.Module):
     def __init__(self, cin=1, cout=256, nmaps=3):
         super(FPN, self).__init__()
         self.cin = cin
-        self.base = 8
+        self.base = 16
         self.cout = cout
         self.nmaps = nmaps
         self.levels = 4
