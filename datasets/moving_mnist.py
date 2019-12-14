@@ -79,6 +79,7 @@ class MnistEnv(object):
         self.max_iter = niter
         self.proc_id = proc_id
         self.labelmap = [str(i) for i in range(10)]
+        self.label_offset = 1
 
     def reset(self):
         for env in self.envs:
@@ -111,14 +112,15 @@ def collate_fn(data):
     t, n = batch.shape[:2]
     boxes = [[torch.from_numpy(boxes[i][t]) for i in range(n)] for t in range(t)]
     resets = 1-torch.FloatTensor(resets)
+    resets = resets[:,None,None,None]
     return {'data': batch, 'boxes': boxes, 'resets': resets}
 
 
 def make_moving_mnist(args):
     tbins, height, width, cin = 10, 256, 256, 3
     array_dim = (tbins, height, width, cin)
-    env_train = partial(MnistEnv, t=tbins, h=height, w=width, c=cin, train=True)
-    env_val = partial(MnistEnv, t=tbins, h=height, w=width, c=cin, train=False)
+    env_train = partial(MnistEnv, niter=args.train_iter, t=tbins, h=height, w=width, c=cin, train=True)
+    env_val = partial(MnistEnv, niter=args.test_iter, t=tbins, h=height, w=width, c=cin, train=False)
     train_dataset = MultiStreamer(env_train, array_dim, batchsize=args.batchsize, max_q_size=4, num_threads=args.num_workers, collate_fn=collate_fn)
     test_dataset = MultiStreamer(env_val, array_dim, batchsize=args.batchsize, max_q_size=4, num_threads=args.num_workers, collate_fn=collate_fn)
     classes = 10

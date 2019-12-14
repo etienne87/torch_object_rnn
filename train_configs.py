@@ -6,7 +6,8 @@ from __future__ import print_function
 import torch.optim as optim
 import torch.backends.cudnn as cudnn
 
-from datasets.moving_mnist_detection import make_moving_mnist
+#from datasets.moving_mnist_detection import make_moving_mnist
+from datasets.moving_mnist import make_moving_mnist
 from datasets.coco_detection import make_still_coco, make_moving_coco
 from core.single_stage_detector import SingleStageDetector
 from core.two_stage_detector import TwoStageDetector
@@ -63,7 +64,7 @@ def mnist_rnn(args):
     print('==> Preparing dataset..')
     train, val, num_classes = make_moving_mnist(args)
     print('==> Building model..')
-    net = SingleStageDetector.tiny_rnn_fpn(3, num_classes, act='sigmoid', loss='_focal_loss')
+    net = SingleStageDetector.tiny_rnn_fpn(3, num_classes, act='softmax', loss='_focal_loss')
     net, optimizer, scheduler, start_epoch = adam_optim(net, args)
     return net, optimizer, scheduler, train, val, start_epoch
 

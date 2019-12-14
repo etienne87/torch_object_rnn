@@ -41,9 +41,7 @@ class DetTrainer(object):
         print('\nEpoch: %d (train)' % epoch)
         self.net.train()
         self.net.reset()
-        dataloader.dataset.max_consecutive_batches = 4 #(2 ** epoch)
-        dataloader.dataset.build()
-
+  
         stats = {'runtime':{'dataloader': hist.HistoryBuffer(),'network': hist.HistoryBuffer()},
                  'loss': hist.HistoryBuffer()}
 
@@ -101,10 +99,7 @@ class DetTrainer(object):
         print('\nEpoch: %d (val)' % epoch)
         self.net.eval()
         self.net.reset()
-        #TODO: set this depending on curriculum argument
-        dataloader.dataset.max_consecutive_batches = 4 #(2 ** epoch)
-        dataloader.dataset.build()
-
+ 
         gts = [] #list of K array of size 5
         proposals = [] #list of K array of size 6
       
