@@ -4,7 +4,7 @@ Tests anchors are working correctly.
 from __future__ import print_function
 from core.anchors import Anchors
 from core.utils import box, opts
-from datasets.moving_box_detection import SquaresVideos
+from datasets.moving_box import Animation
 import torch
 
 
@@ -20,11 +20,14 @@ class TestAnchors(object):
         self.fg_iou_threshold = fg_iou_threshold
         self.allow_low_quality_matches = allow_low_quality_matches
         self.num_classes = 3
-        self.box_generator = SquaresVideos(self.batchsize, self.time, self.height, self.width, max_objects=3, max_classes=3, render=False)
+        self.box_generators = [Animation(self.height, self.width, 3,  max_objects=3, max_classes=3)
+                                for i in range(self.batchsize)]
         self.box_coder = Anchors(allow_low_quality_matches=allow_low_quality_matches, bg_iou_threshold=bg_iou_threshold, fg_iou_threshold=fg_iou_threshold)
         self.fmaps = []
         for i in range(len(self.box_coder.pyramid_levels)):
             self.fmaps += [torch.zeros((self.batchsize, 1, self.height >> (3 + i), self.width >> (3 + i)))]
+        targets = [[torch.from_numpy(self.box_generators[i].run()) for i in range(self.batchsize)] for t in range(self.time)]
+        return targets 
 
     def assert_equal(self, x, y):
         assert (x-y).abs().max().item() == 0
@@ -55,10 +58,8 @@ class TestAnchors(object):
         return all_loc, all_cls
 
     def pytestcase_batch_box_iou(self):
-        self.init(7, 3)
+        targets = self.init(7, 3)
         anchors, anchors_xyxy = self.box_coder(self.fmaps)
-        targets = [self.box_generator[i][1] for i in range(self.batchsize)]
-        targets = [[targets[i][t] for i in range(self.batchsize)] for t in range(self.time)]
         gt_padded, _ = box.pack_boxes_list_of_list(targets)
         gt_boxes = gt_padded[..., :4]
         batch_iou = box.batch_box_iou(anchors_xyxy, gt_boxes.clone())
@@ -68,9 +69,7 @@ class TestAnchors(object):
             assert max_abs_diff == 0
 
     def pytestcase_batched_encode_only_best_quality(self):
-        self.init(3, 7, allow_low_quality_matches=False)
-        targets = [self.box_generator[i][1] for i in range(self.batchsize)]
-        targets = [[targets[i][t] for i in range(self.batchsize)] for t in range(self.time)]
+        targets = self.init(3, 7, allow_low_quality_matches=False)
         anchors, anchors_xyxy = self.box_coder(self.fmaps)
         loc_targets, cls_targets = self.box_coder.encode(anchors, anchors_xyxy, targets)
         loc_targets2, cls_targets2 = self.encode_sequential(targets, anchors, anchors_xyxy,
@@ -87,9 +86,7 @@ class TestAnchors(object):
         assert cat_diff.abs().max() == 0
 
     def pytestcase_batched_encode_allow_low_quality(self):
-        self.init(3, 7, allow_low_quality_matches=True)
-        targets = [self.box_generator[i][1] for i in range(self.batchsize)]
-        targets = [[targets[i][t] for i in range(self.batchsize)] for t in range(self.time)]
+        targets = self.init(3, 7, allow_low_quality_matches=True)
         anchors, anchors_xyxy = self.box_coder(self.fmaps)
         loc_targets, cls_targets = self.box_coder.encode(anchors, anchors_xyxy, targets)
         loc_targets2, cls_targets2 = self.encode_sequential(targets, anchors, anchors_xyxy,
@@ -114,9 +111,7 @@ class TestAnchors(object):
         return t
 
     def pytestcase_batched_decode_boxes(self):
-        self.init(1, 1, allow_low_quality_matches=True, bg_iou_threshold=0.4, fg_iou_threshold=0.5)
-        targets = [self.box_generator[i][1] for i in range(self.batchsize)]
-        targets = [[targets[i][t] for i in range(self.batchsize)] for t in range(self.time)]
+        targets = self.init(1, 1, allow_low_quality_matches=True, bg_iou_threshold=0.4, fg_iou_threshold=0.5)
         anchors, anchors_xyxy = self.box_coder(self.fmaps)
         loc_targets, cls_targets = self.box_coder.encode(anchors, anchors_xyxy, targets)
         scores = self.one_hot(cls_targets, self.num_classes)

@@ -166,6 +166,7 @@ class Animation(object):
         self.max_objects = max_objects
         self.num_objects = np.random.randint(1, max_objects + 1)
         self.objects = []
+        self.label_offset = 1
         for i in range(self.num_objects):
             self.objects += [MovingSquare(self.height, self.width, max_stop, max_classes=max_classes)]
         self.reset()
@@ -183,4 +184,8 @@ class Animation(object):
         self.first_iteration = True
 
     def run(self):
-        raise NotImplementedError()
+        boxes = np.zeros((len(self.objects), 5), dtype=np.float32)
+        for i, anim in enumerate(self.objects):
+            x1, y1, x2, y2 = anim.run()
+            boxes[i] = np.array([x1, y1, x2, y2, anim.class_id + self.label_offset])
+        return boxes
