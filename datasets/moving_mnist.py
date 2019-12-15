@@ -10,7 +10,7 @@ import torch
 import numpy as np
 import random
 import cv2
-import datasets.moving_box_detection as toy
+import datasets.moving_box as toy
 from datasets.multistreamer import MultiStreamer
 
 from torchvision import datasets, transforms
@@ -32,12 +32,13 @@ TEST_DATASET = datasets.MNIST('../data', train=False, download=True,
 
 
 class MovingMnistAnimation(toy.Animation):
-    def __init__(self, t=20, h=128, w=128, c=3, max_stop=15,
+    def __init__(self, h=128, w=128, c=3, max_stop=15,
                 max_objects=2, anim_id = 0, train=True):
         self.dataset_ = TRAIN_DATASET if train else TEST_DATASET
         self.label_offset = 1
+        self.channels = c
         np.random.seed(anim_id)
-        super(MovingMnistAnimation, self).__init__(t, h, w, c, max_stop, 'none', 10, max_objects, True)
+        super(MovingMnistAnimation, self).__init__(h, w, c, max_stop, 10, max_objects)
 
     def reset(self):
         super(MovingMnistAnimation, self).reset()
@@ -116,8 +117,8 @@ def collate_fn(data):
 def make_moving_mnist(train_iter=10, test_iter=10, tbins=10, num_workers=1, batchsize=8):
     height, width, cin = 256, 256, 3
     array_dim = (tbins, height, width, cin)
-    env_train = partial(MnistEnv, niter=train_iter, t=tbins, h=height, w=width, c=cin, train=True)
-    env_val = partial(MnistEnv, niter=test_iter, t=tbins, h=height, w=width, c=cin, train=False)
+    env_train = partial(MnistEnv, niter=train_iter, h=height, w=width, c=cin, train=True)
+    env_val = partial(MnistEnv, niter=test_iter, h=height, w=width, c=cin, train=False)
     train_dataset = MultiStreamer(env_train, array_dim, batchsize=batchsize, max_q_size=4, num_threads=num_workers, collate_fn=collate_fn)
     test_dataset = MultiStreamer(env_val, array_dim, batchsize=batchsize, max_q_size=4, num_threads=num_workers, collate_fn=collate_fn)
     classes = 10
@@ -153,7 +154,7 @@ def show_mnist(train_iter=10, test_iter=10, tbins=10, num_workers=1, batchsize=8
                     grid[n//ncols, n%ncols] = img
                 im = grid.swapaxes(1, 2).reshape(nrows * height, ncols * width, 3)
                 cv2.imshow('dataset', im)
-                key = cv2.waitKey(20)
+                key = cv2.waitKey(5)
                 if key == 27:
                     break
             
