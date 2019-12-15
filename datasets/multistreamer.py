@@ -37,12 +37,14 @@ class MultiStreamer(object):
         self.dataset = make_env(proc_id=0, num_procs=0, num_envs=0)
         self.max_iter = self.dataset.max_iter
         self.collate_fn = collate_fn
+        self.epoch = 0
     
     def __len__(self):
         return self.max_iter
 
     def multi_stream(self, i, m, n, shape):
-        group = self.make_env(proc_id=i+1, num_procs=self.num_threads, num_envs=self.num_videos_per_thread)
+        group = self.make_env(proc_id=i+1, num_procs=self.num_threads, 
+        num_envs=self.num_videos_per_thread, epoch=self.epoch)
         j = 0
         for _ in range(group.max_iter):
             m.acquire()
@@ -66,3 +68,4 @@ class MultiStreamer(object):
             batch['data'] = self.batch.reshape(self.batchsize, *self.array_dim)
             yield self.collate_fn(batch)
         [p.terminate() for p in procs]
+        self.epoch += 1

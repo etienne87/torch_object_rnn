@@ -436,11 +436,11 @@ def make_still_coco(root_dir, batchsize, num_workers, fixed_size=True):
     return train_loader, val_loader, len(dataset_train.labels)
 
 
-def make_moving_coco(root_dir, batchsize, num_workers):
+def make_moving_coco(root_dir, batchsize, num_workers, num_tbins=5):
     dataset_train = CocoDataset(root_dir, set_name='train2017', transform=transforms.Compose([
-        Normalizer(), Flipper(), Resizer(fixed_size=True), CameraMotion(10)]))
+        Normalizer(), Flipper(), Resizer(fixed_size=True), CameraMotion(num_tbins)]))
     dataset_val = CocoDataset(root_dir, set_name='val2017',
-                              transform=transforms.Compose([Normalizer(), Resizer(fixed_size=True), CameraMotion(10)]))
+                              transform=transforms.Compose([Normalizer(), Resizer(fixed_size=True), CameraMotion(num_tbins)]))
 
     train_loader = DataLoader(dataset_train, num_workers=num_workers, batch_size=batchsize,
                                 collate_fn=video_collater, pin_memory=True)
