@@ -116,6 +116,18 @@ class ASPP(nn.Module):
         return res
 
 
+#As a Sanity-Check to compare with the O-Net
+class HighwayGate(nn.Module):
+    def __init__(self, in_channels):
+        super(HighwayGate, self).__init__()
+        self.conv = nn.Conv2d(in_channels, in_channels*2, kernel_size=3, stride=1, padding=1)
+
+    def forward(self, x):
+        tmp = self.conv(x)
+        i, g = torch.split(tmp, x.shape[1], dim=1)
+        h = x + torch.sigmoid(i) * torch.tanh(g)
+        return h
+
 
 
 class RNNCell(nn.Module):
@@ -365,6 +377,7 @@ class ConvRNN(nn.Module):
             factor = 4
 
 
+        # self.highway = SequenceWise(HighwayGate(out_channels))
 
         self.conv_x2h = SequenceWise(ConvLayer(in_channels, factor * out_channels,
                                              kernel_size=kernel_size,
@@ -374,8 +387,10 @@ class ConvRNN(nn.Module):
                                              activation='Identity'))
 
     def forward(self, x):
+        #TODO: remove highway after
         y = self.conv_x2h(x)
         h = self.timepool(y)
+        # h = self.highway(h)
         return h
 
     def reset(self, mask):
