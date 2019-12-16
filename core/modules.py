@@ -392,7 +392,9 @@ class ConvRNN(nn.Module):
                                              padding=padding,
                                              activation='Identity')) """
 
-        self.conv_x2h = SequenceWise(ConvLayer(in_channels, factor * out_channels, stride=stride))
+        self.conv_x2h = SequenceWise(ConvLayer(in_channels, factor * out_channels, 
+        activation='Identity',
+        stride=stride))
 
     def forward(self, x):
         #TODO: remove highway after
