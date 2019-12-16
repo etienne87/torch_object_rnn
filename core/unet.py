@@ -29,7 +29,7 @@ class UNet(nn.Module):
         up = partial(up_func, kernel_size=3, stride=1, padding=1, dilation=1)
         #up = lambda x, y: SequenceWise(nn.Sequential(nn.Conv2d(x, y, kernel_size=3, stride=1, padding=1),
         #nn.ReLU6()))
-        skip = lambda x, y: SequenceWise(nn.Conv2d(x, y, 1, 1, 0))
+        skip = lambda x, y: SequenceWise(nn.Conv2d(x, y, kernel_size=3, stride=1, padding=1))
 
         self.downs = nn.ModuleList()
         self.ups = nn.ModuleList()

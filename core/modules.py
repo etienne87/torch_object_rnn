@@ -187,7 +187,7 @@ class ConvLSTMCell(RNNCell):
                                   out_channels=4 * self.hidden_dim,
                                   kernel_size=kernel_size,
                                   padding=1,
-                                  bias=False)
+                                  bias=True)
 
         self.reset()
 
@@ -202,6 +202,11 @@ class ConvLSTMCell(RNNCell):
         if self.prev_h is not None:
             self.prev_h = self.prev_h.detach()
             self.prev_c = self.prev_c.detach()
+        else:
+            shape = list(xiseq[0][0].shape)
+            shape[1] = self.hidden_dim
+            self.prev_h = torch.zeros(shape, dtype=torch.float32, device=xi.device)
+            self.prev_c = torch.zeros(shape, dtype=torch.float32, device=xi.device)
 
         result = []
         for t, xt in enumerate(xiseq):
@@ -274,6 +279,11 @@ class ConvGRUCell(RNNCell):
 
         if self.prev_h is not None:
             self.prev_h = self.prev_h.detach()
+        else:
+            shape = list(xiseq[0].shape)
+            shape[1] = self.hidden_dim
+            self.prev_h = torch.zeros(shape, dtype=torch.float32, device=x.device)
+            self.prev_c = torch.zeros(shape, dtype=torch.float32, device=x.device)
 
         result = []
         for t, xt in enumerate(xiseq):
@@ -340,11 +350,7 @@ class ConvIRNNCell(RNNCell):
         for t, xt in enumerate(xiseq):
             xt = xt.squeeze(0)
 
-            if self.prev_h is not None:
-                tmp = self.conv_h2h(self.prev_h) + xt
-            else:
-                tmp = xt
-
+            tmp = self.conv_h2h(self.prev_h) + xt
             h = F.relu(tmp)
 
             result.append(h.unsqueeze(0))
@@ -360,7 +366,7 @@ class ConvRNN(nn.Module):
     r"""ConvRNN module.
     """
     def __init__(self, in_channels, out_channels,
-                 kernel_size=5, stride=1, padding=2, dilation=1,
+                 kernel_size=3, stride=1, padding=1, dilation=1,
                  cell='lstm', hard=False):
         super(ConvRNN, self).__init__()
 
@@ -379,12 +385,14 @@ class ConvRNN(nn.Module):
 
         # self.highway = SequenceWise(HighwayGate(out_channels))
 
-        self.conv_x2h = SequenceWise(ConvLayer(in_channels, factor * out_channels,
+        """ self.conv_x2h = SequenceWise(ConvLayer(in_channels, factor * out_channels,
                                              kernel_size=kernel_size,
                                              stride=stride,
                                              dilation=dilation,
                                              padding=padding,
-                                             activation='Identity'))
+                                             activation='Identity')) """
+
+        self.conv_x2h = SequenceWise(ConvLayer(in_channels, factor * out_channels, stride=stride))
 
     def forward(self, x):
         #TODO: remove highway after
