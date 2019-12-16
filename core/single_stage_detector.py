@@ -78,7 +78,7 @@ class SingleStageDetector(nn.Module):
         return targets
 
     @classmethod
-    def tiny_rnn_fpn(cls, in_channels, num_classes, act='sigmoid', loss='_focal_loss'):
+    def unet_rnn(cls, in_channels, num_classes, act='sigmoid', loss='_focal_loss'):
         return cls(FPN, BoxHead, in_channels, num_classes, act, ratios=[1.0], scales=[1.0, 1.5], loss=loss)
 
     @classmethod

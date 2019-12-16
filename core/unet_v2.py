@@ -88,6 +88,10 @@ class UNet(nn.Module):
             if hasattr(module, "reset"):
                 module.reset()
 
+    def upsample(self, x, size):
+        x = F.interpolate(x, size=size, mode='nearest')
+        return x
+
     def fuse(self, x, y):
         if self.mode == 'cat':
             return torch.cat([x, y], dim=2)
@@ -95,6 +99,7 @@ class UNet(nn.Module):
             return x + y
 
     def forward(self, x):
+        xin = x
         outs = []
         for down_layer in self.downs:
             x = down_layer(x)
@@ -103,12 +108,12 @@ class UNet(nn.Module):
         middle = len(outs)-1
 
         for i, (skip_layer, up_layer) in enumerate(zip(self.skips, self.ups)):
-            top = up_layer(self.upsample(outs[-1]))
             side = skip_layer(outs[middle - i - 1])
+            top = up_layer(self.upsample(outs[-1], side.shape[-2:]))
             x = self.fuse(top, side)
             outs.append(x)
 
-        x = self.ups[-1](self.upsample(outs[-1]))
+        x = self.ups[-1](self.upsample(outs[-1], xin.shape[-2:]))
         outs.append(x)
 
         return outs
@@ -141,7 +146,7 @@ class ONet(UNet):
         for down, up in zip(self.downs, self.ups[::-1]):
             in_channels = up.out_channels
             out_channels = down.out_channels
-            self.feedbacks.append(nn.Conv2d(in_channels, 2 * out_channels, 1, 1, 0))
+            self.feedbacks.append(nn.Conv2d(in_channels, 2 * out_channels, kernel_size=3, stride=2, padding=1))
 
     def forward(self, x):
         res = super().forward(x)
@@ -149,7 +154,8 @@ class ONet(UNet):
         for down, up, fb in zip(self.downs, self.ups[::-1], self.feedbacks):
             tmp = fb(up.prev_h)
             i, g = torch.split(tmp, down.out_channels, dim=1)
-            down.prev_h += torch.sigmoid(i) * torch.tanh(g)
+            if down.prev_h is not None:
+                down.prev_h = down.prev_h + torch.sigmoid(i) * torch.tanh(g)
 
         return res
 

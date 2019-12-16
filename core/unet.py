@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from core.utils.opts import time_to_batch, batch_to_time
-from core.modules_bkup import ConvLayer, SequenceWise, ConvRNN, Bottleneck
+from core.modules import ConvLayer, SequenceWise, ConvRNN, Bottleneck
 from functools import partial
 
 
@@ -25,9 +25,10 @@ class UNet(nn.Module):
         """
         super(UNet, self).__init__()
 
-        down = partial(down_func, kernel_size=3, stride=stride, padding=1, dilation=1)
+        down = partial(down_func, kernel_size=3, stride=stride, padding=3, dilation=1)
         up = partial(up_func, kernel_size=3, stride=1, padding=1, dilation=1)
-        # up = lambda x, y: SequenceWise(nn.Conv2d(x, y, kernel_size=3, stride=1, padding=1))
+        #up = lambda x, y: SequenceWise(nn.Sequential(nn.Conv2d(x, y, kernel_size=3, stride=1, padding=1),
+        #nn.ReLU6()))
         skip = lambda x, y: SequenceWise(nn.Conv2d(x, y, 1, 1, 0))
 
         self.downs = nn.ModuleList()
@@ -141,7 +142,7 @@ class UNet(nn.Module):
 
 
 if __name__ == '__main__':
-    t, n, c, h, w = 10, 3, 3, 128, 128
+    t, n, c, h, w = 10, 3, 3, 240, 320
     x = torch.rand(t, n, c, h, w)
     net = UNet([3, 32, 64, 128, 64, 32, 16], mode='sum')
     out = net(x)
