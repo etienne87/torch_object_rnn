@@ -10,42 +10,41 @@ from core.modules import ConvLayer, SequenceWise, ConvRNN, Bottleneck
 from functools import partial
 
 
+def sequence_upsample(x, y):
+    x, n = time_to_batch(x)
+    x = F.interpolate(x, size=y.shape[-2:], mode='nearest')
+    x = batch_to_time(x, n)
+    return x
+
 class UNet(nn.Module):
-    def __init__(self, channel_list, mode='sum', stride=2, down_func=ConvRNN, up_func=ConvRNN):
+    def __init__(self, channel_list, mode, down, up, skip, resize):
         """
-        UNET generic
+        UNET generic: user's choice of layers
 
         :param in_channels:
         :param channel_list: odd list of channels for all layers
         :param mode: 'sum' or 'cat'
-        :param stride: multiple of 2
-        :param down_func: down function
-        :param up_func: up function
-        :param skip_func: skip function
+        :param down: down function with signature f(x, y), from channels x to y
+        :param up: up function with signature f(x, y), from channels x to y
+        :param skip: skip function with signature f(x, y), from channels x to y
+        :param resize: resize function with signature f(x, y), resize x like y
         """
         super(UNet, self).__init__()
 
-        down = partial(down_func, kernel_size=3, stride=stride, padding=3, dilation=1)
-        up = partial(up_func, kernel_size=3, stride=1, padding=1, dilation=1)
-        #up = lambda x, y: SequenceWise(nn.Sequential(nn.Conv2d(x, y, kernel_size=3, stride=1, padding=1),
-        #nn.ReLU6()))
-        skip = lambda x, y: SequenceWise(nn.Conv2d(x, y, kernel_size=3, stride=1, padding=1))
-
         self.downs = nn.ModuleList()
         self.ups = nn.ModuleList()
-
-        self.downstride = stride
         self.mode = mode
+        self.resize = resize
 
-        down_list, up_list, skip_list = self.get_inout_channels_unet(channel_list, mode)
-
-        self.downs += [down(item[0], item[1]) for item in down_list]
-        self.ups += [up(item[0], item[1]) for item in up_list]
+        self.down_list, self.up_list, self.skip_list = self.get_inout_channels_unet(channel_list, mode)
+        
+        self.downs += [down(item[0], item[1]) for item in self.down_list]
+        self.ups += [up(item[0], item[1]) for item in self.up_list]
         if self.mode == 'sum':
             self.skips = nn.ModuleList()
-            self.skips += [skip(item[0], item[1]) for item in skip_list]
+            self.skips += [skip(item[0], item[1]) for item in self.skip_list]
         else:
-            self.skips = [lambda x:x for _ in up_list][:-1]
+            self.skips = [lambda x:x for _ in self.up_list][:-1]
 
     @staticmethod
     def print_shapes(activation_list):
@@ -66,8 +65,6 @@ class UNet(nn.Module):
                     mirror = middle - (i + 1 - middle)
                     skips.append((channel_list[mirror], channel_list[i + 1]))
                     decoders.append((channel_list[i], channel_list[i + 1]))
-
-            skips = skips[:-1]
         else:
             middle = (len(channel_list) - 1) // 2
             for i in range(len(channel_list) - 1):
@@ -89,15 +86,9 @@ class UNet(nn.Module):
         else:
             return x + y
 
-    def upsample(self, x, size):
-        x, n = time_to_batch(x)
-        x = F.interpolate(x, size=size, mode='nearest')
-        x = batch_to_time(x, n)
-        return x
-
     def forward(self, x):
         xin = x
-        outs = []
+        outs = [x]
         for down_layer in self.downs:
             x = down_layer(x)
             outs.append(x)
@@ -106,12 +97,9 @@ class UNet(nn.Module):
 
         for i, (skip_layer, up_layer) in enumerate(zip(self.skips, self.ups)):
             side = skip_layer(outs[middle - i - 1])
-            top = up_layer(self.upsample(outs[-1], side.shape[-2:]))
+            top = up_layer(self.resize(outs[-1], side))
             x = self.fuse(top, side)
             outs.append(x)
-
-        x = self.ups[-1](self.upsample(outs[-1], xin.shape[-2:]))
-        outs.append(x)
 
         return outs
 
@@ -127,22 +115,29 @@ class UNet(nn.Module):
     def _repr_module_list(self, module_list):
         repr = ''
         for i, module in enumerate(module_list):
-            repr += str(i)+': '+str(module.in_channels)+";"+str(module.out_channels)+'\n'
+            repr += str(i)+': '+str(module[0])+";"+str(module[1])+'\n'
         return repr
 
     def __repr__(self):
         repr = ''
         repr += 'downs: ' + '\n'
-        repr += self._repr_module_list(self.downs)
+        repr += self._repr_module_list(self.down_list)
         repr += 'skips: ' + '\n'
-        repr += self._repr_module_list(self.skips)
+        repr += self._repr_module_list(self.skip_list)
         repr += 'ups: ' + '\n'
-        repr += self._repr_module_list(self.ups)
+        repr += self._repr_module_list(self.up_list)
         return repr
 
+    @classmethod
+    def recurrent_unet(cls, channel_list, mode='sum'):
+        down = lambda x, y: ConvRNN(x, y, stride=2)
+        up = lambda x, y: ConvRNN(x, y)
+        skip = lambda x, y: SequenceWise(nn.Conv2d(x, y, kernel_size=3, stride=1, padding=1))
+        return UNet(channel_list, mode, down, up, skip, sequence_upsample)
 
 if __name__ == '__main__':
     t, n, c, h, w = 10, 3, 3, 240, 320
     x = torch.rand(t, n, c, h, w)
-    net = UNet([3, 32, 64, 128, 64, 32, 16], mode='sum')
+    net = UNet.recurrent_unet([3, 32, 64, 128, 64, 32, 16], mode='sum')
+    print(net)
     out = net(x)

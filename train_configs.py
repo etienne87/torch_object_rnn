@@ -100,6 +100,6 @@ def movin_coco_rnn_fpn(args):
     print('==> Preparing dataset..')
     train, val, num_classes = make_moving_coco(args.path, args.batchsize, args.num_workers)
     print('==> Building model..')
-    net = SingleStageDetector.tiny_rnn_fpn(3, num_classes)
+    net = SingleStageDetector.unet_rnn(3, num_classes)
     net, optimizer, scheduler, start_epoch = adam_optim(net, args)
     return net, optimizer, scheduler, train, val, start_epoch

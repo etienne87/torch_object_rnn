@@ -9,8 +9,8 @@ from core.utils.opts import time_to_batch, batch_to_time
 from core.modules import ConvLayer, SequenceWise, ConvRNN, Bottleneck, BottleneckLSTM
 from core.unet import UNet
 
-from core.modules_v2 import RNNWise
-from core.unet_v2 import ONet
+from core.recurrent import RNNWise
+from core.onet import ONet
 
 class FPN(nn.Module):
     def __init__(self, cin=1, cout=256, nmaps=3):
@@ -27,8 +27,7 @@ class FPN(nn.Module):
             Bottleneck(self.base * 4, self.base * 8, 2),
         ))  
 
-        #self.conv2 = UNet([self.base * 8] * (self.levels-1) + [cout] * self.levels, 
-        #down_func=ConvRNN, up_func=ConvRNN)
+        #self.conv2 = UNet.recurrent_unet([self.base * 8] * (self.levels-1) + [cout] * self.levels)
     
         self.conv2 = RNNWise(ONet([self.base * 8] * (self.levels-1) + [cout] * self.levels))
 
@@ -45,6 +44,8 @@ class FPN(nn.Module):
         for name, module in self._modules.items():
             if hasattr(module, "reset"):
                 module.reset(mask)
+            if hasattr(module, "reset_modules"):
+                module.reset_modules(mask)
 
 
 class Trident(nn.Module):
