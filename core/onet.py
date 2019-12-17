@@ -13,7 +13,7 @@ from core.unet import UNet
 
 
 class ONet(UNet):
-    def __init__(self, channel_list, mode='sum', stride=2):
+    def __init__(self, channel_list, mode='cat', stride=2):
         down, up = partial(ConvLSTMCell, stride=2), partial(ConvLSTMCell, stride=1)
         skip = partial(nn.Conv2d, kernel_size=3, stride=1, padding=1)
         resize = lambda x,y: F.interpolate(x, size=y.shape[-2:], mode='nearest')

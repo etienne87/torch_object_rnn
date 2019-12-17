@@ -17,7 +17,7 @@ class MultiStreamer(object):
     uses the multiprocessing package
     expects the "data" in tensor form with array_dim shape per thread.
     """
-    def __init__(self, make_env, array_dim, batchsize, max_q_size, num_threads, collate_fn):
+    def __init__(self, make_env, array_dim, batchsize, max_q_size, num_threads, collate_fn, epoch=0):
         num_threads = max(num_threads, 1)
         self.readyQs = [mp.Queue(maxsize=max_q_size) for i in range(num_threads)]
         self.array_dim = array_dim
@@ -37,7 +37,7 @@ class MultiStreamer(object):
         self.dataset = make_env(proc_id=0, num_procs=0, num_envs=0)
         self.max_iter = self.dataset.max_iter
         self.collate_fn = collate_fn
-        self.epoch = 0
+        self.epoch = epoch
     
     def __len__(self):
         return self.max_iter

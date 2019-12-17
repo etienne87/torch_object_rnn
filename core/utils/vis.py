@@ -4,6 +4,7 @@ from __future__ import print_function
 
 import numpy as np
 import cv2
+import ffmpeg
 
 
 def normalize_float_image(img):
@@ -70,6 +71,31 @@ def filter_outliers(g, num_std=2):
     gimg_max = g.mean() + grange
     g_normed = np.minimum(np.maximum(g,gimg_min),gimg_max) #clamp
     return g_normed
+
+
+def write_video_ffmpeg(video_name, video_tensor, bgr=True, framerate=30, vcodec='libx264'):
+    if not isinstance(video_tensor, np.ndarray):
+        video_tensor = np.asarray(video_tensor)
+    if bgr:
+        video_tensor = video_tensor[..., ::-1]
+    n, height, width, channels = video_tensor.shape
+    process = (
+        ffmpeg
+        .input('pipe:', format='rawvideo', pix_fmt='rgb24', s='{}x{}'.format(width, height))
+        .output(video_name, pix_fmt='yuv420p', vcodec=vcodec, r=framerate)
+        .overwrite_output()
+        .global_args('-loglevel', 'quiet')
+        .global_args('-y')
+        .run_async(pipe_stdin=True)
+    )
+    for frame in video_tensor:
+        process.stdin.write(
+            frame
+            .astype(np.uint8)
+            .tobytes()
+        )
+    process.stdin.close()
+    process.wait()
 
 
 def write_video_opencv(video_name, video_tensor):

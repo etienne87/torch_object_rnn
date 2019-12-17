@@ -44,7 +44,7 @@ class UNet(nn.Module):
             self.skips = nn.ModuleList()
             self.skips += [skip(item[0], item[1]) for item in self.skip_list]
         else:
-            self.skips = [lambda x:x for _ in self.up_list][:-1]
+            self.skips = [lambda x:x for _ in self.up_list]
 
     @staticmethod
     def print_shapes(activation_list):
@@ -70,14 +70,12 @@ class UNet(nn.Module):
             for i in range(len(channel_list) - 1):
                 if i < middle:
                     encoders.append((channel_list[i], channel_list[i + 1]))
-                elif i < len(channel_list) - 2:
+                else:
+                    current = channel_list[i]
                     mirror = middle - (i + 1 - middle)
-                    remain = channel_list[i + 1] - mirror
+                    remain = channel_list[i + 1] - channel_list[mirror]
                     assert remain > 0, "[concat] make sure outchannels of decoders are bigger than encoders"
                     decoders.append((channel_list[i], remain))
-                else:
-                    decoders.append((channel_list[i], channel_list[i + 1]))
-
         return encoders, decoders, skips
 
     def fuse(self, x, y):
@@ -135,9 +133,14 @@ class UNet(nn.Module):
         skip = lambda x, y: SequenceWise(nn.Conv2d(x, y, kernel_size=3, stride=1, padding=1))
         return UNet(channel_list, mode, down, up, skip, sequence_upsample)
 
+
 if __name__ == '__main__':
-    t, n, c, h, w = 10, 3, 3, 240, 320
+    t, n, c, h, w = 10, 3, 64, 32, 32
     x = torch.rand(t, n, c, h, w)
-    net = UNet.recurrent_unet([3, 32, 64, 128, 64, 32, 16], mode='sum')
+
+    channel_list_1 = [3, 32, 64, 128, 128, 64, 32]
+    channel_list = [64] * 3 + [256] * 4
+    net = UNet.recurrent_unet(channel_list, mode='cat')
     print(net)
     out = net(x)
+    print([item.shape for item in out])
