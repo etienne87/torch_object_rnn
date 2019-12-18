@@ -114,20 +114,22 @@ def collate_fn(data):
     return {'data': batch, 'boxes': boxes, 'resets': resets}
 
 
-def make_moving_mnist(train_iter=10, test_iter=10, tbins=10, num_workers=1, batchsize=8):
+def make_moving_mnist(train_iter=10, test_iter=10, tbins=10, num_workers=1, batchsize=8, start_epoch=0):
     height, width, cin = 256, 256, 3
     array_dim = (tbins, height, width, cin)
     env_train = partial(MnistEnv, niter=train_iter, h=height, w=width, c=cin, train=True)
     env_val = partial(MnistEnv, niter=test_iter, h=height, w=width, c=cin, train=False)
-    train_dataset = MultiStreamer(env_train, array_dim, batchsize=batchsize, max_q_size=4, num_threads=num_workers, collate_fn=collate_fn)
-    test_dataset = MultiStreamer(env_val, array_dim, batchsize=batchsize, max_q_size=4, num_threads=num_workers, collate_fn=collate_fn)
+    train_dataset = MultiStreamer(env_train, array_dim, batchsize=batchsize, max_q_size=4, 
+    num_threads=num_workers, collate_fn=collate_fn, epoch=start_epoch)
+    test_dataset = MultiStreamer(env_val, array_dim, batchsize=batchsize, max_q_size=4, 
+    num_threads=num_workers, collate_fn=collate_fn, epoch=100)
     classes = 10
     return train_dataset, test_dataset, classes
 
 
 
 def show_mnist(train_iter=10, test_iter=10, tbins=10, num_workers=1, batchsize=8):
-    dataloader, _, _ = make_moving_mnist(train_iter, test_iter, tbins, num_workers, batchsize)
+    _, dataloader, _ = make_moving_mnist(train_iter, test_iter, tbins, num_workers, batchsize)
     show_batchsize = dataloader.batchsize
 
     start = 0
