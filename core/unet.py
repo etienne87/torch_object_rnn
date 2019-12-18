@@ -35,6 +35,7 @@ class UNet(nn.Module):
         self.ups = nn.ModuleList()
         self.mode = mode
         self.resize = resize
+        self.channel_dim = -3 #if using Unet for sth else than images change
 
         self.down_list, self.up_list, self.skip_list = self.get_inout_channels_unet(channel_list, mode)
         
@@ -80,7 +81,7 @@ class UNet(nn.Module):
 
     def fuse(self, x, y):
         if self.mode == 'cat':
-            return torch.cat([x, y], dim=2)
+            return torch.cat([x, y], dim=self.channel_dim)
         else:
             return x + y
 

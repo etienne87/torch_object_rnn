@@ -157,7 +157,6 @@ class ConvLSTMCell(RNNCell):
         if mask is None or self.prev_h is None:
             self.prev_h, self.prev_c = None, None
         else:
-            self.prev_h, self.prev_c = self.prev_h.detach(), self.prev_c.detach()
             mask = mask.to(self.prev_h)
             self.prev_h *= mask
             self.prev_c *= mask
