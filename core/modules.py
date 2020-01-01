@@ -115,6 +115,11 @@ class ASPP(nn.Module):
         res = self.project(res)
         return res
 
+def sequence_upsample(x, y):
+    x, n = time_to_batch(x)
+    x = F.interpolate(x, size=y.shape[-2:], mode='nearest')
+    x = batch_to_time(x, n)
+    return x
 
 #As a Sanity-Check to compare with the O-Net
 class HighwayGate(nn.Module):

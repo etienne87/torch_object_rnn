@@ -111,7 +111,8 @@ class ConvLSTMCell(RNNCell):
         super(ConvLSTMCell, self).__init__(hard)
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.conv_x2h = ConvLayer(in_channels, self.out_channels * 4, stride=stride)
+        self.conv_x2h = ConvLayer(in_channels, self.out_channels * 4, 
+        activation='Identity', stride=stride)
 
         self.conv_h2h = conv_func(in_channels=self.out_channels,
                                   out_channels=4 * self.out_channels,
