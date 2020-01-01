@@ -4,15 +4,15 @@ from __future__ import print_function
 
 import torch
 import torch.nn as nn
-from core.modules import ConvLayer, SequenceWise, sequence_upsample
+from core.modules import ConvLayer, SequenceWise, sequence_upsample, ConvRNN
 
 class OctConv(nn.Module):
-    def __init__(self, in_channels, out_channels, conv_funcs, up_func):
+    def __init__(self, in_channels, out_channels, conv_funcs, up_func, stride):
         super(OctConv, self).__init__()
         self.convh2h = conv_funcs[1](in_channels[1], out_channels[1], 1)
         self.convl2l = conv_funcs[0](in_channels[0], out_channels[0], 1)
         self.convl2h = conv_funcs[0](out_channels[0], out_channels[1], 1)
-        self.convh2l = conv_funcs[1](out_channels[1], out_channels[0], 2)
+        self.convh2l = conv_funcs[1](out_channels[1], out_channels[0], stride)
         self.up = up_func
 
     def forward(self, x):
@@ -24,16 +24,24 @@ class OctConv(nn.Module):
         return (l, h)
 
     @classmethod
-    def make_conv(cls, cin, cout, f=2):
+    def make_conv(cls, cin, cout, f=2, stride=2):
         cin2 = cin // f
         cout2 = cout // f
         conv1 = lambda x,y,s: SequenceWise(ConvLayer(x, y, stride=s))
         conv2 = lambda x,y,s: SequenceWise(ConvLayer(x, y, stride=s))
-        return OctConv((cin, cin2), (cout, cout2), (conv1, conv2), sequence_upsample)
+        return OctConv((cin, cin2), (cout, cout2), (conv1, conv2), sequence_upsample, stride)
+
+    @classmethod
+    def make_rnn(cls, cin, cout, f=2, stride=2):
+        cin2 = cin // f
+        cout2 = cout // f
+        conv1 = lambda x,y,s:ConvRNN(x, y, stride=s)
+        conv2 = lambda x,y,s: ConvRNN(x, y, stride=s)
+        return OctConv((cin, cin2), (cout, cout2), (conv1, conv2), sequence_upsample, stride)
 
 
 if __name__ == '__main__':
-    x = (torch.rand(1, 1, 16, 32, 32), torch.rand(1, 1, 8, 64, 64))
-    net = OctConv.make_conv(16, 32)
+    x = (torch.rand(1, 1, 16, 32, 32), torch.rand(1, 1, 8, 128, 128))
+    net = OctConv.make_rnn(16, 32, stride=4)
     y = net(x)
     print(y[0].shape, y[1].shape)
