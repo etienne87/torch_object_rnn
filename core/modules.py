@@ -55,19 +55,19 @@ class SeparableConv2d(nn.Sequential):
                       bias=bias),
             nn.Conv2d(in_channels, out_channels, 1, 1, 0, 1, 1, bias=bias)
         )
-
+        
 
 class ConvLayer(nn.Sequential):
 
     def __init__(self, in_channels, out_channels,
                  kernel_size=3, stride=1, padding=1, dilation=1,
-                 bias=True, norm='InstanceNorm2d', activation='LeakyReLU', separable=False):
+                 bias=True, norm='BatchNorm2d', activation='LeakyReLU', separable=False):
 
         conv_func = SeparableConv2d if separable else nn.Conv2d
         super(ConvLayer, self).__init__(
+            nn.Identity() if norm == 'none' else getattr(nn, norm)(in_channels),
             conv_func(in_channels, out_channels, kernel_size=kernel_size, stride=stride, dilation=dilation,
                       padding=padding, bias=bias),
-            nn.Identity() if norm == 'none' else getattr(nn, norm)(out_channels),
             getattr(nn, activation)()
         )
 

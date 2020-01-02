@@ -20,7 +20,7 @@ except ImportError:
 
 
 def adam_optim(net, args):
-    optimizer = optim.Adam(net.parameters(), lr=args.lr, weight_decay=args.wd)
+    optimizer = optim.AdamW(net.parameters(), lr=args.lr, weight_decay=args.wd)
     if args.cuda:
         net.cuda()
         cudnn.benchmark = True

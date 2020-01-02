@@ -27,9 +27,8 @@ class FPN(nn.Module):
             Bottleneck(self.base * 4, self.base * 8, 2),
         ))  
 
-        #self.conv2 = UNet.recurrent_unet([self.base * 8] * (self.levels-1) + [cout] * self.levels)
-    
-        self.conv2 = RNNWise(ONet([self.base * 8] * (self.levels-1) + [cout] * self.levels))
+        self.conv2 = UNet.recurrent_unet([self.base * 8] * (self.levels-1) + [cout] * self.levels, mode='cat')
+        # self.conv2 = RNNWise(ONet([self.base * 8] * (self.levels-1) + [cout] * self.levels))
 
 
     def forward(self, x):
