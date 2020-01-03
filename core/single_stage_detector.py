@@ -72,6 +72,7 @@ class SingleStageDetector(nn.Module):
     def get_boxes(self, x, score_thresh=0.4):
         xs = self.feature_extractor(x)
         loc_preds, cls_preds = self.rpn(xs)
+        cls_preds = self.rpn.probas(cls_preds)
         scores = cls_preds[..., self.label_offset:].contiguous()
         anchors, _ = self.box_coder(xs)
         targets = self.box_coder.decode(anchors, loc_preds, scores, x.size(1), score_thresh=score_thresh)
