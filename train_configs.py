@@ -64,7 +64,7 @@ def mnist_rnn(args):
     print('==> Preparing dataset..')
     train, val, num_classes = make_moving_mnist(args.train_iter, args.test_iter, args.time, args.num_workers, args.batchsize)
     print('==> Building model..')
-    net = SingleStageDetector.unet_rnn(3, num_classes, act='sigmoid', loss='_focal_loss')
+    net = SingleStageDetector.mnist_unet_rnn(3, num_classes, act='softmax', loss='_ohem_loss')
     net, optimizer, scheduler, start_epoch = adam_optim(net, args)
     return net, optimizer, scheduler, train, val, start_epoch
 

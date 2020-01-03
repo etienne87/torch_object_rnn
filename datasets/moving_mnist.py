@@ -129,7 +129,7 @@ def make_moving_mnist(train_iter=10, test_iter=10, tbins=10, num_workers=1, batc
 
 
 def show_mnist(train_iter=10, test_iter=10, tbins=10, num_workers=1, batchsize=8):
-    _, dataloader, _ = make_moving_mnist(train_iter, test_iter, tbins, num_workers, batchsize)
+    dataloader, _, _ = make_moving_mnist(train_iter, test_iter, tbins, num_workers, batchsize)
     show_batchsize = dataloader.batchsize
 
     start = 0

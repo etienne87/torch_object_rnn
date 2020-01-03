@@ -4,13 +4,48 @@ from __future__ import print_function
 
 import torch
 import torch.nn as nn
-from core.utils.opts import time_to_batch, batch_to_time
+from core.utils.opts import time_to_batch, batch_to_time, cuda_time
 
 from core.modules import ConvLayer, SequenceWise, ConvRNN, Bottleneck, BottleneckLSTM
 from core.unet import UNet
 
 from core.recurrent import RNNWise
 from core.onet import ONet
+
+
+class Vanilla(nn.Module):
+    def __init__(self, cin=1, cout=256, nmaps=3):
+        super(Vanilla, self).__init__()
+        self.cin = cin
+        self.base = 16
+        self.cout = cout
+        self.nmaps = nmaps
+        self.levels = 4
+
+        self.conv1 = SequenceWise(nn.Sequential(
+            Bottleneck(cin, self.base * 2, 2),
+            Bottleneck(self.base * 2, self.base * 4, 2),
+            Bottleneck(self.base * 4, self.base * 8, 2),
+        ))
+
+        self.conv2 = nn.ModuleList()
+        self.conv2.append(ConvRNN(self.base * 8, cout, stride=2))
+        for i in range(self.levels-1):
+            self.conv2.append(ConvRNN(cout, cout, stride=2))
+
+    def forward(self, x):
+        x = self.conv1(x)
+        outs = []
+        for conv in self.conv2:
+            x = conv(x)
+            outs.append(time_to_batch(x)[0])
+        return outs
+
+    def reset(self, mask=None):
+        for name, module in self._modules.items():
+            if hasattr(module, "reset"):
+                module.reset(mask)
+
 
 class FPN(nn.Module):
     def __init__(self, cin=1, cout=256, nmaps=3):
@@ -27,9 +62,8 @@ class FPN(nn.Module):
             Bottleneck(self.base * 4, self.base * 8, 2),
         ))  
 
-        self.conv2 = UNet.recurrent_unet([self.base * 8] * (self.levels-1) + [cout] * self.levels, mode='cat')
-        # self.conv2 = RNNWise(ONet([self.base * 8] * (self.levels-1) + [cout] * self.levels))
-
+        # self.conv2 = UNet.recurrent_unet([self.base * 8] * (self.levels-1) + [cout] * self.levels, mode='cat')
+        self.conv2 = RNNWise(ONet([self.base * 8] * (self.levels-1) + [cout] * self.levels))
 
     def forward(self, x):
         x1 = self.conv1(x)
@@ -168,6 +202,12 @@ class ResNet50SSD(BackboneWithP6P7):
 if __name__ == '__main__':
     t, n, c, h, w = 10, 3, 3, 128, 128
     x = torch.rand(t, n, c, h, w)
-    net = MobileNetFPN(3)
-    out = net(x)
+    #net = MobileNetFPN(3)
+    net = FPN(3)
+
+    x = x.cuda()
+    net.cuda()
+
+    for i in range(10):
+        out = net(x)
     print([item.shape for item in out])

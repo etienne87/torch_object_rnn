@@ -53,7 +53,7 @@ class DetTrainer(object):
                 inputs, targets, mask = data['data'], data['boxes'], data['resets']
                 if args.cuda:
                     inputs = inputs.cuda()
-         
+
                 self.net.reset(mask)
                 start = time.time()
                 self.optimizer.zero_grad()
