@@ -18,10 +18,9 @@ from __future__ import print_function
 
 import torch
 import torch.nn as nn
-from core.utils import box, opts
+from core.utils import box
 import numpy as np
 from torchvision.ops.boxes import batched_nms
-
 
 class AnchorLayer(nn.Module):
     '''
@@ -29,13 +28,13 @@ class AnchorLayer(nn.Module):
     The anchors grid is (height, width, num_anchors_per_position, 4)
     The grid is cached, but changes if featuremap size changes
     '''
-    def __init__(self, box_size=32, stride=8, ratios=[1], scales=[1]):
+
+    def __init__(self, box_size=32, ratios=[1], scales=[1]):
         super(AnchorLayer, self).__init__()
         self.num_anchors = len(scales) * len(ratios)
         box_sizes = AnchorLayer.generate_anchors(box_size, ratios, scales)
         self.register_buffer("box_sizes", box_sizes.view(-1))
         self.anchors = None
-        self.stride = stride
 
     @staticmethod
     def generate_anchors(box_size, ratios, scales):
@@ -45,21 +44,22 @@ class AnchorLayer(nn.Module):
         anchors[:, 1] = anchors[:, 0] / np.repeat(ratios, len(scales))
         return torch.from_numpy(anchors).float()
 
-    def make_grid(self, height, width):
+    def make_grid(self, height, width, stride):
 
-        grid_h, grid_w = torch.meshgrid([torch.linspace(0.5 * self.stride, (height-1 + 0.5) * self.stride, height),
-                                         torch.linspace(0.5 * self.stride, (width-1 + 0.5) * self.stride, width)
+        grid_h, grid_w = torch.meshgrid([torch.linspace(0.5 * stride, (height - 1 + 0.5) * stride, height),
+                                         torch.linspace(0.5 * stride, (width - 1 + 0.5) * stride, width)
                                          ])
         grid = torch.cat([grid_w[..., None], grid_h[..., None]], dim=-1)
 
-        grid = grid[:,:,None,:].expand(height, width, self.num_anchors, 2)
+        grid = grid[:, :, None, :].expand(height, width, self.num_anchors, 2)
         return grid
 
-    def forward(self, x):
+    def forward(self, x, stride):
         height, width = x.shape[-2:]
         if self.anchors is None or self.anchors.shape[0] != height or self.anchors.shape[1] != width or self.anchors.device != x.device:
-            grid = self.make_grid(height, width).to(x.device)
-            wh = torch.zeros((self.num_anchors * 2, height, width), dtype=x.dtype, device=x.device) + self.box_sizes.view(self.num_anchors * 2, 1, 1)
+            grid = self.make_grid(height, width, stride).to(x.device)
+            wh = torch.zeros((self.num_anchors * 2, height, width), dtype=x.dtype, device=x.device) + \
+                self.box_sizes.view(self.num_anchors * 2, 1, 1)
             wh = wh.permute([1, 2, 0]).view(height, width, self.num_anchors, 2)
             self.anchors = torch.cat([grid, wh], dim=-1)
 
@@ -74,43 +74,43 @@ class Anchors(nn.Module):
     Decoding uses "batched_nms" of torchvision to parallelize accross images and classes.
     The option "max_decode" means we only decode the best score, otherwise we decode per class
     '''
+
     def __init__(self, **kwargs):
         super(Anchors, self).__init__()
-        self.pyramid_levels = kwargs.get("pyramid_levels", [3, 4, 5, 6])
-        self.strides = kwargs.get("strides", [2 ** x for x in self.pyramid_levels])
+        self.num_levels = 4
         self.base_size = kwargs.get("base_size", 32)
-        self.sizes = kwargs.get("sizes", [self.base_size * 2 ** x for x in range(len(self.pyramid_levels))])
+        self.sizes = kwargs.get("sizes", [self.base_size * 2 ** x for x in range(self.num_levels)])
         self.ratios = kwargs.get("ratios", np.array([0.5, 1, 2]))
         self.scales = kwargs.get("scales", np.array([2 ** 0, 2 ** (1.0 / 3.0), 2 ** (2.0 / 3.0)]))
         self.fg_iou_threshold = kwargs.get("fg_iou_threshold", 0.5)
         self.bg_iou_threshold = kwargs.get("bg_iou_threshold", 0.4)
         self.num_anchors = len(self.scales) * len(self.ratios)
         self.allow_low_quality_matches = kwargs.get("allow_low_quality_matches", False)
-        self.variances = kwargs.get("variances", [0.1, 0.2]) #TODO: remove if we can learn with variances=[1,1]
+        self.variances = kwargs.get("variances", [1.0, 1.0])
         self.anchor_generators = nn.ModuleList()
-        for i, (box_size, stride) in enumerate(zip(self.sizes, self.strides)):
-            self.anchor_generators.append(AnchorLayer(box_size, stride, self.ratios, self.scales))
+        for box_size in self.sizes:
+            self.anchor_generators.append(AnchorLayer(box_size, self.ratios, self.scales))
         self.anchors = None
         self.anchors_xyxy = None
         self.idxs = None
         self.last_shapes = []
-        self.set_low_quality_matches = self.set_low_quality_matches_v1
         self.decode_func = self.batched_decode
         self.max_decode = kwargs.get("max_decode", False)
 
-    def forward(self, features):
+    def forward(self, features, imsize):
         shapes = [item.shape for item in features]
+        strides = [int(imsize[-1] / shape[-1]) for shape in shapes]
         if self.anchors is None or shapes != self.last_shapes:
             default_boxes = []
-            for feature_map, anchor_layer in zip(features, self.anchor_generators):
-                anchors = anchor_layer(feature_map)
+            for feature_map, anchor_layer, stride in zip(features, self.anchor_generators, strides):
+                anchors = anchor_layer(feature_map, stride)
                 default_boxes.append(anchors)
             self.anchors = torch.cat(default_boxes, dim=0)
             self.anchors_xyxy = box.change_box_order(self.anchors, "xywh2xyxy")
         self.last_shapes = shapes
         return self.anchors, self.anchors_xyxy
 
-    # @opts.cuda_time
+    # @cuda_time
     def encode(self, anchors, anchors_xyxy, targets):
         device = anchors.device
 
@@ -124,23 +124,33 @@ class Anchors(nn.Module):
         gt_boxes = gt_padded[..., :4]
         gt_labels = gt_padded[..., 4].long()
 
-        ious = box.batch_box_iou(anchors_xyxy, gt_boxes) # [N, A, M]
+        N, A, M = len(gt_padded), len(anchors), gt_padded.shape[-2]
+        MAX_LEN = 15
+        if M > MAX_LEN:
+            ious = torch.zeros((N, A, M), dtype=torch.float32, device=anchors.device)
+            for i in range(0, M, MAX_LEN):
+                ious[..., i:i + MAX_LEN] = box.batch_box_iou(anchors_xyxy, gt_boxes[..., i:i + MAX_LEN, :])
+        else:
+            ious = box.batch_box_iou(anchors_xyxy, gt_boxes)  # [N, A, M]
 
-        #make sure to not select the dummies
+        # ious = box.batch_box_iou(anchors_xyxy, gt_boxes)  # [N, A, M]
+
+        # make sure to not select the dummies
         mask = (gt_labels == -2).float().unsqueeze(1)
-        ious = (-1 * mask) + ious * (1-mask)
+        ious = (-1 * mask) + ious * (1 - mask)
 
-        batch_best_target_per_prior, batch_best_target_per_prior_index = ious.max(-1) # [N, A]
+        batch_best_target_per_prior, batch_best_target_per_prior_index = ious.max(-1)  # [N, A]
 
         if self.allow_low_quality_matches:
             self.set_low_quality_matches(ious, batch_best_target_per_prior_index, batch_best_target_per_prior, sizes)
 
         mask_bg = batch_best_target_per_prior < self.bg_iou_threshold
-        mask_ign = (batch_best_target_per_prior > self.bg_iou_threshold) * (batch_best_target_per_prior < self.fg_iou_threshold)
+        mask_ign = (batch_best_target_per_prior > self.bg_iou_threshold) * \
+            (batch_best_target_per_prior < self.fg_iou_threshold)
         labels = torch.gather(gt_labels, 1, batch_best_target_per_prior_index)
         labels[mask_ign] = -1
         labels[mask_bg] = 0
-        index = batch_best_target_per_prior_index[...,None].expand(total, len(anchors), 4)
+        index = batch_best_target_per_prior_index[..., None].expand(total, len(anchors), 4)
         boxes = torch.gather(gt_boxes, 1, index)
 
         loc_targets = box.bbox_to_deltas(boxes, anchors[None], self.variances)
@@ -148,7 +158,7 @@ class Anchors(nn.Module):
 
         return loc_targets, cls_targets
 
-    def set_low_quality_matches_v1(self, ious, batch_best_target_per_prior_index, batch_best_target_per_prior, sizes):
+    def set_low_quality_matches(self, ious, batch_best_target_per_prior_index, batch_best_target_per_prior, sizes):
         _, batch_best_prior_per_target_index = ious.max(-2)  # [N, M]
         for t in range(len(sizes)):
             max_size = sizes[t]
@@ -157,16 +167,6 @@ class Anchors(nn.Module):
                 batch_best_target_per_prior_index[t, prior_index] = target_index
                 batch_best_target_per_prior[t, prior_index] = 2.0
 
-    def set_low_quality_matches_v2(self, ious, matches, match_vals, sizes):
-        highest_quality_foreach_gt, _ = ious.max(-2)  # [N, M]
-        gt_pred_pairs_of_highest_quality = torch.nonzero(ious == highest_quality_foreach_gt.unsqueeze(1))
-        batch_index = gt_pred_pairs_of_highest_quality[:, 0]
-        pred_index = gt_pred_pairs_of_highest_quality[:, 1]
-        gt_index = gt_pred_pairs_of_highest_quality[:, 2]
-        matches[batch_index, pred_index] = gt_index
-        match_vals[batch_index, pred_index] = 2.0
-
-    # @opts.cuda_time
     def decode(self, anchors, loc_preds, cls_preds, batchsize, score_thresh, nms_thresh=0.6):
         # loc_preds [N, C] (do not include background column)
         box_preds = box.deltas_to_bbox(loc_preds, anchors, self.variances)
@@ -177,11 +177,11 @@ class Anchors(nn.Module):
 
         # Decoding
         boxes, scores, labels, batch_index = self.decode_func(box_preds, cls_preds,
-                                                    num_anchors, num_classes,
-                                                    len(box_preds), score_thresh, nms_thresh)
+                                                              num_anchors, num_classes,
+                                                              len(box_preds), score_thresh, nms_thresh)
 
         tbins = len(cls_preds) // batchsize
-        targets = [[(None,None,None) for _ in range(batchsize)] for _ in range(tbins)]
+        targets = [[(None, None, None) for _ in range(batchsize)] for _ in range(tbins)]
 
         bidx, sidx = batch_index.sort()
         bidx_vals, sizes = torch.unique(bidx.long(), return_counts=True)
@@ -206,7 +206,7 @@ class Anchors(nn.Module):
             cols = torch.arange(num_classes, dtype=torch.long)[None, :]
             idxs = rows * num_classes + cols
             idxs = idxs.unsqueeze(1).expand(batchsize, num_anchors, num_classes).contiguous()
-            idxs = idxs.to(scores.device) 
+            idxs = idxs.to(scores.device)
 
         boxes = boxes.view(-1, 4)
         scores = scores.view(-1)

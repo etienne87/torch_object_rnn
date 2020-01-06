@@ -60,7 +60,7 @@ class SingleStageDetector(nn.Module):
         loc_preds, cls_preds = self.rpn(xs)
 
         with torch.no_grad():
-            anchors, anchors_xyxy = self.box_coder(xs)
+            anchors, anchors_xyxy = self.box_coder(xs, x.shape[-2:])
             loc_targets, cls_targets = self.box_coder.encode(anchors, anchors_xyxy, targets)
 
         assert cls_targets.shape[1] == cls_preds.shape[1]
@@ -74,13 +74,13 @@ class SingleStageDetector(nn.Module):
         loc_preds, cls_preds = self.rpn(xs)
         cls_preds = self.rpn.probas(cls_preds)
         scores = cls_preds[..., self.label_offset:].contiguous()
-        anchors, _ = self.box_coder(xs)
+        anchors, _ = self.box_coder(xs, x.shape[-2:])
         targets = self.box_coder.decode(anchors, loc_preds, scores, x.size(1), score_thresh=score_thresh)
         return targets
 
     @classmethod
     def mnist_vanilla_rnn(cls, in_channels, num_classes, act='softmax', loss='_ohem_loss'):
-        return cls(FPN, BoxHead, in_channels, num_classes, act, ratios=[1.0], scales=[1.0, 1.5], loss=loss)
+        return cls(Vanilla, BoxHead, in_channels, num_classes, act, ratios=[1.0], scales=[1.0, 1.5], loss=loss)
 
     @classmethod
     def mnist_unet_rnn(cls, in_channels, num_classes, act='sigmoid', loss='_focal_loss'):
