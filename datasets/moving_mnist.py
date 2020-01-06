@@ -33,11 +33,13 @@ TEST_DATASET = datasets.MNIST('../data', train=False, download=True,
 
 class MovingMnistAnimation(toy.Animation):
     def __init__(self, h=128, w=128, c=3, max_stop=15,
-                max_objects=2, anim_id = 0, train=True):
+                max_objects=2, anim_id = 0, train=True, mode='none'):
         self.dataset_ = TRAIN_DATASET if train else TEST_DATASET
         self.label_offset = 1
         self.channels = c
         np.random.seed(anim_id)
+        self.prev_img = None
+        self.mode = mode
         super(MovingMnistAnimation, self).__init__(h, w, c, max_stop, 10, max_objects)
 
     def reset(self):
@@ -64,8 +66,19 @@ class MovingMnistAnimation(toy.Animation):
             thumbnail = cv2.resize(object.img, (x2-x1, y2-y1), cv2.INTER_LINEAR)
             self.img[y1:y2, x1:x2] = np.maximum(self.img[y1:y2, x1:x2], thumbnail)
         output = self.img 
+        if self.mode == 'diff':
+            output = self.run_diff()
         return output, boxes
 
+    def run_diff(self):
+        output = self.img
+        if self.prev_img is None:
+            output[...] = 0
+        else:
+            output = self.prev_img - self.img
+            output = (output-output.min())/(output.max()-output.min())
+        self.prev_img = self.img.copy().astype(np.float32)
+        return output
 
 class MnistEnv(object):
     def __init__(self, proc_id=0, num_procs=1, num_envs=3, epoch=0, niter=100, max_steps=500, **kwargs):
@@ -114,8 +127,9 @@ def collate_fn(data):
     return {'data': batch, 'boxes': boxes, 'resets': resets}
 
 
-def make_moving_mnist(train_iter=10, test_iter=10, tbins=10, num_workers=1, batchsize=8, start_epoch=0):
-    height, width, cin = 256, 256, 3
+def make_moving_mnist(train_iter=10, test_iter=10, tbins=10, num_workers=1, batchsize=8, start_epoch=0,
+    height=256, width=256):
+    height, width, cin = height, width, 3
     array_dim = (tbins, height, width, cin)
     env_train = partial(MnistEnv, niter=train_iter, h=height, w=width, c=cin, train=True)
     env_val = partial(MnistEnv, niter=test_iter, h=height, w=width, c=cin, train=False)

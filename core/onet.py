@@ -23,7 +23,7 @@ class ONet(UNet):
         res = super().forward(x)
         tmp = self.feedback(self.ups[-1].prev_h)
         i, g = torch.split(tmp, self.downs[0].out_channels, dim=1)
-        self.downs[0].prev_h = self.downs[0].prev_h + torch.sigmoid(i) * torch.tanh(g)
+        self.downs[0].prev_h = self.downs[0].prev_h * (torch.sigmoid(i) * torch.tanh(g))
         return res
 
 
