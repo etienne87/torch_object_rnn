@@ -29,7 +29,7 @@ class SingleStageDetector(nn.Module):
 
         self.feature_extractor = feature_extractor(in_channels)
 
-        self.box_coder = Anchors(pyramid_levels=[i for i in range(3,3+self.feature_extractor.levels)],
+        self.box_coder = Anchors(num_levels=self.feature_extractor.levels,
                                  scales=scales,
                                  ratios=ratios,
                                  allow_low_quality_matches=False,

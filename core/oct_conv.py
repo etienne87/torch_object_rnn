@@ -40,6 +40,7 @@ class OctConv(nn.Module):
         return OctConv((cin, cin2), (cout, cout2), (conv1, conv2), sequence_upsample, stride)
 
 
+
 if __name__ == '__main__':
     x = (torch.rand(1, 1, 16, 32, 32), torch.rand(1, 1, 8, 128, 128))
     net = OctConv.make_rnn(16, 32, stride=4)

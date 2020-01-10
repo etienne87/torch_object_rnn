@@ -77,7 +77,7 @@ class Anchors(nn.Module):
 
     def __init__(self, **kwargs):
         super(Anchors, self).__init__()
-        self.num_levels = 4
+        self.num_levels = kwargs.get("num_levels", 32)
         self.base_size = kwargs.get("base_size", 32)
         self.sizes = kwargs.get("sizes", [self.base_size * 2 ** x for x in range(self.num_levels)])
         self.ratios = kwargs.get("ratios", np.array([0.5, 1, 2]))
@@ -100,6 +100,8 @@ class Anchors(nn.Module):
     def forward(self, features, imsize):
         shapes = [item.shape for item in features]
         strides = [int(imsize[-1] / shape[-1]) for shape in shapes]
+        lengths = [shape[-1]*shape[-2]*self.num_anchors for shape in shapes]
+        assert len(self.anchor_generators) == len(features)
         if self.anchors is None or shapes != self.last_shapes:
             default_boxes = []
             for feature_map, anchor_layer, stride in zip(features, self.anchor_generators, strides):

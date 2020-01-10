@@ -17,27 +17,31 @@ class Vanilla(nn.Module):
     def __init__(self, cin=1, cout=256, nmaps=3):
         super(Vanilla, self).__init__()
         self.cin = cin
-        self.base = 16
+        self.base = 8
         self.cout = cout
         self.nmaps = nmaps
         self.levels = 4
 
         self.conv1 = SequenceWise(nn.Sequential(
-            Bottleneck(cin, self.base * 2, 2),
-            Bottleneck(self.base * 2, self.base * 4, 2),
-            Bottleneck(self.base * 4, self.base * 8, 2),
+            ConvLayer(cin, self.base * 2, stride=2),
+            nn.UpsamplingBilinear2d(scale_factor=0.7),
+            Bottleneck(self.base * 2, self.base * 4, 1),
+            nn.UpsamplingBilinear2d(scale_factor=0.7),
+            Bottleneck(self.base * 4, self.base * 8, 1),
+            nn.UpsamplingBilinear2d(scale_factor=0.7)
         ))
+        self.resize = SequenceWise(nn.UpsamplingBilinear2d(scale_factor=0.7))
 
         self.conv2 = nn.ModuleList()
         self.conv2.append(ConvRNN(self.base * 8, cout, stride=2))
         for i in range(self.levels-1):
-            self.conv2.append(ConvRNN(cout, cout, stride=2))
+            self.conv2.append(ConvRNN(cout, cout, stride=1))
 
     def forward(self, x):
         x = self.conv1(x)
         outs = []
         for conv in self.conv2:
-            x = conv(x)
+            x = self.resize(conv(x))
             outs.append(time_to_batch(x)[0])
         return outs
 
@@ -62,8 +66,8 @@ class FPN(nn.Module):
             Bottleneck(self.base * 4, self.base * 8, 2),
         ))  
 
-        # self.conv2 = UNet.recurrent_unet([self.base * 8] * (self.levels-1) + [cout] * self.levels, mode='cat')
-        self.conv2 = RNNWise(ONet([self.base * 8] * (self.levels-1) + [cout] * self.levels))
+        self.conv2 = UNet.recurrent_unet([self.base * 8] * (self.levels-1) + [cout] * self.levels, mode='cat')
+        #self.conv2 = RNNWise(ONet([self.base * 8] * (self.levels-1) + [cout] * self.levels))
 
     def forward(self, x):
         x1 = self.conv1(x)
@@ -141,7 +145,7 @@ class BackboneWithFPN(nn.Module):
         sources = [time_to_batch(item)[0] for item in outs]
         return sources
 
-    def reset(self, mask):
+    def reset(self, mask=None):
         for name, module in self._modules.items():
             if hasattr(module, "reset"):
                 module.reset(mask)
@@ -180,10 +184,10 @@ class BackboneWithP6P7(nn.Module):
         sources = [time_to_batch(item)[0] for item in outs]
         return sources
 
-    def reset(self):
+    def reset(self, mask=None):
         for name, module in self._modules.items():
             if hasattr(module, "reset"):
-                module.reset()
+                module.reset(mask)
 
 
 class MobileNetSSD(BackboneWithP6P7):

@@ -57,14 +57,15 @@ def mnist_rnn(args):
     args.lr = 1e-3
     args.wd = 1e-6
     args.cin = 3
-    args.height = 256
-    args.width = 256
+    args.height = 128
+    args.width = 128
     args.epochs = 20
     args.is_video_dataset = True
     print('==> Preparing dataset..')
-    train, val, num_classes = make_moving_mnist(args.train_iter, args.test_iter, args.time, args.num_workers, args.batchsize)
+    train, val, num_classes = make_moving_mnist(args.train_iter, 
+    args.test_iter, args.time, args.num_workers, args.batchsize, 0, args.height, args.width)
     print('==> Building model..')
-    net = SingleStageDetector.mnist_unet_rnn(3, num_classes, act='softmax', loss='_ohem_loss')
+    net = SingleStageDetector.mnist_vanilla_rnn(3, num_classes, act='softmax', loss='_focal_loss')
     net, optimizer, scheduler, start_epoch = adam_optim(net, args)
     return net, optimizer, scheduler, train, val, start_epoch
 
