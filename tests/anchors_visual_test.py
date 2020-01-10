@@ -61,7 +61,7 @@ print([item.shape[-2:] for item in xs])
 img = np.zeros((imgsize, imgsize, 3), dtype=np.uint8)
 
 anchors, anchors_xyxy = net.box_coder(xs, x.shape[-2:])
-draw_anchors(anchors_xyxy, height=imgsize, width=imgsize, num_anchors=net.box_coder.num_anchors, step=net.box_coder.num_anchors*6)
+draw_anchors(anchors_xyxy, height=imgsize, width=imgsize, num_anchors=net.box_coder.num_anchors, step=10)
 
 
 #show level by level

@@ -156,3 +156,11 @@ class SSDHead(nn.Module):
                 cls_preds = torch.sigmoid(cls_preds)
 
         return loc_preds, cls_preds
+
+    def probas(self, cls_preds):
+        if not self.training:
+            if self.act == 'softmax':
+                cls_preds = F.softmax(cls_preds, dim=2)
+            else:
+                cls_preds = torch.sigmoid(cls_preds)
+        return cls_preds
