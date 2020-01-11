@@ -78,7 +78,7 @@ class CocoDataset(Dataset):
         if len(img.shape) == 2:
             img = cv2.cvtColor(img, cv2.COLOR_GRAYRGB)
 
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB) #not sure anymore we need this
         return img.astype(np.float32) / 255.0
 
     def load_annotations(self, image_index):

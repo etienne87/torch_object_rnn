@@ -25,11 +25,11 @@ class DetTrainer(object):
     class wrapping training/ validation/ testing
     """
 
-    def __init__(self, logdir, net, optimizer, scheduler):
+    def __init__(self, logdir, net, optimizer, scheduler, make_img=vis.general_frame_display):
         self.net = net
         self.optimizer = optimizer
         self.scheduler = scheduler
-        self.make_image = vis.general_frame_display
+        self.make_image = make_img
         self.logdir = logdir
         self.writer = SummaryWriter(logdir)
         self.iteration = 0

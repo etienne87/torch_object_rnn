@@ -41,31 +41,31 @@ def parse_args():
 def main():
     args = parse_args()
 
-    net, optimizer, scheduler, train_dataset, test_dataset, start_epoch = getattr(cfg, args.config)(args)
+    out = getattr(cfg, args.config)(args) 
 
-    trainer = DetTrainer(args.logdir, net, optimizer, scheduler)
+    trainer = DetTrainer(args.logdir, out.net, out.optimizer, out.scheduler)
 
     if args.just_test: 
-        trainer.test(start_epoch + 1, test_dataset, args)
+        trainer.test(out.start_epoch + 1, out.val, args)
         exit()
     elif args.just_val:
-        mean_ap_50 = trainer.evaluate(start_epoch + 1, test_dataset, args)
+        mean_ap_50 = trainer.evaluate(out.start_epoch + 1, out.val, args)
         print('mean_ap_50: ', mean_ap_50)
         exit()
 
-    for epoch in range(start_epoch, args.epochs):
-        trainer.train(epoch, train_dataset, args)
+    for epoch in range(out.start_epoch, args.epochs):
+        trainer.train(epoch, out.train, args)
 
         if epoch%args.save_every == 0:
             trainer.save_ckpt(epoch, 'checkpoint#'+str(epoch))
 
-        mean_ap_50 = trainer.evaluate(epoch, test_dataset, args)
+        mean_ap_50 = trainer.evaluate(epoch, out.val, args)
 
-        trainer.writer.add_scalar('learning rate', optimizer.param_groups[0]['lr'], epoch)
-        scheduler.step(mean_ap_50)
+        trainer.writer.add_scalar('learning rate', out.optimizer.param_groups[0]['lr'], epoch)
+        out.scheduler.step(mean_ap_50)
       
         if epoch%args.test_every == 0:
-            trainer.test(epoch, test_dataset, args)
+            trainer.test(epoch, out.val, args)
 
 
 if __name__ == '__main__':
