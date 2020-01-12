@@ -61,7 +61,7 @@ class ResNet(BackBone):
 
         if in_channels != 3:
             self.features[0] = nn.Conv2d(in_channels, 64, kernel_size=7, stride=2, padding=3, bias=False)
-            self.frozen_stages = max(self.frozen_stages, 4)
+            self.frozen_stages = 0
             self.norm_eval = False
 
     def copy_features(self, module):
@@ -92,7 +92,7 @@ class MobileNet(BackBone):
 
         if in_channels != 3:
             self.features[0] = models.mobilenet.ConvBNReLU(in_channels, 32, stride=2)
-            self.frozen_stages = max(self.frozen_stages, 1)
+            self.frozen_stages = 0
             self.norm_eval = False
 
     def get_stride(self, layer):

@@ -135,7 +135,7 @@ class DetTrainer(object):
 
                     proposals.append(pred)
             
-        start = time.time()
+            start = time.time()
 
         tmp_path = os.path.join(self.logdir, "eval")
         if not os.path.isdir(tmp_path):
@@ -172,9 +172,8 @@ class DetTrainer(object):
             self.net.reset(mask)
 
             with torch.no_grad():
-                targets = self.net.get_boxes(inputs)
+                targets = self.net.get_boxes(inputs, score_thresh=0.01)
 
-            time, batchsize, _, height, width = images.shape
             vis.draw_txn_boxes_on_grid(images, targets, grid[period * time:], self.make_image, labelmap)
             if period >= (args.test_iter-1):
                 break
@@ -182,7 +181,7 @@ class DetTrainer(object):
         grid = grid.swapaxes(2, 3).reshape(args.test_iter * time, nrows * args.height, ncols * args.width, 3)
         video_name =  self.logdir + '/videos/' + 'video#' + str(epoch) + '.avi'
         tbx.prepare_ckpt_dir(video_name)
-        vis.write_video_ffmpeg(video_name, grid)
+        vis.write_video_ffmpeg(video_name, grid, framerate=30 if args.is_video_dataset else 1)
 
     def save_ckpt(self, epoch, name='checkpoint#'):
         state = {
