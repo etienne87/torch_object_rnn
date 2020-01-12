@@ -149,6 +149,15 @@ def coco_eval(gts, proposals, labelmap, height, width, tmp_path, epoch, dump=Fal
                  "annotations": annotations,
                  "categories": categories}
 
+    if len(results) == 0:
+        results = [
+            {
+                'image_id': 1,
+                'category_id': 1,
+                'score': 0,
+                'bbox': [0, 0, 0, 0]
+            } 
+        ]
     # Writing the file is time-consuming
     if dump:
         gt_filename = os.path.join(tmp_path, 'gt.json')
