@@ -46,10 +46,10 @@ def main():
     trainer = DetTrainer(args.logdir, out.net, out.optimizer, out.scheduler)
 
     if args.just_test: 
-        trainer.test(out.start_epoch + 1, out.val, args)
+        trainer.test(out.start_epoch, out.val, args)
         exit()
     elif args.just_val:
-        mean_ap_50 = trainer.evaluate(out.start_epoch + 1, out.val, args)
+        mean_ap_50 = trainer.evaluate(out.start_epoch, out.val, args)
         print('mean_ap_50: ', mean_ap_50)
         exit()
 
