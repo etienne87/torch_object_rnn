@@ -172,7 +172,7 @@ class DetTrainer(object):
             self.net.reset(mask)
 
             with torch.no_grad():
-                targets = self.net.get_boxes(inputs, score_thresh=0.01)
+                targets = self.net.get_boxes(inputs)
 
             vis.draw_txn_boxes_on_grid(images, targets, grid[period * time:], self.make_image, labelmap)
             if period >= (args.test_iter-1):

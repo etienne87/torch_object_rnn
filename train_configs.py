@@ -21,7 +21,8 @@ except ImportError:
 
 
 def adam_optim(net, args):
-    optimizer = optim.AdamW(net.parameters(), lr=args.lr, weight_decay=args.wd)
+    #optimizer = optim.AdamW(net.parameters(), lr=args.lr, weight_decay=args.wd)
+    optimizer = optim.Adam(net.parameters(), lr=args.lr, weight_decay=args.wd)
     if args.cuda:
         net.cuda()
         cudnn.benchmark = True
@@ -96,7 +97,7 @@ def coco_resnet_fpn(args):
 
 
 def coco_resnet_ssd(args):
-    args.lr = 1e-5
+    args.lr = 1e-4
     args.wd = 1e-4
     args.height = 640
     args.width = 640

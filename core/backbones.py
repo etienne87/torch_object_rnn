@@ -193,7 +193,7 @@ class BackboneWithP6P7(nn.Module):
 class MobileNetSSD(BackboneWithP6P7):
     def __init__(self, in_channels=3, out_channels=256):
         super(MobileNetSSD, self).__init__(
-            pbb.MobileNet(in_channels, frozen_stages=1, norm_eval=True)
+            pbb.MobileNet(in_channels, True, frozen_stages=1, norm_eval=True)
         )
 
 class ResNet50SSD(BackboneWithP6P7):
