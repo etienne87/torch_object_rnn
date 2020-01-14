@@ -48,6 +48,20 @@ class SequenceWise(nn.Module):
         return tmpstr
 
 
+class CoordConv(nn.Module):
+    def __init__(self, in_channels, out_channels, conv_func, **kwargs):
+        super(CoordConv, self).__init__()
+        self.conv = conv_func(in_channels + 2, out_channels, **kwargs)
+
+    def forward(self, x):
+        grid_h, grid_w = torch.meshgrid([torch.linspace(-1, 1., x.shape[2]), torch.linspace(-1, 1., x.shape[3])])
+        grid = torch.cat((grid_h[None, None, :, :], grid_w[None, None, :, :]), 1).repeat(x.shape[0], 1, 1, 1)
+        ret = torch.cat((x, grid.to(x.device)), 1)
+        ret = self.conv(ret)
+        return ret
+
+
+
 class SeparableConv2d(nn.Sequential):
     def __init__(self, in_channels, out_channels, kernel_size=1, stride=1, padding=0, dilation=1, bias=False):
         super(SeparableConv2d, self).__init__(
@@ -96,6 +110,37 @@ class Bottleneck(nn.Module):
         out = F.relu(out)
         return out
 
+
+class PreActBlock(nn.Module):
+    def __init__(self, in_planes, planes, stride=1):
+        super(PreActBlock, self).__init__()
+        self.conv1 = ConvLayer(in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
+        self.conv2 = ConvLayer(planes, planes, kernel_size=3, stride=1, padding=1, bias=False)
+
+        self.downsample = nn.Sequential()
+        if stride != 1 or in_planes != planes:
+            self.downsample = nn.Sequential(
+                nn.Conv2d(in_planes, planes, kernel_size=1, stride=stride, bias=False)
+            )
+
+        # SE layers
+        self.fc1 = nn.Conv2d(planes, planes // 4, kernel_size=1)
+        self.fc2 = nn.Conv2d(planes // 4, planes, kernel_size=1)
+
+    def forward(self, x):
+        out = self.conv1(x)
+        out = self.conv2(out)
+
+        # Squeeze
+        w = F.avg_pool2d(out, out.size(2))
+        w = F.relu(self.fc1(w))
+        w = F.sigmoid(self.fc2(w))
+
+        # Excitation
+        out = out * w
+        out += self.downsample(x) 
+        return out
+        
 
 class ASPP(nn.Module):
     def __init__(self, in_channels, out_channels, atrous_rates=[3, 6, 12, 18]):
