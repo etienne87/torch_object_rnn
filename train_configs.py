@@ -97,7 +97,7 @@ def coco_resnet_fpn(args):
 
 
 def coco_resnet_ssd(args):
-    args.lr = 1e-4
+    args.lr = 1e-5
     args.wd = 1e-4
     args.height = 640
     args.width = 640
@@ -106,8 +106,9 @@ def coco_resnet_ssd(args):
     print('==> Preparing dataset..')
     train, val, num_classes = make_still_coco(args.path, args.batchsize, args.num_workers)
     print('==> Building model..')
-    net = SingleStageDetector.resnet50_ssd(3, num_classes)
+    net = SingleStageDetector.resnet50_ssd(3, num_classes, act='softmax')
     out = adam_optim(net, args)
+    out.optimizer.lr = 1e-5
     out.train = train
     out.val = val
     return out

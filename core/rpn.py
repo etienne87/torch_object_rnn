@@ -9,6 +9,26 @@ from core.modules import Bottleneck, ConvLayer
 import math
 
 
+def sigmoid_init(l, num_anchors, num_classes):
+    px = 0.99
+    bias_bg = math.log(px / (1 - px))
+    torch.nn.init.normal_(l.weight, std=0.01)
+    torch.nn.init.constant_(l.bias, 0)
+    l.bias.data = l.bias.data.reshape(num_anchors, num_classes)
+    l.bias.data[:, 0:] -= bias_bg
+    l.bias.data = l.bias.data.reshape(-1)
+
+def softmax_init(l, num_anchors, num_classes):
+    px = 0.99
+    K = num_classes - 1
+    bias_bg = math.log(K * px / (1 - px))
+    torch.nn.init.normal_(l.weight, std=0.01)
+    torch.nn.init.constant_(l.bias, 0)
+    l.bias.data = l.bias.data.reshape(num_anchors, num_classes)
+    l.bias.data[:, 0] += bias_bg
+    l.bias.data = l.bias.data.reshape(-1)
+
+
 class FCHead(nn.Module):
     def __init__(self, in_channels, num_classes, act='sigmoid', n_layers=0):
         super(FCHead, self).__init__()
@@ -55,29 +75,9 @@ class BoxHead(nn.Module):
         self.box_head.apply(initialize_layer)
 
         if self.act == 'softmax':
-            self.softmax_init(self.cls_head[-1])
+            softmax_init(self.cls_head[-1], self.num_anchors, self.num_classes)
         else:
-            self.sigmoid_init(self.cls_head[-1])
-
-    def sigmoid_init(self, l):
-        print('rpn1')
-        px = 0.99
-        bias_bg = math.log(px / (1 - px))
-        torch.nn.init.normal_(l.weight, std=0.01)
-        torch.nn.init.constant_(l.bias, 0)
-        l.bias.data = l.bias.data.reshape(self.num_anchors, self.num_classes)
-        l.bias.data[:, 0:] -= bias_bg
-        l.bias.data = l.bias.data.reshape(-1)
-
-    def softmax_init(self, l):
-        px = 0.99
-        K = self.num_classes - 1
-        bias_bg = math.log(K * px / (1 - px))
-        torch.nn.init.normal_(l.weight, std=0.01)
-        torch.nn.init.constant_(l.bias, 0)
-        l.bias.data = l.bias.data.reshape(self.num_anchors, self.num_classes)
-        l.bias.data[:, 0] += bias_bg
-        l.bias.data = l.bias.data.reshape(-1)
+            sigmoid_init(self.cls_head[-1], self.num_anchors, self.num_classes)
 
     def _make_head(self, in_planes, out_planes, n_layers, conv_func):
         layers = []
@@ -130,9 +130,16 @@ class SSDHead(nn.Module):
             cls_head = conv_func(in_channels, self.num_anchors * self.num_classes)
             torch.nn.init.normal_(loc_head.weight, std=0.01)
             torch.nn.init.constant_(loc_head.bias, 0)
+
+            if self.act == 'softmax':
+                softmax_init(cls_head, self.num_anchors, self.num_classes)
+            else:
+                sigmoid_init(cls_head, self.num_anchors, self.num_classes)
+
             self.box_heads.append(loc_head)
             self.cls_heads.append(cls_head)
-        
+
+            
     def reset(self):
         self.feature_extractor.reset()
 

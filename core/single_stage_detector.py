@@ -95,5 +95,5 @@ class SingleStageDetector(nn.Module):
         return cls(ResNet50FPN, BoxHead, in_channels, num_classes, act, loss=loss, nlayers=nlayers)
 
     @classmethod
-    def resnet50_ssd(cls, in_channels, num_classes, nlayers=0):
-        return cls(ResNet50SSD, SSDHead, in_channels, num_classes, 'softmax', loss='_ohem_loss', nlayers=nlayers)
+    def resnet50_ssd(cls, in_channels, num_classes, act='sigmoid', loss='_focal_loss', nlayers=0):
+        return cls(ResNet50SSD, SSDHead, in_channels, num_classes, act=act, loss=loss, nlayers=nlayers)
