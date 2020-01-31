@@ -134,7 +134,7 @@ class PreActBlock(nn.Module):
         # Squeeze
         w = F.avg_pool2d(out, out.size(2))
         w = F.relu(self.fc1(w))
-        w = F.sigmoid(self.fc2(w))
+        w = torch.sigmoid(self.fc2(w))
 
         # Excitation
         out = out * w
