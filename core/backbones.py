@@ -6,11 +6,15 @@ import torch
 import torch.nn as nn
 from core.utils.opts import time_to_batch, batch_to_time, cuda_time
 
-from core.modules import ConvLayer, SequenceWise, ConvRNN, Bottleneck, BottleneckLSTM
+from core.modules import ConvLayer, SequenceWise, ConvRNN, Bottleneck, BottleneckLSTM, PreActBlock
 from core.unet import UNet
 
 from core.recurrent import RNNWise
 from core.onet import ONet
+
+from core.feedback_convrnn import Feedback
+
+
 
 
 class Vanilla(nn.Module):
@@ -24,11 +28,8 @@ class Vanilla(nn.Module):
 
         self.conv1 = SequenceWise(nn.Sequential(
             ConvLayer(cin, self.base * 2, stride=2),
-            nn.UpsamplingBilinear2d(scale_factor=0.7),
             Bottleneck(self.base * 2, self.base * 4, 1),
-            nn.UpsamplingBilinear2d(scale_factor=0.7),
             Bottleneck(self.base * 4, self.base * 8, 1),
-            nn.UpsamplingBilinear2d(scale_factor=0.7)
         ))
         self.resize = SequenceWise(nn.UpsamplingBilinear2d(scale_factor=0.7))
 
@@ -49,6 +50,42 @@ class Vanilla(nn.Module):
         for name, module in self._modules.items():
             if hasattr(module, "reset"):
                 module.reset(mask)
+
+
+class FBN(nn.Module):
+    def __init__(self, cin=1, cout=256, nmaps=3):
+        super(FBN, self).__init__()
+        self.cin = cin
+        self.base = 8
+        self.cout = cout
+        self.nmaps = nmaps
+        self.levels = 4
+
+        self.conv1 = SequenceWise(nn.Sequential(
+            ConvLayer(cin, self.base * 2, kernel_size=7, stride=2, padding=3),
+            PreActBlock(self.base * 2, self.base * 4, stride=2),
+            PreActBlock(self.base * 4, self.base * 8, stride=2),
+        ))
+
+        self.conv2 = RNNWise(Feedback(self.base * 8))
+        self.adapt = nn.ModuleList([nn.Conv2d(self.base* 8 * 2**(i+1), cout, 1,1,0) for i in range(self.levels)])
+
+    def forward(self, x):
+        x1 = self.conv1(x)
+        outs = self.conv2(x1)
+
+        outs = [time_to_batch(item)[0] for item in outs]
+        outs = [self.adapt[i](item) for i, item in enumerate(outs)]
+
+        return outs
+
+    def reset(self, mask=None):
+        for name, module in self._modules.items():
+            if hasattr(module, "reset"):
+                module.reset(mask)
+            if hasattr(module, "reset_modules"):
+                module.reset_modules(mask)
+
 
 
 class FPN(nn.Module):

@@ -7,7 +7,7 @@ import torch.nn as nn
 
 
 from core.losses import DetectionLoss
-from core.backbones import Vanilla, FPN, MobileNetFPN, ResNet50FPN, ResNet50SSD
+from core.backbones import Vanilla, FPN, FBN, MobileNetFPN, ResNet50FPN, ResNet50SSD
 from core.anchors import Anchors
 from core.rpn import BoxHead, SSDHead
 
@@ -81,6 +81,10 @@ class SingleStageDetector(nn.Module):
     @classmethod
     def mnist_vanilla_rnn(cls, in_channels, num_classes, act='softmax', loss='_ohem_loss'):
         return cls(Vanilla, BoxHead, in_channels, num_classes, act, ratios=[1.0], scales=[1.0, 1.5], loss=loss)
+
+    @classmethod
+    def mnist_fb_rnn(cls, in_channels, num_classes, act='sigmoid', loss='_focal_loss'):
+        return cls(FBN, BoxHead, in_channels, num_classes, act, ratios=[1.0], scales=[1.0, 1.5], loss=loss)
 
     @classmethod
     def mnist_unet_rnn(cls, in_channels, num_classes, act='sigmoid', loss='_focal_loss'):

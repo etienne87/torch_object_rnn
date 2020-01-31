@@ -39,6 +39,11 @@ class Feedback(nn.Module):
 
         return out
 
+    # def reset(self, mask):
+    #     for module in self.convs:
+    #         if hasattr(module, "reset"):
+    #             module.reset(mask)
+
 if __name__ == '__main__':
     t, n, c, h, w = 10, 3, 8, 32, 32
     x = torch.rand(t, n, c, h, w)
