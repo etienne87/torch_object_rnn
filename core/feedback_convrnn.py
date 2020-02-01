@@ -11,44 +11,50 @@ from core.recurrent import *
 
 
 class Feedback(nn.Module):
-    def __init__(self, base, levels=4):
+    def __init__(self, channel_list):
         super(Feedback, self).__init__()
         self.resize = lambda x, size: F.interpolate(x, size=size, mode='nearest')
         self.convs = nn.ModuleList()
         self.feedbacks = nn.ModuleList()
+        levels = len(channel_list)
 
-        for i in range(levels):
-            cin, cout = base * 2**i, base * 2**(i+1)
-            self.convs.append(ConvLSTMCell(cin, cout, stride=2))
-            if i < levels-1:
-                self.feedbacks.append(ConvLayer( base * 2**(i+2), base * 2**(i+1) * 2, stride=1)) #x2 for splitting into i,g
+        down_list = []
+        up_list = []
 
+        for i in range(len(channel_list) - 1):
+            down_list.append((channel_list[i], channel_list[i + 1]))
+
+            if i < len(channel_list)-2:
+                up_list.append((channel_list[i + 2], channel_list[i + 1]))
+        
+        self.downs = nn.ModuleList()
+        self.ups = nn.ModuleList()
+        self.downs += [ConvLSTMCell(item[0], item[1], stride=2) for item in down_list]
+        self.ups += [ConvLayer(item[0], item[1] * 2) for item in up_list]
+        
 
     def forward(self, x):
         out = []
-        for conv in self.convs:
+        for conv in self.downs:
             x = conv(x)
             out.append(x)
 
         #perform all feedbacks (can be pipelined?)
-        for l in range(len(self.convs)-1):
-            src = self.resize(self.convs[l+1].prev_h, self.convs[l].prev_h.shape[-2:])
-            tmp = self.feedbacks[l](src)
-            i, g = torch.split(tmp, self.convs[l].out_channels, dim=1)
-            self.convs[l].prev_h = self.convs[l].prev_h + (torch.sigmoid(i) * torch.tanh(g))
+        for l in range(len(self.downs)-1):  
+            src = self.resize(self.downs[l+1].prev_h, self.downs[l].prev_h.shape[-2:])
+            tmp = self.ups[l](src)
+            i, g = torch.split(tmp, self.downs[l].out_channels, dim=1)
+            self.downs[l].prev_h = self.downs[l].prev_h + (torch.sigmoid(i) * torch.tanh(g))
 
         return out
 
-    # def reset(self, mask):
-    #     for module in self.convs:
-    #         if hasattr(module, "reset"):
-    #             module.reset(mask)
 
 if __name__ == '__main__':
     t, n, c, h, w = 10, 3, 8, 32, 32
     x = torch.rand(t, n, c, h, w)
 
-    net = RNNWise(Feedback(8))
+    channel_list = [8,16,32,64]
+    net = RNNWise(Feedback(channel_list))
 
     out2 = net(x)
     print([item.shape for item in out2])
