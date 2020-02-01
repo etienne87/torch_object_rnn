@@ -53,7 +53,7 @@ if __name__ == '__main__':
     t, n, c, h, w = 10, 3, 8, 32, 32
     x = torch.rand(t, n, c, h, w)
 
-    channel_list = [8,16,32,64]
+    channel_list = [8,16,16,16,16]
     net = RNNWise(Feedback(channel_list))
 
     out2 = net(x)

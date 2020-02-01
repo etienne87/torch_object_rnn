@@ -185,7 +185,11 @@ def coco_eval(gts, proposals, labelmap, height, width, tmp_path, epoch, dump=Fal
         "mean_ap75": coco_eval.stats[2],
         "mean_ap_small": coco_eval.stats[3],
         "mean_ap_medium": coco_eval.stats[4],
-        "mean_ap_big": coco_eval.stats[5]
+        "mean_ap_big": coco_eval.stats[5],
+        "mean_ar": coco_eval.stats[8],
+        "mean_ar_small": coco_eval.stats[9],
+        "mean_ar_medium": coco_eval.stats[10],
+        "mean_ar_big": coco_eval.stats[11]
     }
     return stats
 

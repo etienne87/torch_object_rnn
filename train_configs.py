@@ -74,7 +74,8 @@ def mnist_rnn(args):
     train, val, num_classes = make_moving_mnist(args.train_iter, 
     args.test_iter, args.time, args.num_workers, args.batchsize, 0, args.height, args.width)
     print('==> Building model..')
-    net = SingleStageDetector.mnist_fb_rnn(3, num_classes, act='softmax', loss='_focal_loss')
+   
+    net = getattr(SingleStageDetector, args.backbone)(3, num_classes, act='softmax', loss='_focal_loss')
     out = adam_optim(net, args)
     out.train = train
     out.val = val

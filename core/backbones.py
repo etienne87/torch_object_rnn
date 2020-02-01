@@ -15,7 +15,12 @@ from core.onet import ONet
 from core.feedback_convrnn import Feedback
 
 
-
+def ff_preact_stem(cin, base):
+    return SequenceWise(nn.Sequential(
+            ConvLayer(cin, base * 2, kernel_size=7, stride=2, padding=3),
+            PreActBlock(base * 2, base * 4, stride=2),
+            PreActBlock(base * 4, base * 8, stride=2),
+        ))
 
 class Vanilla(nn.Module):
     def __init__(self, cin=1, cout=256, nmaps=3):
@@ -26,13 +31,8 @@ class Vanilla(nn.Module):
         self.nmaps = nmaps
         self.levels = 4
 
-        self.conv1 = SequenceWise(nn.Sequential(
-            ConvLayer(cin, self.base * 2, stride=2),
-            Bottleneck(self.base * 2, self.base * 4, 1),
-            Bottleneck(self.base * 4, self.base * 8, 1),
-        ))
-        self.resize = SequenceWise(nn.UpsamplingBilinear2d(scale_factor=0.7))
-
+        self.conv1 = ff_preact_stem(cin, self.base)
+       
         self.conv2 = nn.ModuleList()
         self.conv2.append(ConvRNN(self.base * 8, cout, stride=2))
         for i in range(self.levels-1):
@@ -42,7 +42,7 @@ class Vanilla(nn.Module):
         x = self.conv1(x)
         outs = []
         for conv in self.conv2:
-            x = self.resize(conv(x))
+            x = conv(x)
             outs.append(time_to_batch(x)[0])
         return outs
 
@@ -61,22 +61,13 @@ class FBN(nn.Module):
         self.nmaps = nmaps
         self.levels = 4
 
-        self.conv1 = SequenceWise(nn.Sequential(
-            ConvLayer(cin, self.base * 2, kernel_size=7, stride=2, padding=3),
-            PreActBlock(self.base * 2, self.base * 4, stride=2),
-            PreActBlock(self.base * 4, self.base * 8, stride=2),
-        ))
-
-        self.conv2 = RNNWise(Feedback(self.base * 8))
-        self.adapt = nn.ModuleList([nn.Conv2d(self.base* 8 * 2**(i+1), cout, 1,1,0) for i in range(self.levels)])
-
+        self.conv1 = ff_preact_stem(cin, self.base)
+        self.conv2 = RNNWise(Feedback([self.base * 8, cout, cout, cout, cout]))
+        
     def forward(self, x):
         x1 = self.conv1(x)
         outs = self.conv2(x1)
-
         outs = [time_to_batch(item)[0] for item in outs]
-        outs = [self.adapt[i](item) for i, item in enumerate(outs)]
-
         return outs
 
     def reset(self, mask=None):
@@ -97,11 +88,7 @@ class FPN(nn.Module):
         self.nmaps = nmaps
         self.levels = 4
 
-        self.conv1 = SequenceWise(nn.Sequential(
-            Bottleneck(cin, self.base * 2, 2),
-            Bottleneck(self.base * 2, self.base * 4, 2),
-            Bottleneck(self.base * 4, self.base * 8, 2),
-        ))  
+        self.conv1 = ff_preact_stem(cin, self.base)  
 
         self.conv2 = UNet.recurrent_unet([self.base * 8] * (self.levels-1) + [cout] * self.levels, mode='cat')
         #self.conv2 = RNNWise(ONet([self.base * 8] * (self.levels-1) + [cout] * self.levels))

@@ -35,6 +35,8 @@ def parse_args():
     parser.add_argument('--cuda', action='store_true', help='use cuda')
     parser.add_argument('--half', action='store_true', help='use fp16')
     parser.add_argument('--clip_grad_norm', action='store_true', help='clip gradient')
+
+    parser.add_argument('--backbone', type=str, default='mnist_unet_rnn', help='feature extractor')
     return parser.parse_args()
 
 
