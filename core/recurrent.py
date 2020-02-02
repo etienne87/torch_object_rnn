@@ -107,7 +107,10 @@ class ConvLSTMCell(RNNCell):
     r"""ConvLSTMCell module, applies sequential part of LSTM.
     """
 
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, bias=True, conv_func=nn.Conv2d, hard=False):
+    def __init__(self, in_channels, 
+                       out_channels, 
+                       kernel_size=3, stride=1, padding=1, dilation=1, bias=True, 
+                       conv_func=nn.Conv2d, hard=False, feedback_channels=None):
         super(ConvLSTMCell, self).__init__(hard)
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -115,6 +118,15 @@ class ConvLSTMCell(RNNCell):
         activation='Identity', stride=stride)
 
         self.conv_h2h = conv_func(in_channels=self.out_channels,
+                                  out_channels=4 * self.out_channels,
+                                  kernel_size=kernel_size,
+                                  stride=1,
+                                  padding=padding,
+                                  dilation=dilation,
+                                  bias=bias)
+
+        if feedback_channels is not None:
+            self.conv_fb2h = conv_func(in_channels=feedback_channels,
                                   out_channels=4 * self.out_channels,
                                   kernel_size=kernel_size,
                                   stride=1,
@@ -136,6 +148,10 @@ class ConvLSTMCell(RNNCell):
             self.prev_c = torch.zeros(shape, dtype=torch.float32, device=x.device)
 
         tmp = self.conv_h2h(self.prev_h) + x
+
+        if self.prev_fb is not None:
+            tmp += self.conv_fb2h(self.prev_fb)
+
         cc_i, cc_f, cc_o, cc_g = torch.split(tmp, self.out_channels, dim=1)
         i = self.sigmoid(cc_i)
         f = self.sigmoid(cc_f)
@@ -153,14 +169,19 @@ class ConvLSTMCell(RNNCell):
         if self.prev_h is not None:
             self.prev_h = self.prev_h.detach()
             self.prev_c = self.prev_c.detach()
+        if self.prev_fb is not None:
+            self.prev_fb = self.prev_fb.detach()
 
     def reset(self, mask=None):
         if mask is None or self.prev_h is None:
             self.prev_h, self.prev_c = None, None
+            self.prev_fb = None
         else:
             mask = mask.to(self.prev_h)
             self.prev_h *= mask
             self.prev_c *= mask
+            if self.prev_fb is not None:
+                self.prev_fb *= mask
 
 
 

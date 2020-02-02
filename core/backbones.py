@@ -44,6 +44,7 @@ class Vanilla(nn.Module):
         for conv in self.conv2:
             x = conv(x)
             outs.append(time_to_batch(x)[0])
+
         return outs
 
     def reset(self, mask=None):

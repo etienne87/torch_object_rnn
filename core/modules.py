@@ -143,14 +143,16 @@ class PreActBlock(nn.Module):
         
 
 class ASPP(nn.Module):
-    def __init__(self, in_channels, out_channels, atrous_rates=[3, 6, 12, 18]):
+    def __init__(self, in_channels, out_channels, 
+                kernel_size=3, atrous_rates=[3, 6, 12, 18], conv_func=nn.Conv2d):
         super(ASPP, self).__init__()
         modules = []
         for rate in atrous_rates:
-            modules.append(ConvLayer(in_channels, out_channels, dilation=rate, padding=rate))
+            padding = get_padding(kernel_size, rate)
+            modules.append(conv_func(in_channels, in_channels, kernel_size=kernel_size, groups=in_channels, dilation=rate, padding=padding))
 
         self.convs = nn.ModuleList(modules)
-        self.project = ConvLayer(out_channels * len(self.convs), out_channels)
+        self.project = conv_func(in_channels * len(self.convs), out_channels, kernel_size=1, padding=0)
 
     def forward(self, x):
         res = []
@@ -235,9 +237,12 @@ class ConvLSTMCell(RNNCell):
 
         self.conv_h2h = conv_func(in_channels=self.hidden_dim,
                                   out_channels=4 * self.hidden_dim,
-                                  kernel_size=kernel_size,
+                                  kernel_size=3,
+                                  dilation=1,
                                   padding=1,
                                   bias=True)
+        
+        #self.conv_h2h = ASPP(self.hidden_dim, 4 * self.hidden_dim, atrous_rates=[1,2,4])
 
         self.reset()
 
@@ -433,18 +438,13 @@ class ConvRNN(nn.Module):
             factor = 4
 
 
-        # self.highway = SequenceWise(HighwayGate(out_channels))
-
-        """ self.conv_x2h = SequenceWise(ConvLayer(in_channels, factor * out_channels,
+        self.conv_x2h = SequenceWise(ConvLayer(in_channels, factor * out_channels,
                                              kernel_size=kernel_size,
                                              stride=stride,
                                              dilation=dilation,
                                              padding=padding,
-                                             activation='Identity')) """
+                                             activation='Identity'))
 
-        self.conv_x2h = SequenceWise(ConvLayer(in_channels, factor * out_channels, 
-        activation='Identity',
-        stride=stride))
 
     def forward(self, x):
         #TODO: remove highway after
