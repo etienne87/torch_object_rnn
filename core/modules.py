@@ -545,6 +545,8 @@ class ConvRNN(nn.Module):
 
         self.cell = cell
 
+        print('rnn cell: ', cell)
+
         if cell == 'gru':
             self.timepool = ConvGRUCell(out_channels, 3, True, hard=hard)
             factor = 3

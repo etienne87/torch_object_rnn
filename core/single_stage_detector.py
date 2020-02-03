@@ -8,6 +8,7 @@ import torch.nn as nn
 
 from core.losses import DetectionLoss
 from core.backbones import Vanilla, FPN, FBN, MobileNetFPN, ResNet50FPN, ResNet50SSD
+from core.modules import ConvRNN, ConvALSTMCell
 from core.anchors import Anchors
 from core.rpn import BoxHead, SSDHead
 from core.utils.box import box_drawing
@@ -61,34 +62,38 @@ class SingleStageDetector(nn.Module):
         xs = self.feature_extractor(x)
         loc_preds, cls_preds = self.rpn(xs)
 
-        #
-        # import cv2
-        # import numpy as np
-        # for t in range(masks.shape[0]):
-        #     cv2.imshow('mask', masks[t,0].astype(np.uint8)*255)
-        #     cv2.waitKey(15)
-
         with torch.no_grad():
             anchors, anchors_xyxy = self.box_coder(xs, x.shape[-2:])
             loc_targets, cls_targets = self.box_coder.encode(anchors, anchors_xyxy, targets)
 
         assert cls_targets.shape[1] == cls_preds.shape[1]
         loc_loss, cls_loss = self.criterion(loc_preds, loc_targets, cls_preds, cls_targets)
-        loss_dict = {'loc': loc_loss, 'cls_loss': cls_loss}
+
+        attention_loss = self.attention_loss(x, targets)
+        loss_dict = {'loc': loc_loss, 'cls_loss': cls_loss, 'attention_loss': attention_loss}
 
         return loss_dict
 
-    def compute_gate_a_loss(self, targets):
+    def attention_loss(self, x, targets):
+        """TODO: integrate this into losses
+        Temporally Identity-Aware SSD with Attentional-LSTM
+        https://arxiv.org/pdf/1803.00197.pdf
+
+        :param x:
+        :param targets:
+        :return:
+        """
         masks = box_drawing(targets, x.shape[-2], x.shape[-1], 8)
+        masks = torch.from_numpy(masks)[:,:,None,:,:].to(x)
         total_loss = 0
-        for module in self.feature_extractor.conv2._modules():
-            if isinstance(module, ConvALSTM):
+        for module in self.feature_extractor.conv2.modules():
+            if isinstance(module, ConvALSTMCell):
                 gate_a = torch.cat(module.gate_a)
-                mask_a = sequence_upsample(mask_a, gate_a)
+                mask_a = sequence_upsample(masks, gate_a)
                 #Apply Binary Cross-Entropy
-                loss_ = F.binary_cross_entropy_with_logits(
-                    gate_a, mask_a, reduction='none')
-                total_loss += loss_.mean()
+                loss_ = nn.functional.binary_cross_entropy_with_logits(
+                    gate_a, mask_a, reduction='mean')
+                total_loss += loss_
         return total_loss
 
 
