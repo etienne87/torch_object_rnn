@@ -10,6 +10,8 @@ from core.losses import DetectionLoss
 from core.backbones import Vanilla, FPN, FBN, MobileNetFPN, ResNet50FPN, ResNet50SSD
 from core.anchors import Anchors
 from core.rpn import BoxHead, SSDHead
+from core.utils.box import box_drawing
+from core.unet import sequence_upsample
 
 
 
@@ -59,6 +61,13 @@ class SingleStageDetector(nn.Module):
         xs = self.feature_extractor(x)
         loc_preds, cls_preds = self.rpn(xs)
 
+        #
+        # import cv2
+        # import numpy as np
+        # for t in range(masks.shape[0]):
+        #     cv2.imshow('mask', masks[t,0].astype(np.uint8)*255)
+        #     cv2.waitKey(15)
+
         with torch.no_grad():
             anchors, anchors_xyxy = self.box_coder(xs, x.shape[-2:])
             loc_targets, cls_targets = self.box_coder.encode(anchors, anchors_xyxy, targets)
@@ -68,6 +77,20 @@ class SingleStageDetector(nn.Module):
         loss_dict = {'loc': loc_loss, 'cls_loss': cls_loss}
 
         return loss_dict
+
+    def compute_gate_a_loss(self, targets):
+        masks = box_drawing(targets, x.shape[-2], x.shape[-1], 8)
+        total_loss = 0
+        for module in self.feature_extractor.conv2._modules():
+            if isinstance(module, ConvALSTM):
+                gate_a = torch.cat(module.gate_a)
+                mask_a = sequence_upsample(mask_a, gate_a)
+                #Apply Binary Cross-Entropy
+                loss_ = F.binary_cross_entropy_with_logits(
+                    gate_a, mask_a, reduction='none')
+                total_loss += loss_.mean()
+        return total_loss
+
 
     def get_boxes(self, x, score_thresh=0.4):
         xs = self.feature_extractor(x)

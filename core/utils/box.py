@@ -405,3 +405,16 @@ def batched_nms(boxes, scores, idxs, iou_threshold):
     boxes_for_nms = boxes + offsets[:, None]
     keep = box_nms(boxes_for_nms, scores, iou_threshold)
     return keep
+
+def box_drawing(boxes, h, w, stride):
+    tbins, batchsize = len(boxes), len(boxes[0])
+    masks = np.zeros((tbins, batchsize, h//stride, w//stride), dtype=np.bool)
+
+    for t in range(tbins):
+        for n in range(batchsize):
+            boxes_tn = boxes[t][n].numpy().astype(np.int32)
+            for box in boxes_tn:
+                x1, y1, x2, y2 = box[:4]//stride
+                masks[t, n, y1:y2, x1:x2] = True
+    return masks
+

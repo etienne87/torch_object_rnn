@@ -304,6 +304,121 @@ class ConvLSTMCell(RNNCell):
             self.prev_c *= mask
 
 
+class ConvALSTMCell(RNNCell):
+    r"""ConvLSTMCell with Attention
+    Temporally Identity-Aware SSD with Attentional-LSTM
+    https://arxiv.org/pdf/1803.00197.pdf
+
+    """
+
+    def __init__(self, in_channels, hidden_dim, kernel_size, conv_func=nn.Conv2d, hard=False):
+        super(ConvALSTMCell, self).__init__(hard)
+        self.hidden_dim = hidden_dim
+
+        self.conv_x2a = ConvLayer(in_channels=in_channels,
+                                  out_channels=1,
+                                  kernel_size=3,
+                                  dilation=1,
+                                  padding=1,
+                                  bias=True)
+
+        self.conv_h2a = conv_func(in_channels=self.hidden_dim,
+                                  out_channels=1,
+                                  kernel_size=3,
+                                  dilation=1,
+                                  padding=1,
+                                  bias=True)
+
+        self.conv_ax2h = ConvLayer(in_channels=in_channels,
+                                  out_channels=4 * self.hidden_dim,
+                                  kernel_size=3,
+                                  dilation=1,
+                                  padding=1,
+                                  bias=True)
+
+        self.conv_h2h = conv_func(in_channels=self.hidden_dim,
+                                  out_channels=4 * self.hidden_dim,
+                                  kernel_size=3,
+                                  dilation=1,
+                                  padding=1,
+                                  bias=True)
+
+        # self.conv_h2h = ASPP(self.hidden_dim, 4 * self.hidden_dim, atrous_rates=[1,2,4])
+
+        self.reset()
+        self.gate_a = None
+
+    def forward(self, xi):
+        self.saturation_cost = 0
+        inference = (len(xi.shape) == 4)  # inference for model conversion
+        if inference:
+            xiseq = [xi]
+        else:
+            xiseq = xi.split(1, 0)  # t,n,c,h,w
+
+        if self.prev_h is not None:
+            self.prev_h = self.prev_h.detach()
+            self.prev_c = self.prev_c.detach()
+        else:
+            shape = list(xiseq[0][0].shape)
+            shape[1] = self.hidden_dim
+            self.prev_h = torch.zeros(shape, dtype=torch.float32, device=xi.device)
+            self.prev_c = torch.zeros(shape, dtype=torch.float32, device=xi.device)
+
+        self.gate_a = []
+        result = []
+        for t, xt in enumerate(xiseq):
+            if not inference:  # for training/val (not inference)
+                xt = xt.squeeze(0)
+
+            # 1. Make A
+            if self.prev_h is not None:
+                tmp = self.conv_x2a(xt) + self.conv_h2a(self.prev_h)
+            else:
+                tmp = self.conv_x2a(xt)
+
+            a = torch.sigmoid(tmp)
+
+            self.gate_a.append(a[None]) #store gate_a for direct supervision!
+            ax = a * xt
+
+            if self.prev_h is not None:
+                tmp = self.conv_h2h(self.prev_h) + self.conv_ax2h(ax)
+            else:
+                tmp = self.conv_ax2h(ax)
+
+            cc_i, cc_f, cc_o, cc_g = torch.split(tmp, self.hidden_dim, dim=1)
+            i = self.sigmoid(cc_i)
+            f = self.sigmoid(cc_f)
+            o = self.sigmoid(cc_o)
+            g = self.tanh(cc_g)
+            if self.prev_c is None:
+                c = i * g
+            else:
+                c = f * self.prev_c + i * g
+            h = o * self.tanh(c)
+            if not inference:
+                result.append(h.unsqueeze(0))
+            self.prev_h = h
+            self.prev_c = c
+        if inference:
+            res = h
+        else:
+            res = torch.cat(result, dim=0)
+        return res
+
+    def reset(self, mask=None):
+        """To be called in between batches"""
+        if mask is None or self.prev_h is None:
+            self.prev_h, self.prev_c = None, None
+        else:
+            self.prev_h, self.prev_c = self.prev_h.detach(), self.prev_c.detach()
+            mask = mask.to(self.prev_h)
+            self.prev_h *= mask
+            self.prev_c *= mask
+
+
+
 class ConvGRUCell(RNNCell):
     r"""ConvGRUCell module, applies sequential part of LSTM.
     """
@@ -422,35 +537,43 @@ class ConvRNN(nn.Module):
     """
     def __init__(self, in_channels, out_channels,
                  kernel_size=3, stride=1, padding=1, dilation=1,
-                 cell='lstm', hard=False):
+                 cell='alstm', hard=False):
         super(ConvRNN, self).__init__()
 
         self.in_channels = in_channels
         self.out_channels = out_channels
+
+        self.cell = cell
+
         if cell == 'gru':
             self.timepool = ConvGRUCell(out_channels, 3, True, hard=hard)
             factor = 3
         elif cell == 'irnn':
             self.timepool = ConvIRNNCell(out_channels, 3, True, hard=hard)
             factor = 1
+        elif cell == 'alstm':
+            self.timepool = ConvALSTMCell(in_channels, out_channels, 3, hard=hard)
+            factor = 1
         else:
             self.timepool = ConvLSTMCell(out_channels, 3, hard=hard)
             factor = 4
 
-
-        self.conv_x2h = SequenceWise(ConvLayer(in_channels, factor * out_channels,
-                                             kernel_size=kernel_size,
-                                             stride=stride,
-                                             dilation=dilation,
-                                             padding=padding,
-                                             activation='Identity'))
+        if cell != 'alstm':
+            self.conv_x2h = SequenceWise(ConvLayer(in_channels, factor * out_channels,
+                                                 kernel_size=kernel_size,
+                                                 stride=stride,
+                                                 dilation=dilation,
+                                                 padding=padding,
+                                                 activation='Identity'))
 
 
     def forward(self, x):
         #TODO: remove highway after
-        y = self.conv_x2h(x)
-        h = self.timepool(y)
-        # h = self.highway(h)
+        if self.cell == 'alstm':
+            h = self.timepool(x)
+        else:
+            y = self.conv_x2h(x)
+            h = self.timepool(y)
         return h
 
     def reset(self, mask):
