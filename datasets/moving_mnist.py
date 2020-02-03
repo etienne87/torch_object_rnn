@@ -119,7 +119,7 @@ class MnistEnv(object):
 def collate_fn(data):
     #permute NTCHW - TNCHW
     batch, boxes, resets = data['data'], data['boxes'], data['resets']
-    batch = torch.from_numpy(batch).permute(1,0,4,2,3)
+    batch = torch.from_numpy(batch).permute(1,0,4,2,3).contiguous()
     t, n = batch.shape[:2]
     boxes = [[torch.from_numpy(boxes[i][t]) for i in range(n)] for t in range(t)]
     resets = 1-torch.FloatTensor(resets)
