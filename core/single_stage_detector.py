@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 
 
-from core.losses import DetectionLoss
+from core.losses import DetectionLoss, attention_loss
 from core.backbones import Vanilla, FPN, FBN, MobileNetFPN, ResNet50FPN, ResNet50SSD
 from core.modules import ConvRNN, ConvALSTMCell
 from core.anchors import Anchors
@@ -67,34 +67,13 @@ class SingleStageDetector(nn.Module):
             loc_targets, cls_targets = self.box_coder.encode(anchors, anchors_xyxy, targets)
 
         assert cls_targets.shape[1] == cls_preds.shape[1]
+        
         loc_loss, cls_loss = self.criterion(loc_preds, loc_targets, cls_preds, cls_targets)
 
-        attention_loss = self.attention_loss(x, targets)
-        loss_dict = {'loc': loc_loss, 'cls_loss': cls_loss, 'attention_loss': attention_loss}
+        # att_loss = attention_loss(self.feature_extractor, x, targets, sequence_upsample, box_drawing)
+        loss_dict = {'loc': loc_loss, 'cls_loss': cls_loss}
 
         return loss_dict
-
-    def attention_loss(self, x, targets):
-        """TODO: integrate this into losses
-        Temporally Identity-Aware SSD with Attentional-LSTM
-        https://arxiv.org/pdf/1803.00197.pdf
-
-        :param x:
-        :param targets:
-        :return:
-        """
-        masks = box_drawing(targets, x.shape[-2], x.shape[-1], 8)
-        masks = torch.from_numpy(masks)[:,:,None,:,:].to(x)
-        total_loss = 0
-        for module in self.feature_extractor.conv2.modules():
-            if isinstance(module, ConvALSTMCell):
-                gate_a = torch.cat(module.gate_a)
-                mask_a = sequence_upsample(masks, gate_a)
-                #Apply Binary Cross-Entropy
-                loss_ = nn.functional.binary_cross_entropy_with_logits(
-                    gate_a, mask_a, reduction='mean')
-                total_loss += loss_
-        return total_loss
 
 
     def get_boxes(self, x, score_thresh=0.4):

@@ -22,6 +22,29 @@ def reduce(loss, mode='none'):
     return loss
 
 
+def attention_loss(feature_extractor, x, targets, resize, box_drawing):
+    """
+    Temporally Identity-Aware SSD with Attentional-LSTM
+    https://arxiv.org/pdf/1803.00197.pdf
+
+    :param x:
+    :param targets:
+    :return:
+    """
+    masks = box_drawing(targets, x.shape[-2], x.shape[-1], 8)
+    masks = torch.from_numpy(masks)[:,:,None,:,:].to(x)
+    total_loss = 0
+    for module in self.feature_extractor.conv2.modules():
+        if isinstance(module, ConvALSTMCell):
+            gate_a = torch.cat(module.gate_a)
+            mask_a = resize(masks, gate_a)
+            #Apply Binary Cross-Entropy
+            loss_ = nn.functional.binary_cross_entropy_with_logits(
+                gate_a, mask_a, reduction='mean')
+            total_loss += loss_
+    return total_loss
+
+
 def softmax_focal_loss(x, y, reduction='none'):
     ''' softmax focal loss
 

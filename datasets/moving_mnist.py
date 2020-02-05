@@ -85,7 +85,7 @@ class MnistEnv(object):
         self.envs = [MovingMnistAnimation(anim_id=proc_id+epoch+i, **kwargs) for i in range(num_envs)]
         self.niter = niter
         self.reset() 
-        self.max_steps = 2**epoch
+        self.max_steps = min(2**epoch, max_steps//2)
         self.step = 0
         self.max_iter = niter
         self.proc_id = proc_id

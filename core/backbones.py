@@ -26,17 +26,21 @@ class Vanilla(nn.Module):
     def __init__(self, cin=1, cout=256, nmaps=3):
         super(Vanilla, self).__init__()
         self.cin = cin
-        self.base = 8
+        self.base = 4
         self.cout = cout
         self.nmaps = nmaps
-        self.levels = 4
+        self.levels = 2
 
         self.conv1 = ff_preact_stem(cin, self.base)
        
         self.conv2 = nn.ModuleList()
         self.conv2.append(ConvRNN(self.base * 8, cout, stride=2))
         for i in range(self.levels-1):
-            self.conv2.append(ConvRNN(cout, cout, stride=1))
+            m = nn.Sequential(
+                ConvRNN(cout, cout, stride=1),
+                SequenceWise(PreActBlock(cout, cout, stride=2))
+                )
+            self.conv2.append(m)
 
     def forward(self, x):
         x = self.conv1(x)
@@ -97,7 +101,6 @@ class FPN(nn.Module):
     def forward(self, x):
         x1 = self.conv1(x)
         outs = self.conv2(x1)[-self.levels:]
-
         sources = [time_to_batch(item)[0] for item in outs][::-1]
 
         return sources

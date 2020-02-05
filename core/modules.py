@@ -6,6 +6,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 import torch
 from core.utils.opts import time_to_batch, batch_to_time
+from core.attention_conv import AttentionConv
 
 
 def get_padding(kernel, dilation):
@@ -162,23 +163,12 @@ class ASPP(nn.Module):
         res = self.project(res)
         return res
 
+
 def sequence_upsample(x, y):
     x, n = time_to_batch(x)
     x = F.interpolate(x, size=y.shape[-2:], mode='nearest')
     x = batch_to_time(x, n)
     return x
-
-#As a Sanity-Check to compare with the O-Net
-class HighwayGate(nn.Module):
-    def __init__(self, in_channels):
-        super(HighwayGate, self).__init__()
-        self.conv = nn.Conv2d(in_channels, in_channels*2, kernel_size=3, stride=1, padding=1)
-
-    def forward(self, x):
-        tmp = self.conv(x)
-        i, g = torch.split(tmp, x.shape[1], dim=1)
-        h = x + torch.sigmoid(i) * torch.tanh(g)
-        return h
 
 
 
@@ -237,9 +227,10 @@ class ConvLSTMCell(RNNCell):
 
         self.conv_h2h = conv_func(in_channels=self.hidden_dim,
                                   out_channels=4 * self.hidden_dim,
-                                  kernel_size=3,
-                                  dilation=1,
-                                  padding=1,
+                                  kernel_size=kernel_size,
+                                  #dilation=1,
+                                  groups=4,
+                                  padding=kernel_size//2,
                                   bias=True)
         
         #self.conv_h2h = ASPP(self.hidden_dim, 4 * self.hidden_dim, atrous_rates=[1,2,4])
@@ -377,9 +368,11 @@ class ConvALSTMCell(RNNCell):
             else:
                 tmp = self.conv_x2a(xt)
 
-            a = torch.sigmoid(tmp)
+            a = tmp
 
             self.gate_a.append(a[None]) #store gate_a for direct supervision!
+
+            a = torch.sigmoid(a)
             ax = a * xt
 
             if self.prev_h is not None:
@@ -493,51 +486,12 @@ class ConvGRUCell(RNNCell):
         self.prev_h = None
 
 
-class ConvIRNNCell(RNNCell):
-    r"""ConvIRNNCell module, applies sequential part of IRNN.
-    """
-    def __init__(self, hidden_dim, kernel_size, bias, conv_func=nn.Conv2d, hard=False):
-        super(ConvIRNNCell, self).__init__(hard)
-        self.hidden_dim = hidden_dim
-        self.conv_h2h = conv_func(in_channels=self.hidden_dim,
-                                  out_channels=self.hidden_dim,
-                                  kernel_size=kernel_size,
-                                  padding=1,
-                                  bias=bias)
-        self.reset()
-        # identity initialization
-        """ self.conv_h2h.weight.data[...] = 0
-        mid = kernel_size//2
-        self.conv_h2h.weight.data[:,:,mid,mid] = torch.eye(self.hidden_dim) """
-
-    def forward(self, xi):
-        self.saturation_cost = 0
-        xiseq = xi.split(1, 0) #t,n,c,h,w
-        if self.prev_h is not None:
-            self.prev_h = self.prev_h.detach()
-
-        result = []
-        for t, xt in enumerate(xiseq):
-            xt = xt.squeeze(0)
-
-            tmp = self.conv_h2h(self.prev_h) + xt
-            h = F.relu(tmp)
-
-            result.append(h.unsqueeze(0))
-            self.prev_h = h
-        res = torch.cat(result, dim=0)
-        return res
-
-    def reset(self):
-        self.prev_h = None
-
-
 class ConvRNN(nn.Module):
     r"""ConvRNN module.
     """
     def __init__(self, in_channels, out_channels,
                  kernel_size=3, stride=1, padding=1, dilation=1,
-                 cell='alstm', hard=False):
+                 cell='lstm', hard=False, **cell_kwargs):
         super(ConvRNN, self).__init__()
 
         self.in_channels = in_channels
@@ -548,16 +502,13 @@ class ConvRNN(nn.Module):
         print('rnn cell: ', cell)
 
         if cell == 'gru':
-            self.timepool = ConvGRUCell(out_channels, 3, True, hard=hard)
+            self.timepool = ConvGRUCell(out_channels, 3, True, hard=hard, **cell_kwargs)
             factor = 3
-        elif cell == 'irnn':
-            self.timepool = ConvIRNNCell(out_channels, 3, True, hard=hard)
-            factor = 1
         elif cell == 'alstm':
-            self.timepool = ConvALSTMCell(in_channels, out_channels, 3, hard=hard)
+            self.timepool = ConvALSTMCell(in_channels, out_channels, 3, hard=hard, **cell_kwargs)
             factor = 1
         else:
-            self.timepool = ConvLSTMCell(out_channels, 3, hard=hard)
+            self.timepool = ConvLSTMCell(out_channels, 3, hard=hard, **cell_kwargs)
             factor = 4
 
         if cell != 'alstm':
