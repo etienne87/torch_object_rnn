@@ -63,7 +63,12 @@ def cuda_time(func):
         start = cuda_tick()
         out = func(*args, **kwargs)
         end = cuda_tick()
-        print(end-start, ' s @', func)
+        rt = end-start
+        freq = 1./rt
+        if freq > 0:
+            print(freq, ' it/s @ ', func)
+        else:
+            print(rt, ' s/it @ ', func)
         return out
     return wrapper
 
