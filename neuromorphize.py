@@ -18,36 +18,31 @@ def download_video(url, filepath="/tmp/"):
     return filename
 
 
-def neuromorphize(tensor, noise, threshold=0):
-    # very naive & fast simulator of dvs
-    # tensor T, N, C, H, W
-    # first move T at the end & apply a conv2d to compute difference
-    diff = tensor[1:] - tensor[:-1]
-
-    n,c,h,w = diff.shape
-
-    diff, _ = time_to_batch(diff)
-    diff = batch_to_time(diff, tensor.shape[1])
-
-    on = diff > threshold
-    off = diff < threshold
-    zero = diff.abs() <= threshold
-
-   
-    diff[on] = 255
-    diff[off] = 0
-    diff[zero] = 127
-
-    return diff #*noise
+#TODO: simulate refr period?
+#TODO: expand video rate with deep learning
+def neuromorphize_sequence(tensor, state, threshold):
+    diffs = []
+    for i_t in tensor:
+        diff = i_t - state
+        on = diff > threshold
+        off = diff < threshold
+        zero = diff.abs() <= threshold
+        diff[on] = 255
+        diff[off] = 0
+        diff[zero] = 127  
+        state[~zero] = i_t[~zero]
+        diffs.append(diff[None])
+    diff = torch.cat(diffs)
+    return diff, state
 
 
-def neuromorphize_video(video_filename, threshold=0, tbins=60, height=480, width=640):
+def neuromorphize_video(video_filename, threshold=0, tbins=120, height=480, width=640, p=0.01):
     def read(cap):
         ret, frame = cap.read()   
         if ret:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             frame = cv2.resize(frame, (width, height), 0, 0, cv2.INTER_AREA)
-            frame = torch.from_numpy(frame)[None,None]
+            frame = torch.from_numpy(frame)
         return ret, frame
 
     cap = cv2.VideoCapture(video_filename)
@@ -55,24 +50,34 @@ def neuromorphize_video(video_filename, threshold=0, tbins=60, height=480, width
     cap.set(cv2.cv2.CAP_PROP_POS_FRAMES, int(1e4))
 
     _, frame = read(cap)
-    volume = [frame]
 
-    _,c,h,w = frame.shape
-    noise = (torch.rand(tbins,c,h,w)>0.1).cuda() 
+    state = frame.short().cuda()
+    h,w = frame.shape
 
+    #fix-pattern noise (hot pixels)
+    if p > 0:
+        on_noise = (torch.rand(tbins,h,w)<p).cuda() 
+        off_noise = (torch.rand(tbins,h,w)<p).cuda()
     while cap:
-        volume = [volume[-1]]
+        # volume = [volume[-1]]
+
+        volume = []
         for t in range(tbins):
             ret, frame = read(cap)
             if ret:
-                volume.append(frame)
+                volume.append(frame[None])
             else:
                 break
-        tensor = torch.cat(volume).int().cuda()
+        tensor = torch.cat(volume).short().cuda()
 
 
         start = cuda_tick()
-        tensor = neuromorphize(tensor, noise, 6)
+        tensor, state = neuromorphize_sequence(tensor, state, threshold)
+
+        if p>0:
+            tensor[on_noise] = 255
+            tensor[off_noise] = 0
+
         end = cuda_tick()
         rt = end-start
         freq = (1./rt) * tbins
@@ -81,9 +86,9 @@ def neuromorphize_video(video_filename, threshold=0, tbins=60, height=480, width
 
         data = tensor.cpu().numpy()
         for img in data:
-            im = img[0].astype(np.uint8)
+            im = img.astype(np.uint8)
             cv2.imshow('img', im)
-            cv2.waitKey(1)
+            cv2.waitKey(0)
         # viz
         if not ret:
             break
