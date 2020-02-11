@@ -52,28 +52,37 @@ class DynamicConv(nn.Module):
         self.out_channels = out_channels
         self.kernel_size = kernel_size
 
-        self.weights = nn.Parameter(torch.randn(out_channels, num_weights, in_channels, kernel_size, kernel_size), requires_grad=True)
-        self.biases = nn.Parameter(torch.zeros(out_channels, num_weights, 1, 1), requires_grad=True)
+        self.weights = nn.Parameter(torch.randn(1, out_channels, num_weights, in_channels, kernel_size, kernel_size), requires_grad=True)
+        self.biases = nn.Parameter(torch.zeros(1, out_channels, num_weights, 1, 1), requires_grad=True)
 
         self.att_fc = nn.Sequential(
             nn.Conv2d(in_channels, in_channels // num_weights, kernel_size=1),
             nn.ReLU(),
             nn.Conv2d(in_channels // num_weights, num_weights, kernel_size=1)
         )
-        self.tau = temperature
+        self.tau = 1./temperature
 
-        for i in range(num_weights):
-            init.kaiming_normal_(self.weights[i:i+1], mode='fan_out', nonlinearity='sigmoid')
+        #for i in range(num_weights):
+        init.kaiming_normal_(self.weights, mode='fan_out', nonlinearity='relu')
        
 
     def forward(self, x):
-        pi = F.avg_pool2d(self.att_fc(x), x.size(2)) #n,m,1,1
-        pi = F.softmax(pi/self.tau, dim=1)[:,None,:,:,:] #n,1,m,1,1,1
+        pi = F.avg_pool2d(x, x.size(2))
+        pi = self.att_fc(pi)  #n,m,1,1
+        pi = F.softmax(pi*self.tau, dim=1) #n,m,1,1
 
-        weights = torch.sum(self.weights[None] * pi[...,None], dim=2) #1,co,m,ci,k,k * n,1,m,1,1,1
-        biases = torch.sum(self.biases[None] * pi, dim=2) #1,co,m,1,1 * n,1,m,1,1
+        
+        # pi4w = pi[:,None,:,:,:,None]
+        weights = torch.bmm(self.weights, pi[:,None,:,:,:,None])
+
+        import pdb;pdb.set_trace()
+
+        # weights = torch.sum(self.weights * pi[:,None,:,:,:,None], dim=2) #1,co,m,ci,k,k * n,1,m,1,1,1
+        # biases = torch.sum(self.biases * pi[:,None,:,:,:,0], dim=2) #1,co,m,1,1 * n,1,m,1,1
 
         y = conv_dynamic(x, weights, biases, self.stride, self.padding, self.dilation)
+
+        #y = F.conv2d(x, self.weights[:,0], None, self.stride, self.padding, self.dilation)
         return y
 
 
