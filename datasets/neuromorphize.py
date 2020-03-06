@@ -1,5 +1,6 @@
 import os
 import glob
+import time
 import torch
 import torch.nn as nn
 import cv2
@@ -21,10 +22,47 @@ def download_video(url, filepath="/tmp/"):
     return filename
 
 
+def cv2_normalize(im):
+    return (im-im.min())/(im.max()-im.min())
+
+def cv2_shi_tomasi_response(img, k=5):
+    height, width = img.shape
+    imf = img.astype(np.float32)/255.0
+    gx = cv2.Sobel(imf,cv2.CV_32FC1,1,0,ksize=k)
+    gy = cv2.Sobel(imf,cv2.CV_32FC1,0,1,ksize=k) 
+
+    ixy = gx * gy
+    ixx = gx * gx
+    iyy = gy * gy
+
+    m = np.concatenate([ixx[...,None], ixy[...,None], ixy[...,None], ixx[...,None]], axis=2).reshape(*img.shape,2,2)
+    l1l2c = np.linalg.eigvals(m)
+    l1l2 = np.absolute(l1l2c)
+    
+    score = np.minimum(l1l2[...,0], l1l2[...,1])
+    return score
+
+
+class ShiTomasi(nn.Module):
+    def __init__(self):
+        super(ShiTomasi, self).__init__()
+
+        mat = torch.FloatTensor([[1, 0, -1],
+                                 [2, 0, -2],
+                                 [1, 0, -1]])
+        mat = torch.cat((mat[None], mat.t()[None]), dim=0)
+        self.register_buffer("weight", mat[:,None,:,:])
+    
+    def forward(self, x):
+        x = x.float()/255
+        gxy = F.conv2d(x, self.weight)
+                
+
+
 class Neuromorphizer(nn.Module):
     def __init__(self, height, width, video_fps, 
                     refractory_period_us=0, threshold=0, 
-                    p_fix_pattern_noise=0.001, max_period_noise=10, max_tbins=100):
+                    p_fix_pattern_noise=0.001, max_period_noise=10, max_tbins=100, dynamic_threshold=True):
         super(Neuromorphizer, self).__init__()
         self.height = height
         self.width = width
@@ -41,10 +79,11 @@ class Neuromorphizer(nn.Module):
         self.p_fix_pattern_noise = p_fix_pattern_noise
         self.register_buffer('on_noise', torch.rand(max_period_noise,height,width)<p_fix_pattern_noise)
         self.register_buffer('off_noise', torch.rand(max_period_noise,height,width)<p_fix_pattern_noise)
- 
         self.register_buffer('diffs', torch.zeros((max_tbins, height,width), dtype=torch.uint8))
         
-
+        self.dynamic_threshold = dynamic_threshold
+        self.base_threshold = self.threshold
+    
     def reset(self):
         self.state[...] = 0
         self.timesurface[...] = 0
@@ -82,6 +121,9 @@ class Neuromorphizer(nn.Module):
             self.diffs[i][noise_on] = 255
             self.diffs[i][noise_off] = 0
 
+            if self.dynamic_threshold:
+                self.threshold = float(i_t.sum().item())/(self.width * self.height * 255) * self.base_threshold 
+
         return self.diffs
 
   
@@ -98,6 +140,12 @@ class CvFramePipeline(object):
             if ret:
                 frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 frame = cv2.resize(frame, (self.width, self.height), 0, 0, cv2.INTER_AREA)
+                
+                #corner response (TODO: move this elsewhere after of course)
+                #start = time.time() 
+                #cv2_shi_tomasi_response(frame)
+                #print(time.time()-start)
+                
                 frame = torch.from_numpy(frame)
             yield ret, frame
 
