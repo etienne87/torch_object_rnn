@@ -3,24 +3,10 @@ import glob
 import time
 import torch
 import torch.nn as nn
+import kornia
 import cv2
 import numpy as np 
 from core.utils.opts import cuda_tick
-import pafy
-
-
-def download_video(url, filepath="/tmp/"):
-    """
-    code to download a video from youtube
-    :param url:
-    :return:
-    """
-    video = pafy.new(url)
-    best = video.getbest()
-    best.download(quiet=False)
-    filename = best.download(filepath=filepath)
-    return filename
-
 
 def cv2_normalize(im):
     return (im-im.min())/(im.max()-im.min())
@@ -89,6 +75,7 @@ class Neuromorphizer(nn.Module):
         self.timesurface[...] = 0
 
     def forward(self, tensor):
+        tensor = tensor.short()
         for i, i_t in enumerate(tensor):
             self.t_us += self.delta_t_us
             cnt = int(self.t_us // self.delta_t_us)  
@@ -140,12 +127,6 @@ class CvFramePipeline(object):
             if ret:
                 frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 frame = cv2.resize(frame, (self.width, self.height), 0, 0, cv2.INTER_AREA)
-                
-                #corner response (TODO: move this elsewhere after of course)
-                #start = time.time() 
-                #cv2_shi_tomasi_response(frame)
-                #print(time.time()-start)
-                
                 frame = torch.from_numpy(frame)
             yield ret, frame
 
@@ -165,29 +146,36 @@ class TensorPipeline(object):
                 y = torch.cat(volume)
                 if self.cuda:
                     y = y.cuda()
-                y = y.short()
                 volume = []
                 yield y
 
 
-def neuromorphize(tensor_pipeline, pix2nvs, viz):
-    for tensor in tensor_pipeline:
-        start = cuda_tick()
-        tensor = pix2nvs(tensor)
+def neuromorphize(tensor_pipeline, pix2nvs, fltr, viz):
+    with torch.no_grad():
+        for tensor in tensor_pipeline:
+            start = cuda_tick()
+            events = pix2nvs(tensor)
+            fltrd = fltr(tensor.unsqueeze(1).float())
 
-        end = cuda_tick()
-        rt = end-start
-        freq = (1./rt) * len(tensor)
-        print(freq, ' img/s')
+            end = cuda_tick()
+            rt = end-start
+            freq = (1./rt) * len(tensor)
+            print(freq, ' img/s', ' dt: ', rt)
 
-        if viz:
-            data = tensor.cpu().numpy()
-            for img in data:
-                im = img.astype(np.uint8)
-                cv2.imshow('img', im)
-                key = cv2.waitKey(5)
-                if key == 27:
-                    return
+            if viz:
+                event_data = events.cpu().numpy()
+                fltr_data = fltrd.squeeze().cpu().numpy()
+                for ev, fl in zip(event_data, fltr_data):
+                    im = ev.astype(np.uint8)
+                    
+                    # import pdb;pdb.set_trace()
+
+                    fl = cv2_normalize(fl)
+                    cv2.imshow('harris', fl)
+                    cv2.imshow('img', im)
+                    key = cv2.waitKey(5)
+                    if key == 27:
+                        return
 
 def neuromorphize_video(video_filename, threshold=5, tbins=120, height=480, width=640, seek_frame=0, ref=0, scene_fps=1000, p=0.001, viz=True):
     """Example of usage of neuromorphizer
@@ -214,7 +202,9 @@ def neuromorphize_video(video_filename, threshold=5, tbins=120, height=480, widt
 
         frame_pipeline = CvFramePipeline(video_filename, height, width, seek_frame)
         tensor_pipeline = TensorPipeline(tbins, frame_pipeline)
-        neuromorphize(tensor_pipeline, pix2nvs, viz)
+        # cv_filter = lambda x:kornia.feature.harris_response(x)
+        cv_filter = lambda x:kornia.feature.gftt_response(x)
+        neuromorphize(tensor_pipeline, pix2nvs, cv_filter, viz)
 
     
 if __name__ == '__main__':
