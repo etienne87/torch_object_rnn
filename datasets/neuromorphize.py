@@ -1,3 +1,5 @@
+import os
+import glob
 import torch
 import torch.nn as nn
 import cv2
@@ -20,7 +22,9 @@ def download_video(url, filepath="/tmp/"):
 
 
 class Neuromorphizer(nn.Module):
-    def __init__(self, height, width, video_fps, refractory_period_us=0, threshold=0, p_fix_pattern_noise=0.001):
+    def __init__(self, height, width, video_fps, 
+                    refractory_period_us=0, threshold=0, 
+                    p_fix_pattern_noise=0.001, max_period_noise=10, max_tbins=100):
         super(Neuromorphizer, self).__init__()
         self.height = height
         self.width = width
@@ -29,37 +33,44 @@ class Neuromorphizer(nn.Module):
         self.register_buffer('state', torch.zeros((height,width), dtype=torch.short))
         self.register_buffer('timesurface', torch.zeros((height,width), dtype=torch.short))
 
-        self.refractory_period = refractory_period_us
-        print('ref: ', self.refractory_period, ' delta_t: ', self.delta_t_us)
+        self.refractory_period_us = refractory_period_us
+        print('ref: ', self.refractory_period_us, ' delta_t: ', self.delta_t_us)
         self.threshold = threshold 
         self.t_us = 0
 
         self.p_fix_pattern_noise = p_fix_pattern_noise
-        self.register_buffer('on_noise', torch.rand(10,height,width)<p_fix_pattern_noise)
-        self.register_buffer('off_noise', torch.rand(10,height,width)<p_fix_pattern_noise)
+        self.register_buffer('on_noise', torch.rand(max_period_noise,height,width)<p_fix_pattern_noise)
+        self.register_buffer('off_noise', torch.rand(max_period_noise,height,width)<p_fix_pattern_noise)
+ 
+        self.register_buffer('diffs', torch.zeros((max_tbins, height,width), dtype=torch.uint8))
         
 
+    def reset(self):
+        self.state[...] = 0
+        self.timesurface[...] = 0
+
     def forward(self, tensor):
-        diffs = []
-        for i_t in tensor:
+        for i, i_t in enumerate(tensor):
             self.t_us += self.delta_t_us
-            cnt = int(self.t_us // self.delta_t_us)
-
-            self.min_time = (self.t_us - self.refractory_period)//self.delta_t_us
-
-            idle = self.timesurface <= self.min_time
+            cnt = int(self.t_us // self.delta_t_us)  
 
             diff = (i_t - self.state) 
-            diff = diff * idle
+
+            if self.refractory_period_us >= self.delta_t_us:
+                min_time = (self.t_us - self.refractory_period_us)//self.delta_t_us
+                ready = self.timesurface <= min_time
+                diff = diff * ready
 
             on = (diff > self.threshold)  
             off = diff < self.threshold
             zero = diff.abs() <= self.threshold
 
             non_zero = ~zero
-            diff[on] = 255
-            diff[off] = 0
-            diff[zero] = 127  
+
+            self.diffs[i][on] = 255
+            self.diffs[i][off] = 0
+            self.diffs[i][zero] = 127  
+
             self.state[non_zero] = i_t[non_zero]
 
             self.timesurface[non_zero] = cnt
@@ -67,15 +78,13 @@ class Neuromorphizer(nn.Module):
             noise_on = self.on_noise[cnt%len(self.on_noise)]
             noise_off = self.off_noise[cnt%len(self.off_noise)]
 
-            diff[noise_on] = 255
-            diff[noise_off] = 0
-            diffs.append(diff[None])
 
-        diff = torch.cat(diffs)
-        
-        return diff
+            self.diffs[i][noise_on] = 255
+            self.diffs[i][noise_off] = 0
 
+        return self.diffs
 
+  
 class CvFramePipeline(object):
     def __init__(self, video_filename, height, width, seek_frame=0):
         self.height = height
@@ -92,7 +101,7 @@ class CvFramePipeline(object):
                 frame = torch.from_numpy(frame)
             yield ret, frame
 
-class ToTensorPipeline(object):
+class TensorPipeline(object):
     def __init__(self, tbins, frame_pipeline, cuda=True):
         self.tbins = tbins
         self.frame_pipe = frame_pipeline
@@ -102,45 +111,64 @@ class ToTensorPipeline(object):
         volume = []
         for ret, frame in self.frame_pipe:
             if not ret:
-                continue
+                break
             volume.append(frame[None])
             if len(volume) == self.tbins:
-                y = torch.cat(volume).short()
+                y = torch.cat(volume)
                 if self.cuda:
                     y = y.cuda()
+                y = y.short()
                 volume = []
                 yield y
 
 
-def neuromorphize_video(video_filename, threshold=0, tbins=120, height=480, width=640, seek_frame=0, scene_fps=1000, p=0.001):
-    frame_pipeline = CvFramePipeline(video_filename, height, width, seek_frame)
-
-    tensor_pipeline = ToTensorPipeline(tbins, frame_pipeline)
-
-
-    pix2nvs = Neuromorphizer(height, width, scene_fps, refractory_period_us=0*1e6/scene_fps, threshold=threshold)
-    pix2nvs.cuda()
-    
-
+def neuromorphize(tensor_pipeline, pix2nvs, viz):
     for tensor in tensor_pipeline:
-
         start = cuda_tick()
         tensor = pix2nvs(tensor)
 
         end = cuda_tick()
         rt = end-start
-        freq = (1./rt) * tbins
+        freq = (1./rt) * len(tensor)
         print(freq, ' img/s')
 
-        data = tensor.cpu().numpy()
-        for img in data:
-            im = img.astype(np.uint8)
-            cv2.imshow('img', im)
-            cv2.waitKey(0)
+        if viz:
+            data = tensor.cpu().numpy()
+            for img in data:
+                im = img.astype(np.uint8)
+                cv2.imshow('img', im)
+                key = cv2.waitKey(5)
+                if key == 27:
+                    return
+
+def neuromorphize_video(video_filename, threshold=5, tbins=120, height=480, width=640, seek_frame=0, ref=0, scene_fps=1000, p=0.001, viz=True):
+    """Example of usage of neuromorphizer
+
+    Take a OpenCV video & turn it into events
+    """
+    if os.path.isdir(video_filename):
+        video_filenames = glob.glob(video_filename + '/*')
+    else:
+        video_filenames = [video_filename]
+    
+    pix2nvs = Neuromorphizer(height, width, scene_fps, 
+                                refractory_period_us=ref*1e6/scene_fps, 
+                                p_fix_pattern_noise=p,
+                                threshold=threshold, 
+                                max_period_noise=10,
+                                max_tbins=tbins)
+    pix2nvs.cuda()
+    
+    for video_filename in video_filenames:
+        pix2nvs.reset()
+
+        print('video: ', video_filename)
+
+        frame_pipeline = CvFramePipeline(video_filename, height, width, seek_frame)
+        tensor_pipeline = TensorPipeline(tbins, frame_pipeline)
+        neuromorphize(tensor_pipeline, pix2nvs, viz)
 
     
-
-
 if __name__ == '__main__':
     import fire
     fire.Fire(neuromorphize_video)
