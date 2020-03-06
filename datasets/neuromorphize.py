@@ -11,39 +11,6 @@ from core.utils.opts import cuda_tick
 def cv2_normalize(im):
     return (im-im.min())/(im.max()-im.min())
 
-def cv2_shi_tomasi_response(img, k=5):
-    height, width = img.shape
-    imf = img.astype(np.float32)/255.0
-    gx = cv2.Sobel(imf,cv2.CV_32FC1,1,0,ksize=k)
-    gy = cv2.Sobel(imf,cv2.CV_32FC1,0,1,ksize=k) 
-
-    ixy = gx * gy
-    ixx = gx * gx
-    iyy = gy * gy
-
-    m = np.concatenate([ixx[...,None], ixy[...,None], ixy[...,None], ixx[...,None]], axis=2).reshape(*img.shape,2,2)
-    l1l2c = np.linalg.eigvals(m)
-    l1l2 = np.absolute(l1l2c)
-    
-    score = np.minimum(l1l2[...,0], l1l2[...,1])
-    return score
-
-
-class ShiTomasi(nn.Module):
-    def __init__(self):
-        super(ShiTomasi, self).__init__()
-
-        mat = torch.FloatTensor([[1, 0, -1],
-                                 [2, 0, -2],
-                                 [1, 0, -1]])
-        mat = torch.cat((mat[None], mat.t()[None]), dim=0)
-        self.register_buffer("weight", mat[:,None,:,:])
-    
-    def forward(self, x):
-        x = x.float()/255
-        gxy = F.conv2d(x, self.weight)
-                
-
 
 class Neuromorphizer(nn.Module):
     def __init__(self, height, width, video_fps, 
@@ -171,8 +138,8 @@ def neuromorphize(tensor_pipeline, pix2nvs, fltr, viz):
                     # import pdb;pdb.set_trace()
 
                     fl = cv2_normalize(fl)
-                    cv2.imshow('harris', fl)
-                    cv2.imshow('img', im)
+                    cv2.imshow('filtered_frame', fl)
+                    cv2.imshow('events', im)
                     key = cv2.waitKey(5)
                     if key == 27:
                         return
@@ -202,8 +169,9 @@ def neuromorphize_video(video_filename, threshold=5, tbins=120, height=480, widt
 
         frame_pipeline = CvFramePipeline(video_filename, height, width, seek_frame)
         tensor_pipeline = TensorPipeline(tbins, frame_pipeline)
-        # cv_filter = lambda x:kornia.feature.harris_response(x)
-        cv_filter = lambda x:kornia.feature.gftt_response(x)
+        cv_filter = lambda x:kornia.feature.harris_response(x)
+        # cv_filter = lambda x:kornia.feature.gftt_response(x)
+        cv_filter = lambda x:kornia.filters.sobel(x)
         neuromorphize(tensor_pipeline, pix2nvs, cv_filter, viz)
 
     
