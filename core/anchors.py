@@ -42,7 +42,7 @@ class AnchorLayer(nn.Module):
         areas = anchors[:, 0] * anchors[:, 1]
         anchors[:, 0] = np.sqrt(areas * np.repeat(ratios, len(scales)))
         anchors[:, 1] = anchors[:, 0] / np.repeat(ratios, len(scales))
-        return torch.from_numpy(anchors).float()
+        return torch.from_numpy(anchors).float().contiguous()
 
     def make_grid(self, height, width, stride):
 

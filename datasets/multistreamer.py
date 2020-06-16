@@ -7,8 +7,22 @@ import numpy as np
 # import multiprocessing as pmp
 import torch.multiprocessing as mp
 from collections import defaultdict
+from types import SimpleNamespace
 
 
+
+class NumpySharing(object):
+    def __init__(self, array_dim, num_threads):
+        self.batch = np.zeros((self.num_threads, self.num_videos_per_thread,
+                               *array_dim), dtype=np.float32) 
+
+        array_dim2 = (self.max_q_size, self.num_videos_per_thread,
+                      *array_dim)
+        self.m_arrays = (mp.Array('f', int(np.prod(array_dim2)), lock=mp.Lock()) for _ in range(num_threads))
+        self.arrays = [(m, np.frombuffer(m.get_obj(), dtype='f').reshape(array_dim2)) for m in self.m_arrays]
+
+
+    
 
 class MultiStreamer(object):
     """

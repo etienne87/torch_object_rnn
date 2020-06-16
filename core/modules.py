@@ -6,7 +6,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 import torch
 from core.utils.opts import time_to_batch, batch_to_time
-from core.attention_conv import AttentionConv
+# from core.attention_conv import AttentionConv
 
 
 def get_padding(kernel, dilation):
@@ -485,13 +485,89 @@ class ConvGRUCell(RNNCell):
     def reset(self):
         self.prev_h = None
 
+class ConvnBRCCell(RNNCell):
+    r"""ConvnBRCCell module, applies sequential part of nBRC cell.
+
+        A bio-inspired bistable recurrent cell allows for
+long-lasting memory
+        https://arxiv.org/pdf/2006.05252.pdf
+    """
+    def __init__(self, hidden_dim, kernel_size, bias, conv_func=nn.Conv2d, hard=False):
+        super(ConvnBRBCell, self).__init__(hard)
+        self.hidden_dim = hidden_dim
+
+        # Fully-Gated
+        self.conv_h2zr = conv_func(in_channels=self.hidden_dim,
+                                  out_channels=2 * self.hidden_dim,
+                                  kernel_size=kernel_size,
+                                  padding=1,
+                                  bias=bias)
+
+        self.conv_h2h = conv_func(in_channels=self.hidden_dim,
+                                  out_channels=self.hidden_dim,
+                                  kernel_size=kernel_size,
+                                  padding=1,
+                                  bias=bias)
+
+        self.reset()
+
+    def forward(self, xi):
+        self.saturation_cost = 0
+
+        xiseq = xi.split(1, 0) #t,n,c,h,w
+
+
+        if self.prev_h is not None:
+            self.prev_h = self.prev_h.detach()
+        else:
+            shape = list(xiseq[0].shape)
+            shape[1] = self.hidden_dim
+            self.prev_h = torch.zeros(shape, dtype=torch.float32, device=x.device)
+            self.prev_c = torch.zeros(shape, dtype=torch.float32, device=x.device)
+
+        result = []
+        for t, xt in enumerate(xiseq):
+            xt = xt.squeeze(0)
+
+            #split x & h in 3
+            x_zr, x_h = xt[:, :2*self.hidden_dim], xt[:,2*self.hidden_dim:]
+
+            if self.prev_h is not None:
+                tmp = self.conv_h2zr(self.prev_h) + x_zr
+            else:
+                tmp = x_zr
+
+            cc_z, cc_r = torch.split(tmp, self.hidden_dim, dim=1)
+            z = self.sigmoid(cc_z)
+            r = self.tanh(cc_r)+1 #now R is in [0,2]
+
+            if self.prev_h is not None:
+                tmp = self.conv_h2h(r * self.prev_h) + x_h
+            else:
+                tmp = x_h
+            tmp = self.tanh(tmp)
+
+            if self.prev_h is not None:
+                h = (1-z) * self.prev_h + z * tmp
+            else:
+                h = z * tmp
+
+
+            result.append(h.unsqueeze(0))
+            self.prev_h = h
+        res = torch.cat(result, dim=0)
+        return res
+
+    def reset(self):
+        self.prev_h = None
+
 
 class ConvRNN(nn.Module):
     r"""ConvRNN module.
     """
     def __init__(self, in_channels, out_channels,
                  kernel_size=3, stride=1, padding=1, dilation=1,
-                 cell='lstm', hard=False, **cell_kwargs):
+                 cell='nBRB', hard=False, **cell_kwargs):
         super(ConvRNN, self).__init__()
 
         self.in_channels = in_channels
@@ -503,6 +579,9 @@ class ConvRNN(nn.Module):
 
         if cell == 'gru':
             self.timepool = ConvGRUCell(out_channels, 3, True, hard=hard, **cell_kwargs)
+            factor = 3
+        elif cell == 'nbrb':
+            self.timepool = ConvnBRBCell(out_channels, 3, True, hard=hard, **cell_kwargs)
             factor = 3
         elif cell == 'alstm':
             self.timepool = ConvALSTMCell(in_channels, out_channels, 3, hard=hard, **cell_kwargs)

@@ -62,7 +62,11 @@ def draw_bboxes(img, bboxes, thickness=2, colormap=cv2.COLORMAP_HSV, colordefaul
         color = colors[(class_id * 40)%255] if colordefault is None else colordefault
         img = cv2.rectangle(img, pt1, pt2, color, thickness)
         img = cv2.putText(img, class_name, (center[0], max(0, pt2[1] - 1) ), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color)
-    return img.get()
+
+    if isinstance(img, np.ndarray):
+        return img
+    else:
+        return img.get()
 
 
 def filter_outliers(g, num_std=2):
